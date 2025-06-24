@@ -101,16 +101,21 @@
       border: 1px solid #ccc;
       border-radius: 4px;
     }
+    #status {
+      margin: 10px 0;
+      color: #555;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Anonymous Chat</h1>
     <div>Your Code: <span id="code"></span></div>
-    <div>
+    <div id="connectDiv">
       <input id="remoteCode" placeholder="Enter other person's code">
-      <button onclick="connect()">Connect</button>
+      <button onclick="joinSession()">Connect</button>
     </div>
+    <div id="status">Waiting for connection...</div>
     <div id="chat" style="display: none;">
       <div id="messages"></div>
       <input id="messageInput" placeholder="Type a message">
@@ -129,13 +134,17 @@
 
     // State
     let myCode = generateCode();
+    let sessionCode = myCode; // Session code is myCode unless joining another
     let dataChannel = null;
     let messages = [];
     let sharedKey = null;
+    let peerConnection = null;
 
     // UI elements
     const codeElement = document.getElementById('code');
     const remoteCodeInput = document.getElementById('remoteCode');
+    const connectDiv = document.getElementById('connectDiv');
+    const statusElement = document.getElementById('status');
     const chatDiv = document.getElementById('chat');
     const messagesDiv = document.getElementById('messages');
     const messageInput = document.getElementById('messageInput');
@@ -143,35 +152,65 @@
     // Display initial code
     codeElement.textContent = myCode;
 
-    // WebRTC peer connection
+    // WebRTC configuration
     const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-    let peerConnection = null;
 
     // WebSocket for signaling
     const socket = new WebSocket('wss://signaling.simplewebrtc.com:8443');
 
+    socket.onopen = () => {
+      // Register as host with myCode
+      socket.send(JSON.stringify({ type: 'register', code: myCode }));
+    };
+
     socket.onmessage = async ({ data }) => {
       const msg = JSON.parse(data);
-      if (msg.code !== remoteCodeInput.value) return;
 
-      if (msg.offer) {
+      // Handle join request from another user
+      if (msg.type === 'join' && msg.sessionCode === myCode) {
+        statusElement.textContent = 'Someone is connecting...';
+        peerConnection = new RTCPeerConnection(configuration);
+        dataChannel = peerConnection.createDataChannel('chat');
+        setupDataChannel(dataChannel);
+
+        peerConnection.onicecandidate = ({ candidate }) => {
+          if (candidate) {
+            socket.send(JSON.stringify({ type: 'candidate', sessionCode: myCode, candidate }));
+          }
+        };
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.send(JSON.stringify({ type: 'offer', sessionCode: myCode, offer }));
+      }
+
+      // Handle messages for the current sessionCode
+      if (msg.sessionCode !== sessionCode) return;
+
+      if (msg.type === 'offer') {
         peerConnection = new RTCPeerConnection(configuration);
         await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.offer));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-        socket.send(JSON.stringify({ code: myCode, answer }));
+        socket.send(JSON.stringify({ type: 'answer', sessionCode: sessionCode, answer }));
 
         peerConnection.ondatachannel = ({ channel }) => {
           setupDataChannel(channel);
         };
-      } else if (msg.answer) {
+
+        peerConnection.onicecandidate = ({ candidate }) => {
+          if (candidate) {
+            socket.send(JSON.stringify({ type: 'candidate', sessionCode: sessionCode, candidate }));
+          }
+        };
+      } else if (msg.type === 'answer') {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer));
-      } else if (msg.candidate) {
+      } else if (msg.type === 'candidate') {
         await peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
       }
     };
 
-    // Encryption setup (simplified Diffie-Hellman-like key exchange)
+    // Encryption setup (ECDH key exchange)
     async function generateKey() {
       const keyPair = await crypto.subtle.generateKey(
         { name: 'ECDH', namedCurve: 'P-256' },
@@ -223,7 +262,9 @@
     function setupDataChannel(channel) {
       dataChannel = channel;
       dataChannel.onopen = async () => {
+        statusElement.textContent = 'Connected!';
         chatDiv.style.display = 'block';
+        connectDiv.style.display = 'none';
         // Exchange public keys for encryption
         const { privateKey, publicKey } = await generateKey();
         dataChannel.send(JSON.stringify({ type: 'key', publicKey }));
@@ -238,26 +279,22 @@
         };
       };
       dataChannel.onclose = () => {
+        statusElement.textContent = 'Connection closed.';
         chatDiv.style.display = 'none';
-        addMessage('Connection closed.');
+        connectDiv.style.display = 'block';
       };
     }
 
-    // Connect to another user
-    async function connect() {
-      peerConnection = new RTCPeerConnection(configuration);
-      dataChannel = peerConnection.createDataChannel('chat');
-      setupDataChannel(dataChannel);
-
-      peerConnection.onicecandidate = ({ candidate }) => {
-        if (candidate) {
-          socket.send(JSON.stringify({ code: remoteCodeInput.value, candidate }));
-        }
-      };
-
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.send(JSON.stringify({ code: remoteCodeInput.value, offer }));
+    // Join another user's session
+    async function joinSession() {
+      const remoteCode = remoteCodeInput.value.trim();
+      if (!remoteCode) {
+        statusElement.textContent = 'Please enter a code.';
+        return;
+      }
+      sessionCode = remoteCode; // Use remote code as session ID
+      statusElement.textContent = 'Connecting...';
+      socket.send(JSON.stringify({ type: 'join', sessionCode }));
     }
 
     // Send message
@@ -285,9 +322,13 @@
       messages = [];
       messagesDiv.innerHTML = '';
       chatDiv.style.display = 'none';
+      connectDiv.style.display = 'block';
       myCode = generateCode();
+      sessionCode = myCode;
       codeElement.textContent = myCode;
       remoteCodeInput.value = '';
+      statusElement.textContent = 'Waiting for connection...';
+      socket.send(JSON.stringify({ type: 'register', code: myCode }));
     }
 
     // Clear messages on close

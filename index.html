@@ -32,7 +32,11 @@
     let isConnected = false;
 
     document.getElementById('status').textContent = 'Generating code...';
+<<<<<<< HEAD
     document.getElementById('codeDisplay').textContent = Your code: ;
+=======
+    document.getElementById('codeDisplay').textContent = `Your code: ${code}`;
+>>>>>>> 54d57eed865256e9d2a8f44b155c7bd3b63ce83c
 
     socket.onopen = () => {
       socket.send(JSON.stringify({ type: 'join', code }));
@@ -78,7 +82,11 @@
       };
       dataChannel.onmessage = (event) => {
         const messages = document.getElementById('messages');
+<<<<<<< HEAD
         messages.innerHTML += <div class="text-gray-600">Them: </div>;
+=======
+        messages.innerHTML += `<div class="text-gray-600">Them: ${event.data}</div>`;
+>>>>>>> 54d57eed865256e9d2a8f44b155c7bd3b63ce83c
         messages.scrollTop = messages.scrollHeight;
       };
 
@@ -112,7 +120,11 @@
         };
         dataChannel.onmessage = (event) => {
           const messages = document.getElementById('messages');
+<<<<<<< HEAD
           messages.innerHTML += <div class="text-gray-600">Them: </div>;
+=======
+          messages.innerHTML += `<div class="text-gray-600">Them: ${event.data}</div>`;
+>>>>>>> 54d57eed865256e9d2a8f44b155c7bd3b63ce83c
           messages.scrollTop = messages.scrollHeight;
         };
       };
@@ -155,7 +167,11 @@
       if (message && isConnected) {
         dataChannel.send(message);
         const messages = document.getElementById('messages');
+<<<<<<< HEAD
         messages.innerHTML += <div class="text-blue-600">You: </div>;
+=======
+        messages.innerHTML += `<div class="text-blue-600">You: ${message}</div>`;
+>>>>>>> 54d57eed865256e9d2a8f44b155c7bd3b63ce83c
         messages.scrollTop = messages.scrollHeight;
         messageInput.value = '';
       }
@@ -172,7 +188,11 @@
       isInitiator = false;
       code = generateCode();
       document.getElementById('status').textContent = 'Generating new code...';
+<<<<<<< HEAD
       document.getElementById('codeDisplay').textContent = Your code: ;
+=======
+      document.getElementById('codeDisplay').textContent = `Your code: ${code}`;
+>>>>>>> 54d57eed865256e9d2a8f44b155c7bd3b63ce83c
       document.getElementById('messages').innerHTML = '';
       document.getElementById('messageInput').value = '';
       document.getElementById('codeInput').value = '';

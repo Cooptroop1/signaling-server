@@ -1,0 +1,245 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anonymous Chat</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; max-width: 600px; }
+    #code, #chat { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+    #messages { height: 200px; overflow-y: scroll; border: 1px solid #ddd; padding: 10px; }
+    #messageInput { width: 80%; }
+    button { margin-left: 5px; }
+  </style>
+</head>
+<body>
+  <h1>Anonymous Chat</h1>
+  <div>Your Code: <span id="code"></span></div>
+  <div>
+    <input id="remoteCode" placeholder="Enter other person's code">
+    <button onclick="connect()">Connect</button>
+  </div>
+  <div id="chat" style="display: none;">
+    <div id="messages"></div>
+    <input id="messageInput" placeholder="Type a message">
+    <button onclick="sendMessage()">Send</button>
+  </div>
+  <button onclick="newSession()">New Session</button>
+
+  <script>
+    // Generate a random code (UUID-like)
+    function generateCode() {
+      return 'xxxx-xxxx-xxxx-xxxx'.replace(/x/g, () =>
+        Math.floor(Math.random() * 16).toString(16)
+      );
+    }
+
+    // State
+    let myCode = generateCode();
+    let dataChannel = null;
+    let messages = [];
+    let sharedKey = null;
+
+    // UI elements
+    const codeElement = document.getElementById('code');
+    const remoteCodeInput = document.getElementById('remoteCode');
+    const chatDiv = document.getElementById('chat');
+    const messagesDiv = document.getElementById('messages');
+    const messageInput = document.getElementById('messageInput');
+
+    // Display initial code
+    codeElement.textContent = myCode;
+
+    // WebRTC peer connection
+    const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let peerConnection = null;
+
+    // WebSocket for signaling
+    const socket = new WebSocket('wss://signaling.simplewebrtc.com:8443');
+
+    socket.onmessage = async ({ data }) => {
+      const msg = JSON.parse(data);
+      if (msg.code !== remoteCodeInput.value) return;
+
+      if (msg.offer) {
+        peerConnection = new RTCPeerConnection(configuration);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.send(JSON.stringify({ code: myCode, answer }));
+
+        peerConnection.ondatachannel = ({ channel }) => {
+          setupDataChannel(channel);
+        };
+      } else if (msg.answer) {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer));
+      } else if (msg.candidate) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
+      }
+    };
+
+    // Encryption setup (simplified Diffie-Hellman-like key exchange)
+    async function generateKey() {
+      const keyPair = await crypto.subtle.generateKey(
+        { name: 'ECDH', namedCurve: 'P-256' },
+        true,
+        ['deriveKey']
+      );
+      const publicKey = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+      return { privateKey: keyPair.privateKey, publicKey: Array.from(new Uint8Array(publicKey)) };
+    }
+
+    async function deriveSharedSecret(privateKey, publicKey) {
+      const publicKeyObj = await crypto.subtle.importKey(
+        'raw',
+        new Uint8Array(publicKey),
+        { name: 'ECDH', namedCurve: 'P-256' },
+        false,
+        []
+      );
+      return await crypto.subtle.deriveKey(
+        { name: 'ECDH', public: publicKeyObj },
+        privateKey,
+        { name: 'AES-GCM', length: 256 },
+        true,
+        ['encrypt', 'decrypt']
+      );
+    }
+
+    async function encryptMessage(message, key) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const encoded = new TextEncoder().encode(message);
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        encoded
+      );
+      return { iv: Array.from(iv), ciphertext: Array.from(new Uint8Array(ciphertext)) };
+    }
+
+    async function decryptMessage({ iv, ciphertext }, key) {
+      const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(iv) },
+        key,
+        new Uint8Array(ciphertext)
+      );
+      return new TextDecoder().decode(decrypted);
+    }
+
+    // WebRTC data channel setup
+    function setupDataChannel(channel) {
+      dataChannel = channel;
+      dataChannel.onopen = async () => {
+        chatDiv.style.display = 'block';
+        // Exchange public keys for encryption
+        const { privateKey, publicKey } = await generateKey();
+        dataChannel.send(JSON.stringify({ type: 'key', publicKey }));
+        dataChannel.onmessage = async ({ data }) => {
+          const msg = JSON.parse(data);
+          if (msg.type === 'key') {
+            sharedKey = await deriveSharedSecret(privateKey, msg.publicKey);
+          } else if (msg.type === 'message') {
+            const decrypted = await decryptMessage(msg.data, sharedKey);
+            addMessage(`Them: ${decrypted}`);
+          }
+        };
+      };
+      dataChannel.onclose = () => {
+        chatDiv.style.display = 'none';
+        addMessage('Connection closed.');
+      };
+    }
+
+    // Connect to another user
+    async function connect() {
+      peerConnection = new RTCPeerConnection(configuration);
+      dataChannel = peerConnection.createDataChannel('chat');
+      setupDataChannel(dataChannel);
+
+      peerConnection.onicecandidate = ({ candidate }) => {
+        if (candidate) {
+          socket.send(JSON.stringify({ code: remoteCodeInput.value, candidate }));
+        }
+      };
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      socket.send(JSON.stringify({ code: remoteCodeInput.value, offer }));
+    }
+
+    // Send message
+    async function sendMessage() {
+      if (!dataChannel || !sharedKey) return;
+      const message = messageInput.value;
+      if (!message) return;
+      const encrypted = await encryptMessage(message, sharedKey);
+      dataChannel.send(JSON.stringify({ type: 'message', data: encrypted }));
+      addMessage(`You: ${message}`);
+      messageInput.value = '';
+    }
+
+    // Add message to UI
+    function addMessage(message) {
+      messages.push(message);
+      messagesDiv.innerHTML = messages.map(m => `<div>${m}</div>`).join('');
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // Start new session
+    function newSession() {
+      if (dataChannel) dataChannel.close();
+      if (peerConnection) peerConnection.close();
+      messages = [];
+      messagesDiv.innerHTML = '';
+      chatDiv.style.display = 'none';
+      myCode = generateCode();
+      codeElement.textContent = myCode;
+      remoteCodeInput.value = '';
+    }
+
+    // Clear messages on close
+    window.onbeforeunload = () => {
+      newSession();
+    };
+  </script>
+</body>
+</html>

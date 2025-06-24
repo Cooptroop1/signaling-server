@@ -43,6 +43,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Anonymous Chat</title>
+  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAABlBMVEUAAAD///+l2Z/dAAAAAnRSTlMAAHaTzTgAAAA4SURBVDjL7dE3DoAgDAVZwW3/f6sL0hDCnqGdbNly9gEkAAAkBQA+UABsALoAgO8H8B2ALgDw/QF8A8BnB7vG9gAAAABJRU5ErkJggg==">
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -155,8 +156,8 @@
     // WebRTC configuration
     const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // WebSocket for signaling
-    const socket = new WebSocket('wss://signaling.simplewebrtc.com:8443');
+    // WebSocket for signaling (UPDATE WITH YOUR RENDER URL)
+    const socket = new WebSocket('wss://your-signaling-server.onrender.com');
 
     socket.onopen = () => {
       // Register as host with myCode

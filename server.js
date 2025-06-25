@@ -3,9 +3,11 @@ const wss = new WebSocket.Server({ host: '0.0.0.0', port: process.env.PORT || 10
 
 wss.on('connection', (ws) => {
   ws.on('message', (data) => {
+    // Convert Buffer to string
+    const message = data.toString('utf8');
     wss.clients.forEach((client) => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(data);
+        client.send(message);
       }
     });
   });

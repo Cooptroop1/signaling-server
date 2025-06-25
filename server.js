@@ -8,6 +8,7 @@ wss.on('connection', (ws) => {
   let clientCode = null;
   let clientId = Math.random().toString(36).slice(2);
   ws.clientId = clientId;
+  ws.isInitiator = false;
 
   ws.on('message', (data) => {
     const message = data.toString('utf8');
@@ -55,13 +56,14 @@ wss.on('connection', (ws) => {
         if (ws.isInitiator && ws.clientId === room.initiator) {
           const newMax = Math.max(2, Math.min(10, parseInt(parsed.maxClients)));
           room.maxClients = newMax;
-          console.log(`Initiator set maxClients to ${newMax} for code: ${clientCode}`);
+          console.log(`Initiator ${clientId} set maxClients to ${newMax} for code: ${clientCode}`);
           room.clients.forEach((client) => {
             if (client.readyState === WebSocket.OPEN) {
               client.send(JSON.stringify({ type: 'max-clients', maxClients: newMax }));
             }
           });
         } else {
+          console.log(`Client ${clientId} attempted to set maxClients but is not initiator for code: ${clientCode}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set max clients' }));
         }
       } else if (['offer', 'answer', 'candidate'].includes(parsed.type)) {
@@ -104,14 +106,22 @@ wss.on('connection', (ws) => {
       if (room.clients.size === 0) {
         rooms.delete(clientCode);
         console.log(`Cleared code: ${clientCode}`);
-      } else if (ws.isInitiator) {
+      } else if (ws.isInitiator && room.initiator === clientId) {
+        // Assign new initiator from remaining clients
         room.initiator = null;
-        room.maxClients = 2;
-        room.clients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'max-clients', maxClients: 2 }));
-          }
-        });
+        if (room.clients.size > 0) {
+          const newInitiator = Array.from(room.clients)[0];
+          newInitiator.isInitiator = true;
+          room.initiator = newInitiator.clientId;
+          console.log(`Assigned new initiator ${newInitiator.clientId} for code: ${clientCode}`);
+          newInitiator.send(JSON.stringify({ type: 'init', clientId: newInitiator.clientId, maxClients: room.maxClients, isInitiator: true }));
+          room.clients.forEach((client) => {
+            if (client !== newInitiator && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'initiator-changed', newInitiator: newInitiator.clientId }));
+            }
+          });
+        }
+        // Preserve maxClients instead of resetting to 2
       }
     }
   });

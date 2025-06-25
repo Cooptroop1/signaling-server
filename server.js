@@ -18,28 +18,39 @@ wss.on('connection', (ws) => {
         if (!clients.has(clientCode)) {
           clients.set(clientCode, new Set());
         }
-        // Notify existing clients of new join
-        clients.get(clientCode).forEach((client) => {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'join-notify', code: clientCode }));
-            console.log(`Notified client of join for code: ${clientCode}`);
-          }
-        });
-        clients.get(clientCode).add(ws);
-        console.log(`Client joined code: ${clientCode}, total clients: ${clients.get(clientCode).size}`);
-      } else {
-        // Forward signaling messages
-        if (clientCode && clients.has(clientCode)) {
+        // Check if code already has 2 clients
+        if (clients.get(clientCode).size >= 2) {
+          console.log(`Code ${clientCode} is full, rejecting join`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Chat is full, only two users allowed' }));
+          ws.close();
+          return;
+        }
+        // Notify existing client of new join (only if first client)
+        if (clients.get(clientCode).size === 1) {
           clients.get(clientCode).forEach((client) => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(message);
-              console.log(`Forwarded message to client in code: ${clientCode}`);
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'join-notify', code: clientCode }));
+              console.log(`Notified client of join for code: ${clientCode}`);
             }
           });
         }
+        clients.get(clientCode).add(ws);
+        console.log(`Client joined code: ${clientCode}, total clients: ${clients.get(clientCode).size}`);
+      } else if (['offer', 'answer', 'candidate'].includes(parsed.type)) {
+        if (!clientCode || !clients.has(clientCode)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code or no clients' }));
+          return;
+        }
+        // Forward signaling messages to other client
+        clients.get(clientCode).forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(parsed));
+            console.log(`Forwarded message to client in code: ${clientCode}`);
+          }
+        });
       }
     } catch (error) {
-      console.error('Error processing message:', error.message);
+      console.error('Error processing message:', error);
     }
   });
 
@@ -49,6 +60,7 @@ wss.on('connection', (ws) => {
       console.log(`Client disconnected from code: ${clientCode}, remaining: ${clients.get(clientCode).size}`);
       if (clients.get(clientCode).size === 0) {
         clients.delete(clientCode);
+        console.log(`Cleared code: ${clientCode}`);
       }
     }
   });

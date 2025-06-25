@@ -8,7 +8,6 @@ wss.on('connection', (ws) => {
   let clientCode = null;
 
   ws.on('message', (data) => {
-    // Convert Buffer to string
     const message = data.toString('utf8');
     console.log('Received message:', message);
 
@@ -19,10 +18,17 @@ wss.on('connection', (ws) => {
         if (!clients.has(clientCode)) {
           clients.set(clientCode, new Set());
         }
+        // Notify existing clients of new join
+        clients.get(clientCode).forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'join-notify', code: clientCode }));
+            console.log(`Notified client of join for code: ${clientCode}`);
+          }
+        });
         clients.get(clientCode).add(ws);
         console.log(`Client joined code: ${clientCode}, total clients: ${clients.get(clientCode).size}`);
       } else {
-        // Forward message to other clients with the same code
+        // Forward signaling messages
         if (clientCode && clients.has(clientCode)) {
           clients.get(clientCode).forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {

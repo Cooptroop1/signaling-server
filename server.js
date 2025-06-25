@@ -1,14 +1,30 @@
 const WebSocket = require('ws');
 const wss = new WebSocket.Server({ host: '0.0.0.0', port: process.env.PORT || 10000 });
 
-// Store rooms by code
-const rooms = new Map();
+const rooms = new Map(); // code -> { initiator, clients, maxClients, usernames }
+const clientIds = new Map(); // ws -> clientId
+const codes = new Map(); // ws -> code
+
+function generateClientId() {
+  return Math.random().toString(36).slice(2);
+}
+
+function generateCode() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < 16; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    if (i % 4 === 3 && i < 15) result += '-';
+  }
+  return result;
+}
 
 wss.on('connection', (ws) => {
-  let clientCode = null;
-  let clientId = Math.random().toString(36).slice(2);
+  let clientId = generateClientId();
   ws.clientId = clientId;
   ws.isInitiator = false;
+
+  console.log(`Client ${clientId} connected`);
 
   ws.on('message', (data) => {
     const message = data.toString('utf8');
@@ -16,38 +32,71 @@ wss.on('connection', (ws) => {
 
     try {
       const parsed = JSON.parse(message);
+
       if (parsed.type === 'join' && parsed.code) {
-        clientCode = parsed.code;
+        let clientCode = parsed.code;
+        let username = parsed.username;
+
+        if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9]{1,16}$/.test(username)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username: 1-16 alphanumeric characters required.' }));
+          return;
+        }
+
         if (!rooms.has(clientCode)) {
-          rooms.set(clientCode, {
-            clients: new Set(),
-            maxClients: 2,
-            initiator: null
-          });
+          rooms.set(clientCode, { initiator: null, clients: new Map(), maxClients: 2, usernames: new Map() });
         }
+
         const room = rooms.get(clientCode);
-        if (!room.initiator) {
-          room.initiator = clientId;
-          ws.isInitiator = true;
-          console.log(`Set initiator ${clientId} for code: ${clientCode}`);
+
+        if (Array.from(room.usernames.values()).includes(username)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this chat.' }));
+          return;
         }
-        if (room.clients.size >= room.maxClients) {
-          console.log(`Code ${clientCode} is full (max ${room.maxClients}), rejecting join`);
+
+        if (room.clients.size >= room.maxClients && !room.clients.has(ws)) {
           ws.send(JSON.stringify({ type: 'error', message: `Chat is full, max ${room.maxClients} users allowed` }));
           ws.close();
           return;
         }
-        room.clients.add(ws);
-        console.log(`Client ${clientId} joined code: ${clientCode}, total clients: ${room.clients.size}`);
-        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: ws.isInitiator }));
-        // Notify all clients of new join
-        room.clients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'join-notify', code: clientCode, clientId, totalClients: room.clients.size }));
-            console.log(`Sent join-notify to ${client.clientId} for code: ${clientCode}`);
+
+        if (!clientIds.has(ws)) {
+          clientIds.set(ws, clientId);
+          codes.set(ws, clientCode);
+          room.clients.set(ws, clientId);
+          room.usernames.set(clientId, username);
+          console.log(`Client ${clientId} joined code: ${clientCode} with username: ${username}, total clients: ${room.clients.size}`);
+
+          if (!room.initiator || !room.initiator._socket) {
+            room.initiator = ws;
+            ws.isInitiator = true;
+            console.log(`Set initiator ${clientId} for code: ${clientCode}`);
+            ws.send(JSON.stringify({
+              type: 'init',
+              clientId,
+              isInitiator: true,
+              maxClients: room.maxClients
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              type: 'init',
+              clientId,
+              isInitiator: false,
+              maxClients: room.maxClients
+            }));
           }
-        });
-      } else if (parsed.type === 'set-max-clients' && clientCode) {
+
+          broadcast(clientCode, {
+            type: 'join-notify',
+            clientId,
+            totalClients: room.clients.size,
+            code: clientCode,
+            username
+          });
+        }
+      }
+
+      if (parsed.type === 'set-max-clients' && codes.get(ws)) {
+        const clientCode = codes.get(ws);
         const room = rooms.get(clientCode);
         if (!room) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid room' }));
@@ -57,30 +106,28 @@ wss.on('connection', (ws) => {
           const newMax = Math.max(2, Math.min(10, parseInt(parsed.maxClients)));
           room.maxClients = newMax;
           console.log(`Initiator ${clientId} set maxClients to ${newMax} for code: ${clientCode}`);
-          room.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'max-clients', maxClients: newMax }));
-            }
-          });
+          broadcast(clientCode, { type: 'max-clients', maxClients: newMax });
         } else {
           console.log(`Client ${clientId} attempted to set maxClients but is not initiator for code: ${clientCode}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set max clients' }));
         }
-      } else if (['offer', 'answer', 'candidate'].includes(parsed.type)) {
+      }
+
+      if (['offer', 'answer', 'candidate'].includes(parsed.type)) {
+        const clientCode = codes.get(ws);
         if (!clientCode || !rooms.has(clientCode)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code or no room' }));
           return;
         }
         const room = rooms.get(clientCode);
         if (parsed.targetId) {
-          room.clients.forEach((client) => {
-            if (client.clientId === parsed.targetId && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
-              console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
-            }
-          });
+          const targetWs = Array.from(room.clients.entries()).find(([client, id]) => id === parsed.targetId)?.[0];
+          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
+            console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${parsed.targetId} in code: ${clientCode}`);
+          }
         } else {
-          room.clients.forEach((client) => {
+          room.clients.forEach((_, client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
               console.log(`Broadcasted ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
@@ -94,34 +141,44 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    const clientCode = codes.get(ws);
     if (clientCode && rooms.has(clientCode)) {
       const room = rooms.get(clientCode);
       room.clients.delete(ws);
+      room.usernames.delete(clientId);
       console.log(`Client ${clientId} disconnected from code: ${clientCode}, remaining: ${room.clients.size}`);
-      room.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: 'client-disconnected', clientId, totalClients: room.clients.size }));
-        }
-      });
+      clientIds.delete(ws);
+      codes.delete(ws);
+
       if (room.clients.size === 0) {
         rooms.delete(clientCode);
         console.log(`Cleared code: ${clientCode}`);
-      } else if (ws.isInitiator && room.initiator === clientId) {
-        // Assign new initiator from remaining clients
-        room.initiator = null;
-        if (room.clients.size > 0) {
-          const newInitiator = Array.from(room.clients)[0];
-          newInitiator.isInitiator = true;
-          room.initiator = newInitiator.clientId;
-          console.log(`Assigned new initiator ${newInitiator.clientId} for code: ${clientCode}`);
-          newInitiator.send(JSON.stringify({ type: 'init', clientId: newInitiator.clientId, maxClients: room.maxClients, isInitiator: true }));
-          room.clients.forEach((client) => {
-            if (client !== newInitiator && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'initiator-changed', newInitiator: newInitiator.clientId }));
-            }
-          });
+      } else {
+        broadcast(clientCode, {
+          type: 'client-disconnected',
+          clientId,
+          totalClients: room.clients.size
+        });
+        if (ws.isInitiator && room.initiator === clientId) {
+          room.initiator = null;
+          if (room.clients.size > 0) {
+            const newInitiator = Array.from(room.clients.keys())[0];
+            newInitiator.isInitiator = true;
+            room.initiator = newInitiator.clientId;
+            console.log(`Assigned new initiator ${newInitiator.clientId} for code: ${clientCode}`);
+            newInitiator.send(JSON.stringify({
+              type: 'init',
+              clientId: newInitiator.clientId,
+              maxClients: room.maxClients,
+              isInitiator: true
+            }));
+            room.clients.forEach((client) => {
+              if (client !== newInitiator && client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'initiator-changed', newInitiator: newInitiator.clientId }));
+              }
+            });
+          }
         }
-        // Preserve maxClients instead of resetting to 2
       }
     }
   });
@@ -130,5 +187,16 @@ wss.on('connection', (ws) => {
     console.error(`WebSocket error for ${clientId}:`, error);
   });
 });
+
+function broadcast(code, data) {
+  const room = rooms.get(code);
+  if (room) {
+    room.clients.forEach((_, client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(data));
+      }
+    });
+  }
+}
 
 console.log(`Signaling server running on port ${process.env.PORT || 10000}`);

@@ -39,13 +39,9 @@ wss.on('connection', (ws) => {
         room.clients.add(ws);
         console.log(`Client ${clientId} joined code: ${clientCode}, total clients: ${room.clients.size}`);
         ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: ws.isInitiator }));
-        if (room.clients.size === 2) {
-          room.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'join-notify', code: clientCode }));
-              console.log(`Sent join-notify for code: ${clientCode}`);
-            }
-          });
+        if (room.clients.size === 2 && ws.isInitiator) {
+          ws.send(JSON.stringify({ type: 'join-notify', code: clientCode }));
+          console.log(`Sent join-notify to initiator ${clientId} for code: ${clientCode}`);
         }
       } else if (parsed.type === 'set-max-clients' && clientCode) {
         const room = rooms.get(clientCode);

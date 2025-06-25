@@ -19,6 +19,23 @@ function generateCode() {
   return result;
 }
 
+function cleanupRoom(clientCode) {
+  if (rooms.has(clientCode)) {
+    const room = rooms.get(clientCode);
+    const closedClients = Array.from(room.clients.keys()).filter(client => client.readyState !== WebSocket.OPEN);
+    closedClients.forEach(client => {
+      const id = room.clients.get(client);
+      room.clients.delete(client);
+      room.usernames.delete(id);
+      clientIds.delete(client);
+      codes.delete(client);
+      console.log(`Cleaned up closed client ${id} from code: ${clientCode}`);
+    });
+    return room.clients.size > 0;
+  }
+  return false;
+}
+
 wss.on('connection', (ws) => {
   const clientId = generateClientId();
   ws.clientId = clientId;
@@ -40,8 +57,16 @@ wss.on('connection', (ws) => {
 
         if (!username || typeof username !== 'string' || !/^[a-zA-Z0-9]{1,16}$/.test(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username: 1-16 alphanumeric characters required.' }));
+          console.log(`Client ${clientId} sent invalid username: ${username}`);
           return;
         }
+
+        if (ws.readyState !== WebSocket.OPEN) {
+          console.log(`Client ${clientId} WebSocket closed before join processing`);
+          return;
+        }
+
+        cleanupRoom(clientCode);
 
         if (!rooms.has(clientCode)) {
           rooms.set(clientCode, { initiator: null, clients: new Map(), maxClients: 2, usernames: new Map() });
@@ -51,12 +76,14 @@ wss.on('connection', (ws) => {
 
         if (Array.from(room.usernames.values()).includes(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this chat.' }));
+          console.log(`Client ${clientId} tried duplicate username: ${username} in code: ${clientCode}`);
           return;
         }
 
         if (room.clients.size >= room.maxClients && !room.clients.has(ws)) {
           ws.send(JSON.stringify({ type: 'error', message: `Chat is full, max ${room.maxClients} users allowed` }));
           ws.close();
+          console.log(`Client ${clientId} rejected: chat full for code: ${clientCode}, max: ${room.maxClients}`);
           return;
         }
 
@@ -95,12 +122,12 @@ wss.on('connection', (ws) => {
 
       if (parsed.type === 'set-max-clients' && codes.get(ws)) {
         const clientCode = codes.get(ws);
-        const room = rooms.get(clientCode);
-        if (!room) {
+        if (!cleanupRoom(clientCode)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid room' }));
           console.log(`Client ${clientId} attempted to set maxClients for invalid code: ${clientCode}`);
           return;
         }
+        const room = rooms.get(clientCode);
         console.log(`Processing set-max-clients for client ${clientId}, code: ${clientCode}, isInitiator: ${ws.isInitiator}, room.initiator: ${room.initiator}`);
         if (ws.isInitiator && clientId === room.initiator) {
           const newMax = Math.max(2, Math.min(10, parseInt(parsed.maxClients)));
@@ -115,32 +142,33 @@ wss.on('connection', (ws) => {
 
       if (['offer', 'answer', 'candidate'].includes(parsed.type)) {
         const clientCode = codes.get(ws);
-        if (!clientCode || !rooms.has(clientCode)) {
+        if (!clientCode || !cleanupRoom(clientCode)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code or no room' }));
           console.log(`Client ${clientId} sent ${parsed.type} for invalid code: ${clientCode}`);
           return;
         }
         const room = rooms.get(clientCode);
-        console.log(`Processing ${parsed.type} from ${clientId} in code: ${clientCode}, targetId: ${parsed.targetId || 'all'}`, parsed);
+        const logData = { ...parsed, offer: parsed.offer ? '[truncated]' : undefined, answer: parsed.answer ? '[truncated]' : undefined, candidate: parsed.candidate ? '[truncated]' : undefined };
+        console.log(`Processing ${parsed.type} from ${clientId} in code: ${clientCode}, targetId: ${parsed.targetId || 'all'}`, logData);
         if (parsed.targetId) {
           const targetWs = Array.from(room.clients.entries()).find(([client, id]) => id === parsed.targetId)?.[0];
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
             targetWs.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
             console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${parsed.targetId} in code: ${clientCode}`);
           } else {
-            console.log(`Failed to forward ${parsed.type} to ${parsed.targetId}: not found or closed in code: ${clientCode}`);
+            console.log(`Failed to forward ${parsed.type} from ${ws.clientId} to ${parsed.targetId}: not found or closed in code: ${clientCode}, targetWs state: ${targetWs ? targetWs.readyState : 'null'}`);
           }
         } else {
-          room.clients.forEach((_, client) => {
+          room.clients.forEach((id, client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
-              console.log(`Broadcasted ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
+              console.log(`Broadcasted ${parsed.type} from ${ws.clientId} to ${id} in code: ${clientCode}`);
             }
           });
         }
       }
     } catch (error) {
-      console.error(`Error processing message from ${clientId}:`, error);
+      console.error(`Error processing message from ${clientId}:`, error, `Raw message:`, message);
     }
   });
 
@@ -194,14 +222,14 @@ wss.on('connection', (ws) => {
 });
 
 function broadcast(code, data) {
+  if (!cleanupRoom(code)) return;
   const room = rooms.get(code);
-  if (room) {
-    room.clients.forEach((_, client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(data));
-      }
-    });
-  }
+  room.clients.forEach((_, client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(data));
+      console.log(`Broadcasted ${data.type} to ${room.clients.get(client)} in code: ${code}`);
+    }
+  });
 }
 
 console.log(`Signaling server running on port ${process.env.PORT || 10000}`);

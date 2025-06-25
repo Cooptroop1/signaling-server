@@ -30,8 +30,18 @@ function cleanupRoom(clientCode) {
       clientIds.delete(client);
       codes.delete(client);
       console.log(`Cleaned up closed client ${id} from code: ${clientCode}`);
+      broadcast(clientCode, {
+        type: 'client-disconnected',
+        clientId: id,
+        totalClients: room.clients.size
+      });
     });
-    return room.clients.size > 0;
+    if (room.clients.size === 0) {
+      rooms.delete(clientCode);
+      console.log(`Cleared empty code: ${clientCode}`);
+      return false;
+    }
+    return true;
   }
   return false;
 }
@@ -42,11 +52,11 @@ wss.on('connection', (ws) => {
   ws.isInitiator = false;
   clientIds.set(ws, clientId);
 
-  console.log(`Client ${clientId} connected`);
+  console.log(`Client ${clientId} connected, WebSocket state: ${ws.readyState}`);
 
   ws.on('message', (data) => {
     const message = data.toString('utf8');
-    console.log(`Received message from ${clientId}:`, message);
+    console.log(`Received message from ${clientId}, state: ${ws.readyState}:`, message);
 
     try {
       const parsed = JSON.parse(message);
@@ -149,16 +159,24 @@ wss.on('connection', (ws) => {
         }
         const room = rooms.get(clientCode);
         const logData = { ...parsed, offer: parsed.offer ? '[truncated]' : undefined, answer: parsed.answer ? '[truncated]' : undefined, candidate: parsed.candidate ? '[truncated]' : undefined };
-        console.log(`Processing ${parsed.type} from ${clientId} in code: ${clientCode}, targetId: ${parsed.targetId || 'all'}`, logData);
+        console.log(`Processing ${parsed.type} from ${clientId} in code: ${clientCode}, targetId: ${parsed.targetId || 'none'}, room.clients: ${JSON.stringify([...room.clients.keys()].map(c => ({ id: room.clients.get(c), state: c.readyState })))}`, logData);
         if (parsed.targetId) {
           const targetWs = Array.from(room.clients.entries()).find(([client, id]) => id === parsed.targetId)?.[0];
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
             targetWs.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
-            console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${parsed.targetId} in code: ${clientCode}`);
+            console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${parsed.targetId} in code: ${clientCode}, targetWs state: ${targetWs.readyState}`);
           } else {
-            console.log(`Failed to forward ${parsed.type} from ${ws.clientId} to ${parsed.targetId}: not found or closed in code: ${clientCode}, targetWs state: ${targetWs ? targetWs.readyState : 'null'}`);
+            console.warn(`Failed to forward ${parsed.type} from ${ws.clientId} to ${parsed.targetId}: not found or closed in code: ${clientCode}, targetWs state: ${targetWs ? targetWs.readyState : 'null'}`);
+            // Fallback broadcast to all clients in room
+            room.clients.forEach((id, client) => {
+              if (client !== ws && client.readyState === WebSocket.OPEN && id === parsed.targetId) {
+                client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
+                console.log(`Fallback broadcasted ${parsed.type} from ${ws.clientId} to ${id} in code: ${clientCode}`);
+              }
+            });
           }
         } else {
+          console.log(`Broadcasting ${parsed.type} from ${ws.clientId} to all clients in code: ${clientCode}`);
           room.clients.forEach((id, client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
@@ -168,29 +186,17 @@ wss.on('connection', (ws) => {
         }
       }
     } catch (error) {
-      console.error(`Error processing message from ${clientId}:`, error, `Raw message:`, message);
+      console.error(`Error processing message from ${clientId}, state: ${ws.readyState}:`, error, `Raw message:`, message);
     }
   });
 
   ws.on('close', () => {
+    console.log(`Client ${clientId} closed, WebSocket state: ${ws.readyState}`);
     const clientCode = codes.get(ws);
     if (clientCode && rooms.has(clientCode)) {
+      cleanupRoom(clientCode);
       const room = rooms.get(clientCode);
-      room.clients.delete(ws);
-      room.usernames.delete(clientId);
-      console.log(`Client ${clientId} disconnected from code: ${clientCode}, remaining: ${room.clients.size}`);
-      clientIds.delete(ws);
-      codes.delete(ws);
-
-      if (room.clients.size === 0) {
-        rooms.delete(clientCode);
-        console.log(`Cleared code: ${clientCode}`);
-      } else {
-        broadcast(clientCode, {
-          type: 'client-disconnected',
-          clientId,
-          totalClients: room.clients.size
-        });
+      if (room) {
         if (ws.isInitiator && clientId === room.initiator) {
           room.initiator = null;
           if (room.clients.size > 0) {
@@ -199,35 +205,42 @@ wss.on('connection', (ws) => {
             newInitiatorWs.isInitiator = true;
             room.initiator = newInitiatorId;
             console.log(`Assigned new initiator ${newInitiatorId} for code: ${clientCode}`);
-            newInitiatorWs.send(JSON.stringify({
-              type: 'init',
-              clientId: newInitiatorId,
-              maxClients: room.maxClients,
-              isInitiator: true
-            }));
-            room.clients.forEach((_, client) => {
-              if (client !== newInitiatorWs && client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'initiator-changed', newInitiator: newInitiatorId }));
-              }
-            });
+            if (newInitiatorWs.readyState === WebSocket.OPEN) {
+              newInitiatorWs.send(JSON.stringify({
+                type: 'init',
+                clientId: newInitiatorId,
+                maxClients: room.maxClients,
+                isInitiator: true
+              }));
+              room.clients.forEach((_, client) => {
+                if (client !== newInitiatorWs && client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ type: 'initiator-changed', newInitiator: newInitiatorId }));
+                }
+              });
+            }
           }
         }
       }
     }
+    clientIds.delete(ws);
+    codes.delete(ws);
   });
 
   ws.on('error', (error) => {
-    console.error(`WebSocket error for ${clientId}:`, error);
+    console.error(`WebSocket error for ${clientId}, state: ${ws.readyState}:`, error);
   });
 });
 
 function broadcast(code, data) {
   if (!cleanupRoom(code)) return;
   const room = rooms.get(code);
+  console.log(`Broadcasting ${data.type} to ${room.clients.size} clients in code: ${code}, clients: ${JSON.stringify([...room.clients.keys()].map(c => ({ id: room.clients.get(c), state: c.readyState })))}`, data);
   room.clients.forEach((_, client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify(data));
-      console.log(`Broadcasted ${data.type} to ${room.clients.get(client)} in code: ${code}`);
+      console.log(`Broadcasted ${data.type} to ${room.clients.get(client)} in code: ${code}, client state: ${client.readyState}`);
+    } else {
+      console.log(`Skipped broadcast to ${room.clients.get(client)} in code: ${code}, client state: ${client.readyState}`);
     }
   });
 }

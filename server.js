@@ -39,10 +39,13 @@ wss.on('connection', (ws) => {
         room.clients.add(ws);
         console.log(`Client ${clientId} joined code: ${clientCode}, total clients: ${room.clients.size}`);
         ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: ws.isInitiator }));
-        if (room.clients.size === 2 && ws.isInitiator) {
-          ws.send(JSON.stringify({ type: 'join-notify', code: clientCode }));
-          console.log(`Sent join-notify to initiator ${clientId} for code: ${clientCode}`);
-        }
+        // Notify all clients of new join
+        room.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'join-notify', code: clientCode, clientId, totalClients: room.clients.size }));
+            console.log(`Sent join-notify to ${client.clientId} for code: ${clientCode}`);
+          }
+        });
       } else if (parsed.type === 'set-max-clients' && clientCode) {
         const room = rooms.get(clientCode);
         if (!room) {
@@ -67,12 +70,21 @@ wss.on('connection', (ws) => {
           return;
         }
         const room = rooms.get(clientCode);
-        room.clients.forEach((client) => {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
-            console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
-          }
-        });
+        if (parsed.targetId) {
+          room.clients.forEach((client) => {
+            if (client.clientId === parsed.targetId && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
+              console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
+            }
+          });
+        } else {
+          room.clients.forEach((client) => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
+              console.log(`Broadcasted ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
+            }
+          });
+        }
       }
     } catch (error) {
       console.error(`Error processing message from ${clientId}:`, error);
@@ -86,7 +98,7 @@ wss.on('connection', (ws) => {
       console.log(`Client ${clientId} disconnected from code: ${clientCode}, remaining: ${room.clients.size}`);
       room.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: 'client-disconnected', clientId }));
+          client.send(JSON.stringify({ type: 'client-disconnected', clientId, totalClients: room.clients.size }));
         }
       });
       if (room.clients.size === 0) {

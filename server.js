@@ -1,24 +1,26 @@
 ```javascript
 const express = require('express');
-const fetch = require('node-fetch');
 const WebSocket = require('ws');
 const app = express();
 
+// Proxy endpoint for Metered TURN credentials
 app.get('/get-turn-credentials', async (req, res) => {
   try {
     const response = await fetch('https://anonmess.metered.live/api/v1/turn/credentials?apiKey=20409a1726332ccf335585493153f4e3eafb');
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`HTTP error, status: ${response.status}`);
     }
     const iceServers = await response.json();
     res.json(iceServers);
   } catch (error) {
-    console.error('Error fetching TURN credentials:', error);
+    console.error('Error fetching TURN credentials:', error.message);
     res.status(500).json({ error: 'Failed to fetch TURN credentials' });
   }
 });
 
-const server = app.listen(process.env.PORT || 3000);
+const server = app.listen(process.env.PORT || 3000, () => {
+  console.log(`Server running on port ${process.env.PORT || 3000}`);
+});
 const wss = new WebSocket.Server({ server });
 
 let rooms = new Map();
@@ -84,7 +86,7 @@ wss.on('connection', (ws) => {
         }
       }
     } catch (error) {
-      console.error('Error processing message:', error);
+      console.error('Error processing message:', error.message);
     }
   });
 

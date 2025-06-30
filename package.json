@@ -1,15 +1,16 @@
 {
-  "name": "signaling-server",
+  "name": "anonmess-signaling",
   "version": "1.0.0",
-  "description": "WebSocket signaling server for anonymous chat",
+  "description": "Signaling server for AnonMess WebRTC chat",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "Cooptroop1",
-  "license": "ISC",
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "axios": "^1.7.7"
+  },
+  "engines": {
+    "node": "22.16.0"
   }
 }

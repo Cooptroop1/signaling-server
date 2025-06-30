@@ -1,4 +1,3 @@
-```javascript
 const WebSocket = require('ws');
 const axios = require('axios');
 
@@ -87,7 +86,7 @@ wss.on('connection', (ws) => {
         if (rooms.has(data.code)) {
           const room = rooms.get(data.code);
           room.maxClients = data.maxClients;
-          broadcast(data.code, { type: 'set-max-clients', maxClients: data.maxClients, totalClients: room.clients.size });
+          broadcast(code, { type: 'set-max-clients', maxClients: data.maxClients, totalClients: room.clients.size });
           logStats({ clientId, code, event: 'set-max-clients', totalClients: room.clients.size, maxClients: data.maxClients });
         }
       }
@@ -134,18 +133,18 @@ wss.on('connection', (ws) => {
 async function logStats(data) {
   const timestamp = new Date().toISOString();
   const stats = {
-    clientId: data.clientId,
-    username: data.username || '',
-    code: data.code || '',
-    connections: data.connections || 0,
-    totalClients: data.totalClients || 0,
-    event: data.event || '',
-    timestamp: timestamp,
-    hour: `hour:${timestamp.slice(0, 13)}`,
-    day: `day:${timestamp.slice(0, 10)}`,
-    week: `week:${getWeek(timestamp)}`,
-    month: `month:${timestamp.slice(0, 7)}`,
-    year: `year:${timestamp.slice(0, 4)}`
+    "clientId": data.clientId,
+    "username": data.username || '',
+    "code": data.code || '',
+    "connections": data.connections || 0,
+    "totalClients": data.totalClients || 0,
+    "event": data.event || '',
+    "timestamp": timestamp,
+    "hour": `hour:${timestamp.slice(0, 13)}`,
+    "day": `day:${timestamp.slice(0, 10)}`,
+    "week": `week:${getWeek(timestamp)}`,
+    "month": `month:${timestamp.slice(0, 7)}`,
+    "year": `year:${timestamp.slice(0, 4)}`
   };
   statsBuffer.push(stats);
 }
@@ -208,4 +207,3 @@ function broadcast(code, message) {
 }
 
 console.log(`Signaling server running on port ${process.env.PORT || 10000}`);
-```

@@ -1,137 +1,157 @@
 
-
 const WebSocket = require('ws');
-const wss = new WebSocket.Server({ host: '0.0.0.0', port: process.env.PORT || 10000 });
+const axios = require('axios');
 
-// Store rooms by code
-const rooms = new Map();
+const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
+const rooms = {};
+const githubToken = process.env.GITHUB_TOKEN || 'your-github-token';
+const githubRepo = 'cooptroop1/anonmess-stats';
+const statsFilePath = 'stats.jsonl';
 
-wss.on('connection', (ws) => {
-  let clientCode = null;
-  let clientId = Math.random().toString(36).slice(2);
-  ws.clientId = clientId;
-  ws.isInitiator = false;
+async function logStats(stats) {
+    const now = new Date();
+    const hourKey = `hour:${now.toISOString().slice(0, 13)}`;
+    const dayKey = `day:${now.toISOString().slice(0, 10)}`;
+    const weekKey = `week:${now.getFullYear()}-${Math.ceil((now.getDate() + (new Date(now.getFullYear(), now.getMonth(), 1).getDay() + 6) % 7) / 7)}`;
+    const monthKey = `month:${now.toISOString().slice(0, 7)}`;
+    const yearKey = `year:${now.getFullYear()}`;
+    const totalConnections = stats.connections.reduce((sum, conn) => sum + conn.activeDataChannels, 0);
 
-  ws.on('message', (data) => {
-    const message = data.toString('utf8');
-    console.log(`Received message from ${clientId}:`, message);
+    const logEntry = JSON.stringify({
+        clientId: stats.clientId,
+        username: stats.username,
+        code: stats.code,
+        connections: totalConnections,
+        timestamp: now.toISOString(),
+        hour: hourKey,
+        day: dayKey,
+        week: weekKey,
+        month: monthKey,
+        year: yearKey
+    }) + '\n';
 
+    // Fetch current file content and SHA
+    let sha;
     try {
-      const parsed = JSON.parse(message);
-      if (parsed.type === 'join' && parsed.code) {
-        clientCode = parsed.code;
-        if (!rooms.has(clientCode)) {
-          rooms.set(clientCode, {
-            clients: new Set(),
-            maxClients: 2,
-            initiator: null
-          });
-        }
-        const room = rooms.get(clientCode);
-        if (!room.initiator) {
-          room.initiator = clientId;
-          ws.isInitiator = true;
-          console.log(`Set initiator ${clientId} for code: ${clientCode}`);
-        }
-        if (room.clients.size >= room.maxClients) {
-          console.log(`Code ${clientCode} is full (max ${room.maxClients}), rejecting join`);
-          ws.send(JSON.stringify({ type: 'error', message: `Chat is full, max ${room.maxClients} users allowed` }));
-          ws.close();
-          return;
-        }
-        room.clients.add(ws);
-        console.log(`Client ${clientId} joined code: ${clientCode}, total clients: ${room.clients.size}`);
-        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: ws.isInitiator }));
-        // Notify all clients of new join
-        room.clients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'join-notify', code: clientCode, clientId, totalClients: room.clients.size }));
-            console.log(`Sent join-notify to ${client.clientId} for code: ${clientCode}`);
-          }
+        const response = await axios.get(`https://api.github.com/repos/${githubRepo}/contents/${statsFilePath}`, {
+            headers: {
+                Authorization: `Bearer ${githubToken}`,
+                Accept: 'application/vnd.github.v3+json'
+            }
         });
-      } else if (parsed.type === 'set-max-clients' && clientCode) {
-        const room = rooms.get(clientCode);
-        if (!room) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid room' }));
-          return;
-        }
-        if (ws.isInitiator && ws.clientId === room.initiator) {
-          const newMax = Math.max(2, Math.min(10, parseInt(parsed.maxClients)));
-          room.maxClients = newMax;
-          console.log(`Initiator ${clientId} set maxClients to ${newMax} for code: ${clientCode}`);
-          room.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'max-clients', maxClients: newMax }));
-            }
-          });
-        } else {
-          console.log(`Client ${clientId} attempted to set maxClients but is not initiator for code: ${clientCode}`);
-          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set max clients' }));
-        }
-      } else if (['offer', 'answer', 'candidate'].includes(parsed.type)) {
-        if (!clientCode || !rooms.has(clientCode)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code or no room' }));
-          return;
-        }
-        const room = rooms.get(clientCode);
-        if (parsed.targetId) {
-          room.clients.forEach((client) => {
-            if (client.clientId === parsed.targetId && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
-              console.log(`Forwarded ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
-            }
-          });
-        } else {
-          room.clients.forEach((client) => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ ...parsed, clientId: ws.clientId }));
-              console.log(`Broadcasted ${parsed.type} from ${ws.clientId} to ${client.clientId} in code: ${clientCode}`);
-            }
-          });
-        }
-      }
+        sha = response.data.sha;
+        const currentContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
+        logEntry = currentContent + logEntry;
     } catch (error) {
-      console.error(`Error processing message from ${clientId}:`, error);
-    }
-  });
-
-  ws.on('close', () => {
-    if (clientCode && rooms.has(clientCode)) {
-      const room = rooms.get(clientCode);
-      room.clients.delete(ws);
-      console.log(`Client ${clientId} disconnected from code: ${clientCode}, remaining: ${room.clients.size}`);
-      room.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: 'client-disconnected', clientId, totalClients: room.clients.size }));
+        if (error.response?.status !== 404) {
+            console.error('GitHub API error fetching file:', error);
+            return;
         }
-      });
-      if (room.clients.size === 0) {
-        rooms.delete(clientCode);
-        console.log(`Cleared code: ${clientCode}`);
-      } else if (ws.isInitiator && room.initiator === clientId) {
-        // Assign new initiator from remaining clients
-        room.initiator = null;
-        if (room.clients.size > 0) {
-          const newInitiator = Array.from(room.clients)[0];
-          newInitiator.isInitiator = true;
-          room.initiator = newInitiator.clientId;
-          console.log(`Assigned new initiator ${newInitiator.clientId} for code: ${clientCode}`);
-          newInitiator.send(JSON.stringify({ type: 'init', clientId: newInitiator.clientId, maxClients: room.maxClients, isInitiator: true }));
-          room.clients.forEach((client) => {
-            if (client !== newInitiator && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'initiator-changed', newInitiator: newInitiator.clientId }));
+    }
+
+    // Update file via GitHub API
+    try {
+        await axios.put(`https://api.github.com/repos/${githubRepo}/contents/${statsFilePath}`, {
+            message: `Update stats ${now.toISOString()}`,
+            content: Buffer.from(logEntry).toString('base64'),
+            sha: sha,
+            branch: 'main'
+        }, {
+            headers: {
+                Authorization: `Bearer ${githubToken}`,
+                Accept: 'application/vnd.github.v3+json'
             }
-          });
-        }
-        // Preserve maxClients instead of resetting to 2
-      }
+        });
+        console.log('Pushed stats to GitHub');
+    } catch (error) {
+        console.error('GitHub API error updating file:', error);
     }
-  });
+}
 
-  ws.on('error', (error) => {
-    console.error(`WebSocket error for ${clientId}:`, error);
-  });
+function generateCode() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let code = '';
+    for (let i = 0; i < 16; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+        if (i % 4 === 3 && i < 15) code += '-';
+    }
+    return code;
+}
+
+wss.on('connection', async (ws) => {
+    let clientId = null;
+
+    ws.on('message', async (data) => {
+        try {
+            const message = JSON.parse(data);
+            console.log('Received:', message);
+
+            if (message.type === 'connect') {
+                clientId = message.clientId;
+                await logStats({ clientId, username: '', code: '', connections: [] });
+            } else if (message.type === 'start') {
+                const code = generateCode();
+                rooms[code] = rooms[code] || [];
+                rooms[code].push({ ws, clientId: message.clientId, username: message.username });
+                ws.send(JSON.stringify({ type: 'code', code }));
+            } else if (message.type === 'join') {
+                const { code, clientId, username } = message;
+                if (rooms[code]) {
+                    if (rooms[code].length >= 10) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Room is full (max 10 clients)' }));
+                        return;
+                    }
+                    rooms[code].push({ ws, clientId, username });
+                    rooms[code].forEach(client => {
+                        if (client.clientId !== clientId) {
+                            client.ws.send(JSON.stringify({
+                                type: 'join',
+                                clientId,
+                                username
+                            }));
+                        }
+                    });
+                } else {
+                    ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+                }
+            } else if (message.type === 'offer' || message.type === 'answer' || message.type === 'candidate') {
+                const { to, code } = message;
+                if (rooms[code]) {
+                    const recipient = rooms[code].find(client => client.clientId === to);
+                    if (recipient) {
+                        recipient.ws.send(JSON.stringify(message));
+                    }
+                }
+            } else if (message.type === 'leave') {
+                const { code, clientId } = message;
+                if (rooms[code]) {
+                    rooms[code] = rooms[code].filter(client => client.clientId !== clientId);
+                    rooms[code].forEach(client => {
+                        client.ws.send(JSON.stringify({ type: 'leave', clientId }));
+                    });
+                    if (rooms[code].length === 0) delete rooms[code];
+                }
+                await logStats({ clientId, username: '', code, connections: [] });
+            } else if (message.type === 'stats') {
+                await logStats(message);
+            }
+        } catch (error) {
+            console.error('Error processing message:', error);
+        }
+    });
+
+    ws.on('close', async () => {
+        for (const code in rooms) {
+            rooms[code] = rooms[code].filter(client => client.ws !== ws);
+            if (clientId) {
+                rooms[code].forEach(client => {
+                    client.ws.send(JSON.stringify({ type: 'leave', clientId }));
+                });
+                if (rooms[code].length === 0) delete rooms[code];
+                await logStats({ clientId, username: '', code, connections: [] });
+            }
+        }
+    });
 });
 
-console.log(`Signaling server running on port ${process.env.PORT || 10000}`);
-
+console.log('Signaling server running on port', process.env.PORT || 10000);

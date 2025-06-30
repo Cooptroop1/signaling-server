@@ -88,6 +88,7 @@ wss.on('connection', (ws) => {
           const room = rooms.get(data.code);
           room.maxClients = data.maxClients;
           broadcast(data.code, { type: 'set-max-clients', maxClients: data.maxClients, totalClients: room.clients.size });
+          logStats({ clientId, code, event: 'set-max-clients', totalClients: room.clients.size, maxClients: data.maxClients });
         }
       }
 
@@ -107,7 +108,8 @@ wss.on('connection', (ws) => {
           username: data.username,
           code: data.code,
           connections: data.connections.reduce((sum, c) => sum + c.activeDataChannels, 0),
-          event: data.event
+          event: data.event,
+          totalClients: rooms.has(data.code) ? rooms.get(data.code).clients.size : 0
         });
       }
     } catch (error) {
@@ -138,7 +140,7 @@ async function logStats(data) {
     connections: data.connections || 0,
     totalClients: data.totalClients || 0,
     event: data.event || '',
-    timestamp,
+    timestamp: timestamp,
     hour: `hour:${timestamp.slice(0, 13)}`,
     day: `day:${timestamp.slice(0, 10)}`,
     week: `week:${getWeek(timestamp)}`,
@@ -161,7 +163,7 @@ async function flushStats() {
       {
         message: `Update stats for ${new Date().toISOString()}`,
         content: Buffer.from(content).toString('base64'),
-        sha,
+        sha: sha,
         branch: 'main'
       },
       {
@@ -169,7 +171,7 @@ async function flushStats() {
       }
     );
     console.log(`Pushed ${statsBuffer.length} stats to GitHub`);
-    statsBuffer.length = 0; // Clear buffer
+    statsBuffer.length = 0;
   } catch (error) {
     console.error('Error pushing stats:', error.response?.data || error.message);
   }

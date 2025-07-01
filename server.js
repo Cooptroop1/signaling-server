@@ -18,6 +18,10 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'connect') {
         clientId = data.clientId;
+        if (!clientId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid clientId' }));
+          return;
+        }
         ws.clientId = clientId;
         logStats({ clientId, event: 'connect' });
       }
@@ -96,6 +100,8 @@ wss.on('connection', (ws) => {
           const target = room.clients.get(data.targetId);
           if (target && target.ws.readyState === WebSocket.OPEN) {
             target.ws.send(JSON.stringify({ ...data, clientId }));
+          } else {
+            console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
           }
         }
       }
@@ -155,23 +161,26 @@ async function logStats(data) {
 async function flushStats() {
   if (statsBuffer.length === 0) return;
 
-  const content = statsBuffer.map(s => JSON.stringify(s)).join('\n') + '\n';
+  let content = statsBuffer.map(s => JSON.stringify(s)).join('\n') + '\n';
+  let sha;
   try {
-    let sha;
-    try {
-      const response = await axios.get('https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl', {
-        headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
-      });
-      sha = response.data.sha;
-      const currentContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
-      content = currentContent + content;
-    } catch (error) {
-      if (error.response?.status !== 404) {
-        console.error('Error fetching stats file:', error.response?.data || error.message);
-        return;
-      }
+    const response = await axios.get('https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl', {
+      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
+    });
+    sha = response.data.sha;
+    const currentContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
+    content = currentContent + content;
+  } catch (error) {
+    if (error.response?.status === 404) {
+      console.log('stats.jsonl not found, creating new file');
+      sha = undefined; // New file, no sha
+    } else {
+      console.error('Error fetching stats file:', error.response?.data || error.message);
+      return;
     }
+  }
 
+  try {
     await axios.put(
       'https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl',
       {

@@ -28,7 +28,7 @@ wss.on('connection', (ws) => {
         username = data.username;
 
         if (!validateUsername(username)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
           return;
         }
 
@@ -46,7 +46,7 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
             return;
           }
-          if (!room.clients.has(room.initiator)) {
+          if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline' }));
             return;
           }
@@ -132,7 +132,7 @@ function validateUsername(username) {
 
 async function logStats(data) {
   const timestamp = new Date().toISOString();
-  const day = timestamp.slice(0, 10); // e.g., 2025-07-01
+  const day = timestamp.slice(0, 10);
   const stats = {
     clientId: data.clientId,
     username: data.username || '',
@@ -144,7 +144,6 @@ async function logStats(data) {
   };
   statsBuffer.push(stats);
 
-  // Update daily user count
   if (data.event === 'connect' || data.event === 'join') {
     if (!dailyUsers.has(day)) {
       dailyUsers.set(day, new Set());
@@ -158,10 +157,21 @@ async function flushStats() {
 
   const content = statsBuffer.map(s => JSON.stringify(s)).join('\n') + '\n';
   try {
-    const response = await axios.get('https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl', {
-      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
-    });
-    const sha = response.data.sha;
+    let sha;
+    try {
+      const response = await axios.get('https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl', {
+        headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
+      });
+      sha = response.data.sha;
+      const currentContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
+      content = currentContent + content;
+    } catch (error) {
+      if (error.response?.status !== 404) {
+        console.error('Error fetching stats file:', error.response?.data || error.message);
+        return;
+      }
+    }
+
     await axios.put(
       'https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl',
       {
@@ -176,7 +186,6 @@ async function flushStats() {
     );
     console.log(`Pushed ${statsBuffer.length} stats to GitHub`);
 
-    // Log daily user count
     const day = new Date().toISOString().slice(0, 10);
     if (dailyUsers.has(day)) {
       const userCount = dailyUsers.get(day).size;
@@ -187,7 +196,7 @@ async function flushStats() {
         userCount,
         timestamp: new Date().toISOString()
       });
-      dailyUsers.delete(day); // Clear after logging
+      dailyUsers.delete(day);
     }
 
     statsBuffer.length = 0;

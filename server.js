@@ -99,6 +99,7 @@ wss.on('connection', (ws) => {
           const room = rooms.get(data.code);
           const target = room.clients.get(data.targetId);
           if (target && target.ws.readyState === WebSocket.OPEN) {
+            console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
             target.ws.send(JSON.stringify({ ...data, clientId }));
           } else {
             console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);

@@ -6,7 +6,7 @@ const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
 const dailyUsers = new Map(); // Track unique clientIds per day
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const UPDATE_INTERVAL = 3600000; // 1 hour in milliseconds
+const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 
 wss.on('connection', (ws) => {
   let clientId, code, username;
@@ -173,12 +173,12 @@ function updateLogFile() {
   });
 }
 
-// Initial file creation and hourly updates
+// Initial file creation and 30-second updates for testing
 fs.writeFile(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
     updateLogFile(); // Initial write
-    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every hour
+    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every 30 seconds
   }
 });
 

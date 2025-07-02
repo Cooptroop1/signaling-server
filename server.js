@@ -1,11 +1,7 @@
 const WebSocket = require('ws');
-const axios = require('axios');
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const statsBuffer = [];
-const STATS_FLUSH_INTERVAL = 60000; // Flush every 60s
 const dailyUsers = new Map(); // Track unique clientIds per day
 
 wss.on('connection', (ws) => {
@@ -137,7 +133,7 @@ function validateUsername(username) {
   return username && regex.test(username);
 }
 
-async function logStats(data) {
+function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
@@ -149,73 +145,17 @@ async function logStats(data) {
     timestamp,
     day
   };
-  statsBuffer.push(stats);
+  console.log('Stats:', stats);
 
   if (data.event === 'connect' || data.event === 'join') {
     if (!dailyUsers.has(day)) {
       dailyUsers.set(day, new Set());
     }
     dailyUsers.get(day).add(data.clientId);
+    const userCount = dailyUsers.get(day).size;
+    console.log(`Unique users for ${day}: ${userCount}`);
   }
 }
-
-async function flushStats() {
-  if (statsBuffer.length === 0) return;
-
-  let content = statsBuffer.map(s => JSON.stringify(s)).join('\n') + '\n';
-  let sha;
-  try {
-    const response = await axios.get('https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl', {
-      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
-    });
-    sha = response.data.sha;
-    const currentContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
-    content = currentContent + content;
-  } catch (error) {
-    if (error.response?.status === 404) {
-      console.log('stats.jsonl not found, creating new file');
-      sha = undefined; // New file, no sha
-    } else {
-      console.error('Error fetching stats file:', error.response?.data || error.message);
-      return;
-    }
-  }
-
-  try {
-    await axios.put(
-      'https://api.github.com/repos/cooptroop1/anonmess-stats/contents/stats.jsonl',
-      {
-        message: `Update stats for ${new Date().toISOString()}`,
-        content: Buffer.from(content).toString('base64'),
-        sha,
-        branch: 'main'
-      },
-      {
-        headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json' }
-      }
-    );
-    console.log(`Pushed ${statsBuffer.length} stats to GitHub`);
-
-    const day = new Date().toISOString().slice(0, 10);
-    if (dailyUsers.has(day)) {
-      const userCount = dailyUsers.get(day).size;
-      console.log(`Daily unique users for ${day}: ${userCount}`);
-      statsBuffer.push({
-        event: 'daily-users',
-        day,
-        userCount,
-        timestamp: new Date().toISOString()
-      });
-      dailyUsers.delete(day);
-    }
-
-    statsBuffer.length = 0;
-  } catch (error) {
-    console.error('Error pushing stats:', error.response?.data || error.message);
-  }
-}
-
-setInterval(flushStats, STATS_FLUSH_INTERVAL);
 
 function generateCode() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';

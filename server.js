@@ -1,8 +1,12 @@
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
 const dailyUsers = new Map(); // Track unique clientIds per day
+const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const UPDATE_INTERVAL = 3600000; // 1 hour in milliseconds
 
 wss.on('connection', (ws) => {
   let clientId, code, username;
@@ -145,17 +149,38 @@ function logStats(data) {
     timestamp,
     day
   };
-  console.log('Stats:', stats);
 
   if (data.event === 'connect' || data.event === 'join') {
     if (!dailyUsers.has(day)) {
       dailyUsers.set(day, new Set());
     }
     dailyUsers.get(day).add(data.clientId);
-    const userCount = dailyUsers.get(day).size;
-    console.log(`Unique users for ${day}: ${userCount}`);
   }
 }
+
+function updateLogFile() {
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  const userCount = dailyUsers.get(day)?.size || 0;
+  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}\n`;
+  
+  fs.appendFile(LOG_FILE, logEntry, (err) => {
+    if (err) {
+      console.error('Error writing to log file:', err);
+    } else {
+      console.log(`Updated ${LOG_FILE} with ${userCount} unique users for ${day}`);
+    }
+  });
+}
+
+// Initial file creation and hourly updates
+fs.writeFile(LOG_FILE, '', (err) => {
+  if (err) console.error('Error creating log file:', err);
+  else {
+    updateLogFile(); // Initial write
+    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every hour
+  }
+});
 
 function generateCode() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';

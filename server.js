@@ -4,10 +4,10 @@ const path = require('path');
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
-const dailyUsers = new Map(); // Track unique clientIds per day
+const dailyUsers = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
-const randomCodes = new Set(); // Store unique codes for random matching
+const UPDATE_INTERVAL = 30000;
+const randomCodes = new Set();
 
 wss.on('connection', (ws) => {
   let clientId, code, username;
@@ -73,7 +73,7 @@ wss.on('connection', (ws) => {
           logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size });
           if (room.clients.size === 0) {
             rooms.delete(data.code);
-            randomCodes.delete(data.code); // Remove code from random list if room empties
+            randomCodes.delete(data.code);
           } else {
             if (data.clientId === room.initiator) {
               const newInitiator = room.clients.keys().next().value;
@@ -133,7 +133,7 @@ wss.on('connection', (ws) => {
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size });
       if (room.clients.size === 0) {
         rooms.delete(ws.code);
-        randomCodes.delete(ws.code); // Clean up random code on room closure
+        randomCodes.delete(ws.code);
       } else {
         if (ws.clientId === room.initiator) {
           const newInitiator = room.clients.keys().next().value;
@@ -189,12 +189,11 @@ function updateLogFile() {
   });
 }
 
-// Initial file creation and 30-second updates for testing
 fs.writeFile(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
-    updateLogFile(); // Initial write
-    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every 30 seconds
+    updateLogFile();
+    setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
 

@@ -1,13 +1,13 @@
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
-const dailyUsers = new Map();
+const dailyUsers = new Map(); // Track unique clientIds per day
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const UPDATE_INTERVAL = 30000;
-const randomCodes = new Set();
+const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 
 wss.on('connection', (ws) => {
   let clientId, code, username;
@@ -73,7 +73,6 @@ wss.on('connection', (ws) => {
           logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size });
           if (room.clients.size === 0) {
             rooms.delete(data.code);
-            randomCodes.delete(data.code);
           } else {
             if (data.clientId === room.initiator) {
               const newInitiator = room.clients.keys().next().value;
@@ -108,19 +107,6 @@ wss.on('connection', (ws) => {
           }
         }
       }
-
-      if (data.type === 'submit-random') {
-        if (data.code && !rooms.get(data.code)?.clients.size) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
-          return;
-        }
-        randomCodes.add(data.code);
-        broadcastRandomCodes();
-      }
-
-      if (data.type === 'get-random-codes') {
-        ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
-      }
     } catch (error) {
       console.error('Error processing message:', error);
     }
@@ -133,7 +119,6 @@ wss.on('connection', (ws) => {
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size });
       if (room.clients.size === 0) {
         rooms.delete(ws.code);
-        randomCodes.delete(ws.code);
       } else {
         if (ws.clientId === room.initiator) {
           const newInitiator = room.clients.keys().next().value;
@@ -189,11 +174,12 @@ function updateLogFile() {
   });
 }
 
+// Initial file creation and 30-second updates for testing
 fs.writeFile(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
-    updateLogFile();
-    setInterval(updateLogFile, UPDATE_INTERVAL);
+    updateLogFile(); // Initial write
+    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every 30 seconds
   }
 });
 
@@ -216,14 +202,6 @@ function broadcast(code, message) {
       }
     });
   }
-}
-
-function broadcastRandomCodes() {
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
-    }
-  });
 }
 
 console.log(`Signaling server running on port ${process.env.PORT || 10000}`);

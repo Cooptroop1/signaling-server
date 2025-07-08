@@ -1,3 +1,4 @@
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -110,48 +111,27 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'submit-random') {
-        if (!data.code || !rooms.has(data.code) || rooms.get(data.code).clients.size === 0) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty or invalid room code' }));
+        if (data.code && !rooms.get(data.code)?.clients.size) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
           return;
         }
         randomCodes.add(data.code);
-        console.log(`Added code ${data.code} to randomCodes. Current randomCodes:`, Array.from(randomCodes));
         broadcastRandomCodes();
       }
 
-      if (data.type === 'get-random-code') {
-        if (!randomCodes.size) {
-          console.log('No random codes available for client:', data.clientId);
-          ws.send(JSON.stringify({ type: 'error', message: 'No random codes available' }));
-          return;
-        }
-        const codes = Array.from(randomCodes);
-        const randomCode = codes[Math.floor(Math.random() * codes.length)];
-        if (rooms.has(randomCode) && rooms.get(randomCode).clients.size > 0) {
-          console.log(`Sending random code ${randomCode} to client ${data.clientId}`);
-          ws.send(JSON.stringify({ type: 'random-code', code: randomCode }));
-        } else {
-          console.log(`Invalid or empty room for code ${randomCode}, removing from randomCodes`);
-          randomCodes.delete(randomCode);
-          ws.send(JSON.stringify({ type: 'error', message: 'No random codes available' }));
-        }
-      }
-
       if (data.type === 'get-random-codes') {
-        console.log(`Sending random codes to client ${data.clientId}:`, Array.from(randomCodes));
         ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
       }
 
       if (data.type === 'remove-random-code') {
         if (randomCodes.has(data.code)) {
           randomCodes.delete(data.code);
-          console.log(`Removed code ${data.code} from randomCodes`);
           broadcastRandomCodes();
+          console.log(`Removed code ${data.code} from randomCodes`);
         }
       }
     } catch (error) {
-      console.error('Error processing message:', error, 'Raw message:', message);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error processing message' }));
+      console.error('Error processing message:', error);
     }
   });
 
@@ -163,7 +143,6 @@ wss.on('connection', (ws) => {
       if (room.clients.size === 0) {
         rooms.delete(ws.code);
         randomCodes.delete(ws.code); // Clean up random code on room closure
-        console.log(`Room ${ws.code} closed, removed from randomCodes`);
       } else {
         if (ws.clientId === room.initiator) {
           const newInitiator = room.clients.keys().next().value;

@@ -1,4 +1,3 @@
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -121,6 +120,14 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'get-random-codes') {
         ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+      }
+
+      if (data.type === 'remove-random-code') {
+        if (randomCodes.has(data.code)) {
+          randomCodes.delete(data.code);
+          broadcastRandomCodes();
+          console.log(`Removed code ${data.code} from randomCodes`);
+        }
       }
     } catch (error) {
       console.error('Error processing message:', error);

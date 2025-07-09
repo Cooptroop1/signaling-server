@@ -5,7 +5,7 @@ const path = require('path');
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
 const dailyUsers = new Map(); // Track unique clientIds per day
-const dailyConnections = new Map(); // Track directed WebRTC connections per day
+const dailyConnections = new Map(); // Track WebRTC connections per day
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 const randomCodes = new Set(); // Store unique codes for random matching
@@ -58,6 +58,20 @@ wss.on('connection', (ws) => {
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false }));
           logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
+          // Log WebRTC connections for new client with all existing clients
+          if (room.clients.size > 0) {
+            room.clients.forEach((_, existingClientId) => {
+              if (existingClientId !== clientId) {
+                logStats({
+                  clientId,
+                  targetId: existingClientId,
+                  code,
+                  event: 'webrtc-connection',
+                  totalClients: room.clients.size + 1
+                });
+              }
+            });
+          }
         }
 
         const room = rooms.get(code);
@@ -104,23 +118,6 @@ wss.on('connection', (ws) => {
           if (target && target.ws.readyState === WebSocket.OPEN) {
             console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
             target.ws.send(JSON.stringify({ ...data, clientId }));
-            if (data.type === 'answer') {
-              // Log WebRTC connection for both directions
-              logStats({
-                clientId: data.clientId,
-                targetId: data.targetId,
-                code: data.code,
-                event: 'webrtc-connection',
-                totalClients: room.clients.size
-              });
-              logStats({
-                clientId: data.targetId,
-                targetId: data.clientId,
-                code: data.code,
-                event: 'webrtc-connection',
-                totalClients: room.clients.size
-              });
-            }
           } else {
             console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
           }
@@ -203,7 +200,7 @@ function logStats(data) {
     dailyUsers.get(day).add(data.clientId);
     if (data.event === 'webrtc-connection' && data.targetId) {
       dailyUsers.get(day).add(data.targetId); // Add targetId to unique users
-      // Log directed connection (clientId -> targetId)
+      // Log connection with unique key
       const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
       dailyConnections.get(day).add(connectionKey);
     }

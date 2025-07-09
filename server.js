@@ -1,4 +1,3 @@
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -6,6 +5,7 @@ const path = require('path');
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
 const dailyUsers = new Map(); // Track unique clientIds per day
+const dailyConnections = new Map(); // Track WebRTC connection events per day
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 const randomCodes = new Set(); // Store unique codes for random matching
@@ -104,6 +104,16 @@ wss.on('connection', (ws) => {
           if (target && target.ws.readyState === WebSocket.OPEN) {
             console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
             target.ws.send(JSON.stringify({ ...data, clientId }));
+            if (data.type === 'answer') {
+              // Log WebRTC connection when answer is successfully forwarded
+              logStats({
+                clientId: data.clientId,
+                targetId: data.targetId,
+                code: data.code,
+                event: 'webrtc-connection',
+                totalClients: room.clients.size
+              });
+            }
           } else {
             console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
           }
@@ -168,6 +178,7 @@ function logStats(data) {
   const stats = {
     clientId: data.clientId,
     username: data.username || '',
+    targetId: data.targetId || '', // For webrtc-connection events
     code: data.code || '',
     event: data.event || '',
     totalClients: data.totalClients || 0,
@@ -175,11 +186,20 @@ function logStats(data) {
     day
   };
 
-  if (data.event === 'connect' || data.event === 'join') {
+  if (data.event === 'connect' || data.event === 'join' || data.event === 'webrtc-connection') {
     if (!dailyUsers.has(day)) {
       dailyUsers.set(day, new Set());
     }
+    if (!dailyConnections.has(day)) {
+      dailyConnections.set(day, new Set());
+    }
     dailyUsers.get(day).add(data.clientId);
+    if (data.event === 'webrtc-connection') {
+      dailyUsers.get(day).add(data.targetId); // Add targetId to unique users
+      // Use a unique key for the connection event to avoid duplicates
+      const connectionKey = `${data.clientId}-${data.targetId}-${data.code}-${timestamp}`;
+      dailyConnections.get(day).add(connectionKey);
+    }
   }
 }
 
@@ -187,13 +207,14 @@ function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
   const userCount = dailyUsers.get(day)?.size || 0;
-  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}\n`;
+  const connectionCount = dailyConnections.get(day)?.size || 0;
+  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}\n`;
   
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
       console.error('Error writing to log file:', err);
     } else {
-      console.log(`Updated ${LOG_FILE} with ${userCount} unique users for ${day}`);
+      console.log(`Updated ${LOG_FILE} with ${userCount} unique users and ${connectionCount} WebRTC connections for ${day}`);
     }
   });
 }

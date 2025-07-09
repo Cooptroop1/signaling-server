@@ -5,7 +5,7 @@ const path = require('path');
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
 const dailyUsers = new Map(); // Track unique clientIds per day
-const dailyConnections = new Map(); // Track WebRTC connection events per day
+const dailyConnections = new Map(); // Track directed WebRTC connections per day
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 const randomCodes = new Set(); // Store unique codes for random matching
@@ -105,10 +105,17 @@ wss.on('connection', (ws) => {
             console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
             target.ws.send(JSON.stringify({ ...data, clientId }));
             if (data.type === 'answer') {
-              // Log WebRTC connection when answer is successfully forwarded
+              // Log WebRTC connection for both directions
               logStats({
                 clientId: data.clientId,
                 targetId: data.targetId,
+                code: data.code,
+                event: 'webrtc-connection',
+                totalClients: room.clients.size
+              });
+              logStats({
+                clientId: data.targetId,
+                targetId: data.clientId,
                 code: data.code,
                 event: 'webrtc-connection',
                 totalClients: room.clients.size
@@ -194,10 +201,10 @@ function logStats(data) {
       dailyConnections.set(day, new Set());
     }
     dailyUsers.get(day).add(data.clientId);
-    if (data.event === 'webrtc-connection') {
+    if (data.event === 'webrtc-connection' && data.targetId) {
       dailyUsers.get(day).add(data.targetId); // Add targetId to unique users
-      // Use a unique key for the connection event to avoid duplicates
-      const connectionKey = `${data.clientId}-${data.targetId}-${data.code}-${timestamp}`;
+      // Log directed connection (clientId -> targetId)
+      const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
       dailyConnections.get(day).add(connectionKey);
     }
   }

@@ -9,11 +9,18 @@ const dailyConnections = new Map(); // Track WebRTC connections per day
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 const randomCodes = new Set(); // Store unique codes for random matching
+const rateLimits = new Map(); // Track message rate limits per clientId
 
 wss.on('connection', (ws) => {
   let clientId, code, username;
 
   ws.on('message', async (message) => {
+    // Rate limiting: 50 messages per minute per client
+    if (!restrictRate(ws)) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
+      return;
+    }
+
     try {
       const data = JSON.parse(message);
       console.log('Received:', data);
@@ -180,8 +187,13 @@ wss.on('connection', (ws) => {
           console.log(`Removed code ${data.code} from randomCodes`);
         }
       }
+
+      if (data.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+      }
     } catch (error) {
       console.error('Error processing message:', error);
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' }));
     }
   });
 
@@ -190,6 +202,7 @@ wss.on('connection', (ws) => {
       const room = rooms.get(ws.code);
       const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
+      rateLimits.delete(ws.clientId); // Clear rate limit on disconnect
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
@@ -222,6 +235,24 @@ wss.on('connection', (ws) => {
     }
   });
 });
+
+// Rate limiting function: 50 messages per minute per client
+function restrictRate(ws) {
+  if (!ws.clientId) return true; // Allow initial connect message
+  const now = Date.now();
+  const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
+  if (now - rateLimit.startTime >= 60000) {
+    rateLimit.count = 0;
+    rateLimit.startTime = now;
+  }
+  rateLimit.count += 1;
+  rateLimits.set(ws.clientId, rateLimit);
+  if (rateLimit.count > 50) {
+    console.warn(`Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages in 60s`);
+    return false;
+  }
+  return true;
+}
 
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;

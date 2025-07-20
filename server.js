@@ -48,7 +48,23 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat is full' }));
             return;
           }
-          if (Array.from(room.clients.values()).some(c => c.username === username)) {
+          // Allow rejoin if clientId matches existing client with same username
+          if (room.clients.has(clientId)) {
+            if (room.clients.get(clientId).username === username) {
+              // Clean up old connection
+              room.clients.get(clientId).ws.close();
+              room.clients.delete(clientId);
+              broadcast(code, { 
+                type: 'client-disconnected', 
+                clientId, 
+                totalClients: room.clients.size, 
+                isInitiator: clientId === room.initiator 
+              });
+            } else {
+              ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId' }));
+              return;
+            }
+          } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
             return;
           }

@@ -84,20 +84,36 @@ wss.on('connection', (ws) => {
       if (data.type === 'leave') {
         if (rooms.has(data.code)) {
           const room = rooms.get(data.code);
+          const isInitiator = data.clientId === room.initiator;
           room.clients.delete(data.clientId);
-          logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size });
-          if (room.clients.size === 0) {
+          logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
+          if (room.clients.size === 0 || isInitiator) {
             rooms.delete(data.code);
-            randomCodes.delete(data.code); // Remove code from random list if room empties
+            randomCodes.delete(data.code); // Remove code from random list if room empties or initiator leaves
+            broadcast(data.code, { 
+              type: 'client-disconnected', 
+              clientId: data.clientId, 
+              totalClients: 0, 
+              isInitiator 
+            });
           } else {
-            if (data.clientId === room.initiator) {
+            if (isInitiator) {
               const newInitiator = room.clients.keys().next().value;
               if (newInitiator) {
                 room.initiator = newInitiator;
-                broadcast(data.code, { type: 'initiator-changed', newInitiator, totalClients: room.clients.size });
+                broadcast(data.code, { 
+                  type: 'initiator-changed', 
+                  newInitiator, 
+                  totalClients: room.clients.size 
+                });
               }
             }
-            broadcast(data.code, { type: 'client-disconnected', clientId: data.clientId, totalClients: room.clients.size });
+            broadcast(data.code, { 
+              type: 'client-disconnected', 
+              clientId: data.clientId, 
+              totalClients: room.clients.size, 
+              isInitiator 
+            });
           }
         }
       }
@@ -105,8 +121,8 @@ wss.on('connection', (ws) => {
       if (data.type === 'set-max-clients') {
         if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
           const room = rooms.get(data.code);
-          room.maxClients = data.maxClients;
-          broadcast(data.code, { type: 'max-clients', maxClients: data.maxClients, totalClients: room.clients.size });
+          room.maxClients = Math.min(data.maxClients, 10);
+          broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
         }
       }
@@ -129,8 +145,12 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
           return;
         }
-        randomCodes.add(data.code);
-        broadcastRandomCodes();
+        if (rooms.get(data.code)?.initiator === data.clientId) {
+          randomCodes.add(data.code);
+          broadcastRandomCodes();
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board' }));
+        }
       }
 
       if (data.type === 'get-random-codes') {
@@ -138,7 +158,7 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'remove-random-code') {
-        if (randomCodes.has(data.code)) {
+        if (rooms.get(data.code)?.initiator === data.clientId) {
           randomCodes.delete(data.code);
           broadcastRandomCodes();
           console.log(`Removed code ${data.code} from randomCodes`);
@@ -152,20 +172,36 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (ws.code && rooms.has(ws.code)) {
       const room = rooms.get(ws.code);
+      const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
-      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size });
-      if (room.clients.size === 0) {
+      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
+      if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
-        randomCodes.delete(ws.code); // Clean up random code on room closure
+        randomCodes.delete(ws.code); // Clean up random code on room closure or initiator disconnect
+        broadcast(ws.code, { 
+          type: 'client-disconnected', 
+          clientId: ws.clientId, 
+          totalClients: 0, 
+          isInitiator 
+        });
       } else {
-        if (ws.clientId === room.initiator) {
+        if (isInitiator) {
           const newInitiator = room.clients.keys().next().value;
           if (newInitiator) {
             room.initiator = newInitiator;
-            broadcast(ws.code, { type: 'initiator-changed', newInitiator, totalClients: room.clients.size });
+            broadcast(ws.code, { 
+              type: 'initiator-changed', 
+              newInitiator, 
+              totalClients: room.clients.size 
+            });
           }
         }
-        broadcast(ws.code, { type: 'client-disconnected', clientId: ws.clientId, totalClients: room.clients.size });
+        broadcast(ws.code, { 
+          type: 'client-disconnected', 
+          clientId: ws.clientId, 
+          totalClients: room.clients.size, 
+          isInitiator 
+        });
       }
     }
   });
@@ -186,6 +222,7 @@ function logStats(data) {
     code: data.code || '',
     event: data.event || '',
     totalClients: data.totalClients || 0,
+    isInitiator: data.isInitiator || false,
     timestamp,
     day
   };
@@ -205,6 +242,13 @@ function logStats(data) {
       dailyConnections.get(day).add(connectionKey);
     }
   }
+
+  const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
+  fs.appendFile(LOG_FILE, logEntry, (err) => {
+    if (err) {
+      console.error('Error appending to log file:', err);
+    }
+  });
 }
 
 function updateLogFile() {

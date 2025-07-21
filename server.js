@@ -53,7 +53,7 @@ app.post('/api/log', (req, res) => {
   });
 });
 
-// WebSocket server logic (unchanged)
+// WebSocket server logic (unchanged from your original)
 wss.on('connection', (ws) => {
   let clientId, code, username;
 

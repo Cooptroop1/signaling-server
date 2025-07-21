@@ -1,63 +1,21 @@
-try {
-  require.resolve('ws');
-  require.resolve('express');
-  require.resolve('cors');
-} catch (e) {
-  console.error('Required dependencies missing. Please run `npm install`.', e);
-  process.exit(1);
-}
-
 const WebSocket = require('ws');
-const express = require('express');
-const http = require('http');
-const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
-const dailyUsers = new Map();
-const dailyConnections = new Map();
-const randomCodes = new Set();
-const rateLimits = new Map();
+const dailyUsers = new Map(); // Track unique clientIds per day
+const dailyConnections = new Map(); // Track WebRTC connections per day
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const EVENT_LOG_FILE = path.join(__dirname, 'event_logs.log');
-const UPDATE_INTERVAL = 30000;
-const PORT = process.env.PORT || 10000;
+const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
+const randomCodes = new Set(); // Store unique codes for random matching
+const rateLimits = new Map(); // Track message rate limits per clientId
 
-// Middleware
-app.use(express.json());
-app.use(cors({ origin: '*' })); // Allow all origins for testing; restrict in production
-app.use((req, res, next) => {
-  console.log(`Received ${req.method} request to ${req.url}`);
-  next();
-});
-
-// Analytics endpoint
-app.post('/api/log', (req, res) => {
-  const { eventType, timestamp, clientId, details } = req.body;
-  if (!eventType || !timestamp || !clientId) {
-    console.error('Invalid analytics event:', req.body);
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-  const logEntry = `${timestamp} - Client: ${clientId}, Event: ${eventType}, Details: ${JSON.stringify(details)}\n`;
-  fs.appendFile(EVENT_LOG_FILE, logEntry, (err) => {
-    if (err) {
-      console.error('Error appending to event log:', err);
-      return res.status(500).json({ error: 'Server error' });
-    }
-    console.log(`Logged event: ${eventType} for client ${clientId}`);
-    res.status(200).json({ status: 'Event logged' });
-  });
-});
-
-// WebSocket server logic (unchanged)
 wss.on('connection', (ws) => {
   let clientId, code, username;
 
   ws.on('message', async (message) => {
+    // Rate limiting: 50 messages per minute per client
     if (!restrictRate(ws)) {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
       return;
@@ -97,8 +55,10 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat is full' }));
             return;
           }
+          // Allow rejoin if clientId matches existing client with same username
           if (room.clients.has(clientId)) {
             if (room.clients.get(clientId).username === username) {
+              // Clean up old connection
               room.clients.get(clientId).ws.close();
               room.clients.delete(clientId);
               broadcast(code, { 
@@ -121,6 +81,7 @@ wss.on('connection', (ws) => {
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false }));
           logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
+          // Log WebRTC connections for new client with all existing clients
           if (room.clients.size > 0) {
             room.clients.forEach((_, existingClientId) => {
               if (existingClientId !== clientId) {
@@ -151,7 +112,7 @@ wss.on('connection', (ws) => {
           logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
           if (room.clients.size === 0 || isInitiator) {
             rooms.delete(data.code);
-            randomCodes.delete(data.code);
+            randomCodes.delete(data.code); // Remove code from random list if room empties or initiator leaves
             broadcast(data.code, { 
               type: 'client-disconnected', 
               clientId: data.clientId, 
@@ -241,11 +202,11 @@ wss.on('connection', (ws) => {
       const room = rooms.get(ws.code);
       const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
-      rateLimits.delete(ws.clientId);
+      rateLimits.delete(ws.clientId); // Clear rate limit on disconnect
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
-        randomCodes.delete(ws.code);
+        randomCodes.delete(ws.code); // Clean up random code on room closure or initiator disconnect
         broadcast(ws.code, { 
           type: 'client-disconnected', 
           clientId: ws.clientId, 
@@ -275,9 +236,9 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Rate limiting function
+// Rate limiting function: 50 messages per minute per client
 function restrictRate(ws) {
-  if (!ws.clientId) return true;
+  if (!ws.clientId) return true; // Allow initial connect message
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
@@ -293,20 +254,18 @@ function restrictRate(ws) {
   return true;
 }
 
-// Validate username
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
 
-// Log user statistics
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
     clientId: data.clientId,
     username: data.username || '',
-    targetId: data.targetId || '',
+    targetId: data.targetId || '', // For webrtc-connection events
     code: data.code || '',
     event: data.event || '',
     totalClients: data.totalClients || 0,
@@ -324,7 +283,8 @@ function logStats(data) {
     }
     dailyUsers.get(day).add(data.clientId);
     if (data.event === 'webrtc-connection' && data.targetId) {
-      dailyUsers.get(day).add(data.targetId);
+      dailyUsers.get(day).add(data.targetId); // Add targetId to unique users
+      // Log connection with unique key
       const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
       dailyConnections.get(day).add(connectionKey);
     }
@@ -333,29 +293,36 @@ function logStats(data) {
   const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
-      console.error('Error appending to user log file:', err);
+      console.error('Error appending to log file:', err);
     }
   });
 }
 
-// Update user_counts.log
 function updateLogFile() {
-  const now = Date.now();
-  const day = new Date(now).toISOString().slice(0, 10);
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
   const userCount = dailyUsers.get(day)?.size || 0;
   const connectionCount = dailyConnections.get(day)?.size || 0;
-  const logEntry = `${new Date(now).toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}\n`;
+  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}\n`;
   
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
-      console.error('Error writing to user log file:', err);
+      console.error('Error writing to log file:', err);
     } else {
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users and ${connectionCount} WebRTC connections for ${day}`);
     }
   });
 }
 
-// Generate random code
+// Initial file creation and 30-second updates for testing
+fs.writeFile(LOG_FILE, '', (err) => {
+  if (err) console.error('Error creating log file:', err);
+  else {
+    updateLogFile(); // Initial write
+    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every 30 seconds
+  }
+});
+
 function generateCode() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
@@ -366,7 +333,6 @@ function generateCode() {
   return result;
 }
 
-// Broadcast messages
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -378,7 +344,6 @@ function broadcast(code, message) {
   }
 }
 
-// Broadcast random codes
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -387,17 +352,4 @@ function broadcastRandomCodes() {
   });
 }
 
-// Initialize log files
-fs.writeFile(LOG_FILE, '', (err) => {
-  if (err) console.error('Error creating user log file:', err);
-});
-fs.writeFile(EVENT_LOG_FILE, '', (err) => {
-  if (err) console.error('Error creating event log file:', err);
-});
-updateLogFile();
-setInterval(updateLogFile, UPDATE_INTERVAL);
-
-// Start server
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+console.log(`Signaling server running on port ${process.env.PORT || 10000}`);

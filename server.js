@@ -1,16 +1,42 @@
+const express = require('express');
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 
+const app = express();
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
 const dailyUsers = new Map(); // Track unique clientIds per day
 const dailyConnections = new Map(); // Track WebRTC connections per day
-const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
+const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const EVENT_LOG_FILE = path.join(__dirname, 'event_logs.log'); // New log file for analytics events
+const UPDATE_INTERVAL = 30000; // 30 seconds for testing
 
+// Middleware for JSON parsing
+app.use(express.json());
+
+// Analytics endpoint for client-side events
+app.post('/api/log', (req, res) => {
+  const { eventType, timestamp, clientId, details } = req.body;
+  if (!eventType || !timestamp || !clientId) {
+    console.error('Invalid analytics event received:', req.body);
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const logEntry = `${timestamp} - Client: ${clientId}, Event: ${eventType}, Details: ${JSON.stringify(details)}\n`;
+  fs.appendFile(EVENT_LOG_FILE, logEntry, (err) => {
+    if (err) {
+      console.error('Error appending to event log file:', err);
+      return res.status(500).json({ error: 'Server error' });
+    }
+    console.log(`Logged event: ${eventType} for client ${clientId}`);
+    res.status(200).json({ status: 'Event logged' });
+  });
+});
+
+// WebSocket server logic
 wss.on('connection', (ws) => {
   let clientId, code, username;
 
@@ -254,18 +280,20 @@ function restrictRate(ws) {
   return true;
 }
 
+// Validate username: 1-16 alphanumeric characters
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
 
+// Log user statistics to user_counts.log
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
     clientId: data.clientId,
     username: data.username || '',
-    targetId: data.targetId || '', // For webrtc-connection events
+    targetId: data.targetId || '',
     code: data.code || '',
     event: data.event || '',
     totalClients: data.totalClients || 0,
@@ -284,7 +312,6 @@ function logStats(data) {
     dailyUsers.get(day).add(data.clientId);
     if (data.event === 'webrtc-connection' && data.targetId) {
       dailyUsers.get(day).add(data.targetId); // Add targetId to unique users
-      // Log connection with unique key
       const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
       dailyConnections.get(day).add(connectionKey);
     }
@@ -293,11 +320,12 @@ function logStats(data) {
   const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
-      console.error('Error appending to log file:', err);
+      console.error('Error appending to user log file:', err);
     }
   });
 }
 
+// Update user_counts.log with daily stats
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -307,22 +335,14 @@ function updateLogFile() {
   
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
-      console.error('Error writing to log file:', err);
+      console.error('Error writing to user log file:', err);
     } else {
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users and ${connectionCount} WebRTC connections for ${day}`);
     }
   });
 }
 
-// Initial file creation and 30-second updates for testing
-fs.writeFile(LOG_FILE, '', (err) => {
-  if (err) console.error('Error creating log file:', err);
-  else {
-    updateLogFile(); // Initial write
-    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every 30 seconds
-  }
-});
-
+// Generate random code for chat rooms
 function generateCode() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
@@ -333,6 +353,7 @@ function generateCode() {
   return result;
 }
 
+// Broadcast messages to all clients in a room
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -344,6 +365,7 @@ function broadcast(code, message) {
   }
 }
 
+// Broadcast updated random codes to all clients
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -352,4 +374,19 @@ function broadcastRandomCodes() {
   });
 }
 
-console.log(`Signaling server running on port ${process.env.PORT || 10000}`);
+// Initialize log files and periodic updates
+fs.writeFile(LOG_FILE, '', (err) => {
+  if (err) console.error('Error creating user log file:', err);
+});
+fs.writeFile(EVENT_LOG_FILE, '', (err) => {
+  if (err) console.error('Error creating event log file:', err);
+});
+updateLogFile(); // Initial write
+setInterval(updateLogFile, UPDATE_INTERVAL); // Update every 30 seconds
+
+// Start Express server (use a different port for HTTP to avoid conflict with WebSocket)
+const HTTP_PORT = process.env.HTTP_PORT || 8080;
+app.listen(HTTP_PORT, () => {
+  console.log(`HTTP server running on port ${HTTP_PORT}`);
+  console.log(`Signaling server running on port ${process.env.PORT || 10000}`);
+});

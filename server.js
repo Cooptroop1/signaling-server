@@ -53,7 +53,7 @@ app.post('/api/log', (req, res) => {
   });
 });
 
-// WebSocket server logic (unchanged from your original)
+// WebSocket server logic (unchanged)
 wss.on('connection', (ws) => {
   let clientId, code, username;
 
@@ -340,11 +340,11 @@ function logStats(data) {
 
 // Update user_counts.log
 function updateLogFile() {
-  const now = new Date();
-  const day = now.toISOString().slice(0, 10);
+  const now = Date.now();
+  const day = new Date(now).toISOString().slice(0, 10);
   const userCount = dailyUsers.get(day)?.size || 0;
   const connectionCount = dailyConnections.get(day)?.size || 0;
-  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}\n`;
+  const logEntry = `${new Date(now).toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}\n`;
   
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {

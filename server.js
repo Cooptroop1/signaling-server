@@ -12,6 +12,7 @@ const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
 const allTimeUsers = new Set(); // Track all-time unique users persistently
 const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
+const ADMIN_SECRET = 'your_secret_key_here'; // Set a secure secret key for admin access
 
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
@@ -231,6 +232,27 @@ wss.on('connection', (ws) => {
           randomCodes.delete(data.code);
           broadcastRandomCodes();
           console.log(`Removed code ${data.code} from randomCodes`);
+        }
+      }
+
+      if (data.type === 'get-stats') {
+        if (data.secret === ADMIN_SECRET) {
+          const now = new Date();
+          const day = now.toISOString().slice(0, 10);
+          let totalClients = 0;
+          rooms.forEach(room => {
+            totalClients += room.clients.size;
+          });
+          ws.send(JSON.stringify({
+            type: 'stats',
+            dailyUsers: dailyUsers.get(day)?.size || 0,
+            dailyConnections: dailyConnections.get(day)?.size || 0,
+            allTimeUsers: allTimeUsers.size,
+            activeRooms: rooms.size,
+            totalClients: totalClients
+          }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
         }
       }
 

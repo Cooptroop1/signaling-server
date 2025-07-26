@@ -9,7 +9,8 @@
   "dependencies": {
     "express": "^4.19.2",
     "ws": "^8.18.0",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "uuid": "^10.0.0"
   },
   "engines": {
     "node": "22.16.0"

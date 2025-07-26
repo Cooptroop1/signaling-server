@@ -11,6 +11,7 @@ const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
 const allTimeUsers = new Set(); // Track all-time unique users persistently
+const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
 
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
@@ -35,6 +36,7 @@ setInterval(() => {
 }, 3600000); // Every hour (3600000 ms)
 
 wss.on('connection', (ws) => {
+  const clientIp = ws._socket.remoteAddress; // Get client IP
   let clientId, code, username;
 
   ws.on('message', async (message) => {
@@ -59,12 +61,23 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'join') {
+        // IP rate limiting for joins: max 5 per minute per IP
+        if (!restrictIpRate(clientIp, 'join')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
+          return;
+        }
+
         code = data.code;
         clientId = data.clientId;
         username = data.username;
 
         if (!validateUsername(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
+          return;
+        }
+
+        if (!validateCode(code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
           return;
         }
 
@@ -187,8 +200,18 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'submit-random') {
+        // IP rate limiting for submits: max 5 per minute per IP
+        if (!restrictIpRate(clientIp, 'submit-random')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.' }));
+          return;
+        }
+
         if (data.code && !rooms.get(data.code)?.clients.size) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
+          return;
+        }
+        if (!validateCode(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
           return;
         }
         if (rooms.get(data.code)?.initiator === data.clientId) {
@@ -277,9 +300,32 @@ function restrictRate(ws) {
   return true;
 }
 
+// IP rate limiting function: max 5 actions (join/submit) per minute per IP
+function restrictIpRate(ip, action) {
+  const now = Date.now();
+  const key = `${ip}:${action}`;
+  const rateLimit = ipRateLimits.get(key) || { count: 0, startTime: now };
+  if (now - rateLimit.startTime >= 60000) {
+    rateLimit.count = 0;
+    rateLimit.startTime = now;
+  }
+  rateLimit.count += 1;
+  ipRateLimits.set(key, rateLimit);
+  if (rateLimit.count > 5) {
+    console.warn(`IP rate limit exceeded for ${action} from ${ip}: ${rateLimit.count} in 60s`);
+    return false;
+  }
+  return true;
+}
+
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
+}
+
+function validateCode(code) {
+  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+  return code && regex.test(code);
 }
 
 function logStats(data) {

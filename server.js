@@ -12,7 +12,7 @@ const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
 const allTimeUsers = new Set(); // Track all-time unique users persistently
 const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
-const ADMIN_SECRET = 'your_secret_key_here'; // Set a secure secret key for admin access
+const ADMIN_SECRET = Pig12Bannapets34Shitbits@; // Set a secure secret key for admin access
 
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {

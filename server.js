@@ -10,6 +10,29 @@ const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
 const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
+const allTimeUsers = new Set(); // Track all-time unique users persistently
+
+// Load historical unique users from log on startup
+if (fs.existsSync(LOG_FILE)) {
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
+  const lines = logContent.split('\n');
+  lines.forEach(line => {
+    const match = line.match(/Client: (\w+)/);
+    if (match) allTimeUsers.add(match[1]);
+  });
+  console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
+}
+
+// Auto-cleanup for random codes every hour
+setInterval(() => {
+  randomCodes.forEach(code => {
+    if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
+      randomCodes.delete(code);
+    }
+  });
+  broadcastRandomCodes();
+  console.log('Auto-cleaned random codes.');
+}, 3600000); // Every hour (3600000 ms)
 
 wss.on('connection', (ws) => {
   let clientId, code, username;
@@ -282,8 +305,10 @@ function logStats(data) {
       dailyConnections.set(day, new Set());
     }
     dailyUsers.get(day).add(data.clientId);
+    allTimeUsers.add(data.clientId); // Add to all-time unique users
     if (data.event === 'webrtc-connection' && data.targetId) {
       dailyUsers.get(day).add(data.targetId); // Add targetId to unique users
+      allTimeUsers.add(data.targetId); // Add to all-time unique users
       // Log connection with unique key
       const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
       dailyConnections.get(day).add(connectionKey);
@@ -303,13 +328,14 @@ function updateLogFile() {
   const day = now.toISOString().slice(0, 10);
   const userCount = dailyUsers.get(day)?.size || 0;
   const connectionCount = dailyConnections.get(day)?.size || 0;
-  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}\n`;
+  const allTimeUserCount = allTimeUsers.size;
+  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
   
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
       console.error('Error writing to log file:', err);
     } else {
-      console.log(`Updated ${LOG_FILE} with ${userCount} unique users and ${connectionCount} WebRTC connections for ${day}`);
+      console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
     }
   });
 }

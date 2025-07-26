@@ -15,6 +15,10 @@ const allTimeUsers = new Set(); // Track all-time unique users persistently
 const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'fallback_secret'; // Use env var for security
 
+// TURN credentials from env vars (set in Render dashboard)
+const TURN_USERNAME = process.env.TURN_USERNAME || 'default_username';
+const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || 'default_credential';
+
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
@@ -245,7 +249,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
           return;
         }
-        // Broadcast to all other clients in the room
+        // Broadcast to all other clients in the room (no logging of content for privacy)
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
@@ -257,7 +261,8 @@ wss.on('connection', (ws) => {
             }));
           }
         });
-        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code}`);
+        // Log only the event, not the content
+        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
       }
 
       if (data.type === 'get-stats') {

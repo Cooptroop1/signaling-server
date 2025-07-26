@@ -181,7 +181,7 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'remove-random-code') {
-        if (rooms.get(data.code)?.initiator === data.clientId) {
+        if (randomCodes.has(data.code)) {
           randomCodes.delete(data.code);
           broadcastRandomCodes();
           console.log(`Removed code ${data.code} from randomCodes`);

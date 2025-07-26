@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
@@ -12,7 +13,7 @@ const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
 const allTimeUsers = new Set(); // Track all-time unique users persistently
 const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
-const ADMIN_SECRET = 'Pig12Bannapets34Shitbits@'; // Set a secure secret key for admin access
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'fallback_secret'; // Use env var for security
 
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
@@ -52,13 +53,15 @@ wss.on('connection', (ws) => {
       console.log('Received:', data);
 
       if (data.type === 'connect') {
-        clientId = data.clientId;
+        clientId = data.clientId || uuidv4();
         if (!clientId) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid clientId' }));
           return;
         }
         ws.clientId = clientId;
         logStats({ clientId, event: 'connect' });
+        ws.send(JSON.stringify({ type: 'connected', clientId }));
+        return;
       }
 
       if (data.type === 'join') {
@@ -201,7 +204,6 @@ wss.on('connection', (ws) => {
       }
 
       if (data.type === 'submit-random') {
-        // IP rate limiting for submits: max 5 per minute per IP
         if (!restrictIpRate(clientIp, 'submit-random')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.' }));
           return;
@@ -209,10 +211,6 @@ wss.on('connection', (ws) => {
 
         if (data.code && !rooms.get(data.code)?.clients.size) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
-          return;
-        }
-        if (!validateCode(data.code)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
           return;
         }
         if (rooms.get(data.code)?.initiator === data.clientId) {
@@ -233,6 +231,34 @@ wss.on('connection', (ws) => {
           broadcastRandomCodes();
           console.log(`Removed code ${data.code} from randomCodes`);
         }
+      }
+
+      // Relay fallback handling from the new code
+      if (data.type === 'relay-message' || data.type === 'relay-image') {
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
+          return;
+        }
+        const room = rooms.get(data.code);
+        const senderId = data.clientId;
+        if (!room.clients.has(senderId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
+          return;
+        }
+        // Broadcast to all other clients in the room
+        room.clients.forEach((client, clientId) => {
+          if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify({
+              type: data.type.replace('relay-', ''), // Strip 'relay-' for client
+              messageId: data.messageId,
+              username: data.username,
+              content: data.content,
+              data: data.data,
+              timestamp: data.timestamp
+            }));
+          }
+        });
+        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code}`);
       }
 
       if (data.type === 'get-stats') {
@@ -446,4 +472,4 @@ function broadcastRandomCodes() {
   });
 }
 
-console.log(`Signaling server running on port ${process.env.PORT || 10000}`);
+console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);

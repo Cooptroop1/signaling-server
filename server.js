@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
-const uuid = require('uuid'); // Changed to full uuid require for validate
+const { v4: uuidv4 } = require('uuid');
 
 const http = require('http'); // Added for HTTP server to support WS upgrades
 
@@ -84,12 +84,7 @@ wss.on('connection', (ws) => {
       console.log('Received:', data);
 
       if (data.type === 'connect') {
-        clientId = data.clientId;
-        if (clientId && !uuid.validate(clientId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid clientId format' }));
-          return;
-        }
-        clientId = clientId || uuid.v4();
+        clientId = data.clientId || uuidv4();
         ws.clientId = clientId;
         logStats({ clientId, event: 'connect' });
         ws.send(JSON.stringify({ type: 'connected', clientId }));

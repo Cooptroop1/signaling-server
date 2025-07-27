@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto'); // Added for IP hashing
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 const rooms = new Map();
@@ -13,7 +14,10 @@ const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
 const allTimeUsers = new Set(); // Track all-time unique users persistently
 const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'fallback_secret'; // Use env var for security
+const ADMIN_SECRET = process.env.ADMIN_SECRET;
+if (!ADMIN_SECRET) {
+  throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
+}
 
 // TURN credentials from env vars (set in Render dashboard)
 const TURN_USERNAME = process.env.TURN_USERNAME || 'default_username';

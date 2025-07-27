@@ -6,8 +6,15 @@ const jwt = require('jsonwebtoken'); // New: for JWT tokens
 const validator = require('validator'); // New: for robust input sanitization
 
 const http = require('http'); // Added for HTTP server to support WS upgrades
+const https = require('https'); // New: For HTTPS server
 
-const server = http.createServer();
+const server = process.env.NODE_ENV === 'production' 
+  ? http.createServer() // Render handles TLS
+  : https.createServer({ // Local dev: Load certs
+      key: fs.readFileSync('path/to/your/private-key.pem'),
+      cert: fs.readFileSync('path/to/your/fullchain.pem')
+    });
+
 const wss = new WebSocket.Server({ server });
 
 const rooms = new Map();
@@ -26,6 +33,9 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
+
+// New: Allowed origins for WS connections (add your domain)
+const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000']; // Adjust for your prod/local
 
 // New: JWT secret for tokens
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback'; // Set in env for production
@@ -71,7 +81,15 @@ const pingInterval = setInterval(() => {
   });
 }, 30000);
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // New: Origin validation
+  const origin = req.headers.origin;
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    console.warn(`Rejected connection from invalid origin: ${origin}`);
+    ws.close(1008, 'Invalid origin');
+    return;
+  }
+
   ws.isAlive = true;
   ws.on('pong', () => {
     ws.isAlive = true;

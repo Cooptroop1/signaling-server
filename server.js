@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken'); // New: for JWT tokens
+const validator = require('validator'); // New: for robust input sanitization
 
 const http = require('http'); // Added for HTTP server to support WS upgrades
 
@@ -86,6 +87,13 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(message);
       console.log('Received:', data);
+
+      // New: Sanitize all JSON fields robustly
+      Object.keys(data).forEach(key => {
+        if (typeof data[key] === 'string') {
+          data[key] = validator.escape(validator.trim(data[key])); // Escape HTML, trim whitespace
+        }
+      });
 
       if (data.type === 'connect') {
         clientId = data.clientId || uuidv4();
@@ -324,7 +332,7 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
           return;
         }
-        // Broadcast to all other clients in the room except sender (no decryption, relay ciphertext as-is)
+        // Broadcast to all other clients in the room (no logging of content for privacy)
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({

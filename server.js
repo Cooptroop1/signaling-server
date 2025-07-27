@@ -33,8 +33,6 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
-// New: IP whitelisting for stats access (add your allowed IPs)
-const STATS_ALLOWED_IPS = ['127.0.0.1', '51.146.248.151']; // Updated with your public IP
 
 // New: Allowed origins for WS connections (add your domain)
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000']; // Adjust for your prod/local

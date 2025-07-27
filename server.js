@@ -19,6 +19,9 @@ const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
 const allTimeUsers = new Set(); // Track all-time unique users persistently
 const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
+const ipDailyLimits = new Map(); // New: Daily joins per IP
+const ipFailureCounts = new Map(); // New: Track failed attempts per IP for temporary bans
+const ipBans = new Map(); // New: Banned IPs with expiration
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -124,6 +127,12 @@ wss.on('connection', (ws) => {
         }
       }
 
+      // New: Check if IP is banned
+      if (ipBans.has(clientIp) && ipBans.get(clientIp) > Date.now()) {
+        ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
+        return;
+      }
+
       if (data.type === 'public-key') {
         // New: Handle public key from joiner, relay to initiator
         if (rooms.has(data.code)) {
@@ -142,7 +151,7 @@ wss.on('connection', (ws) => {
           const room = rooms.get(data.code);
           const targetWs = room.clients.get(data.targetId)?.ws;
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, clientId: data.clientId, code: data.code }));
+            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, clientId: data.clientId, code: data.code }));
           }
         }
         return;
@@ -152,6 +161,14 @@ wss.on('connection', (ws) => {
         // IP rate limiting for joins: max 5 per minute per IP
         if (!restrictIpRate(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
+          incrementFailure(clientIp);
+          return;
+        }
+
+        // New: Daily join limit: max 100 per day per IP
+        if (!restrictIpDaily(clientIp, 'join')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.' }));
+          incrementFailure(clientIp);
           return;
         }
 
@@ -161,11 +178,13 @@ wss.on('connection', (ws) => {
 
         if (!validateUsername(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
+          incrementFailure(clientIp);
           return;
         }
 
         if (!validateCode(code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
+          incrementFailure(clientIp);
           return;
         }
 
@@ -177,6 +196,7 @@ wss.on('connection', (ws) => {
           const room = rooms.get(code);
           if (room.clients.size >= room.maxClients) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat is full' }));
+            incrementFailure(clientIp);
             return;
           }
           // Allow rejoin if clientId matches existing client with same username
@@ -196,14 +216,17 @@ wss.on('connection', (ws) => {
               });
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId' }));
+              incrementFailure(clientIp);
               return;
             }
           } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
+            incrementFailure(clientIp);
             return;
           }
           if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline' }));
+            incrementFailure(clientIp);
             return;
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
@@ -293,11 +316,13 @@ wss.on('connection', (ws) => {
       if (data.type === 'submit-random') {
         if (!restrictIpRate(clientIp, 'submit-random')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.' }));
+          incrementFailure(clientIp);
           return;
         }
 
         if (data.code && !rooms.get(data.code)?.clients.size) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
+          incrementFailure(clientIp);
           return;
         }
         if (rooms.get(data.code)?.initiator === data.clientId) {
@@ -305,6 +330,7 @@ wss.on('connection', (ws) => {
           broadcastRandomCodes();
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board' }));
+          incrementFailure(clientIp);
         }
       }
 
@@ -324,12 +350,14 @@ wss.on('connection', (ws) => {
       if (data.type === 'relay-message' || data.type === 'relay-image') {
         if (!rooms.has(data.code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
+          incrementFailure(clientIp);
           return;
         }
         const room = rooms.get(data.code);
         const senderId = data.clientId;
         if (!room.clients.has(senderId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
+          incrementFailure(clientIp);
           return;
         }
         // Broadcast to all other clients in the room (no logging of content for privacy)
@@ -376,6 +404,7 @@ wss.on('connection', (ws) => {
     } catch (error) {
       console.error('Error processing message:', error);
       ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' }));
+      incrementFailure(clientIp);
     }
   });
 
@@ -452,6 +481,33 @@ function restrictIpRate(ip, action) {
     return false;
   }
   return true;
+}
+
+// New: Daily IP limit for joins (100/day)
+function restrictIpDaily(ip, action) {
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${ip}:${action}:${day}`;
+  const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
+  dailyLimit.count += 1;
+  ipDailyLimits.set(key, dailyLimit);
+  if (dailyLimit.count > 100) {
+    console.warn(`Daily IP limit exceeded for ${action} from ${ip}: ${dailyLimit.count} in day ${day}`);
+    return false;
+  }
+  return true;
+}
+
+// New: Increment failure count and ban IP if threshold reached
+function incrementFailure(ip) {
+  const failure = ipFailureCounts.get(ip) || { count: 0 };
+  failure.count += 1;
+  ipFailureCounts.set(ip, failure);
+  if (failure.count >= 10) {
+    const banUntil = Date.now() + 300000; // Ban for 5 minutes
+    ipBans.set(ip, banUntil);
+    console.warn(`IP ${ip} banned until ${new Date(banUntil).toISOString()} due to excessive failures`);
+    ipFailureCounts.delete(ip); // Reset after ban
+  }
 }
 
 function validateUsername(username) {

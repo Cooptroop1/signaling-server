@@ -98,7 +98,7 @@ wss.on('connection', (ws) => {
       }
 
       // New: Verify token for protected actions
-      const protectedTypes = ['join', 'leave', 'set-max-clients', 'offer', 'answer', 'candidate', 'relay-message', 'relay-image', 'submit-random'];
+      const protectedTypes = ['join', 'leave', 'set-max-clients', 'offer', 'answer', 'candidate', 'relay-message', 'relay-image', 'submit-random', 'public-key']; // Added public-key
       if (protectedTypes.includes(data.type)) {
         if (!data.token) {
           ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
@@ -114,6 +114,30 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
           return;
         }
+      }
+
+      if (data.type === 'public-key') {
+        // New: Handle public key from joiner, relay to initiator
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          const initiatorWs = room.clients.get(room.initiator)?.ws;
+          if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
+            initiatorWs.send(JSON.stringify({ type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
+          }
+        }
+        return;
+      }
+
+      if (data.type === 'encrypted-room-key') {
+        // New: Handle encrypted room key from initiator, relay to joiner
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          const targetWs = room.clients.get(data.targetId)?.ws;
+          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, clientId: data.clientId, code: data.code }));
+          }
+        }
+        return;
       }
 
       if (data.type === 'join') {
@@ -155,14 +179,6 @@ wss.on('connection', (ws) => {
               setTimeout(() => {
                 oldWs.close();
               }, 1000); // 1-second delay for graceful close
-              room.clients.delete(clientId);
-              broadcast(code, { 
-                type: 'client-disconnected', 
-                clientId, 
-                totalClients: room.clients.size, 
-                isInitiator: clientId === room.initiator 
-              });
-              room.clients.set(clientId, { ws, username });
               room.clients.delete(clientId);
               broadcast(code, { 
                 type: 'client-disconnected', 
@@ -308,15 +324,16 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
           return;
         }
-        // Broadcast to all other clients in the room (no logging of content for privacy)
+        // Broadcast to all other clients in the room except sender (no decryption, relay ciphertext as-is)
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
               type: data.type.replace('relay-', ''), // Strip 'relay-' for client
               messageId: data.messageId,
               username: data.username,
-              content: data.content, // for text
-              data: data.data // for images
+              encryptedContent: data.encryptedContent, // New: For encrypted text
+              encryptedData: data.encryptedData, // New: For encrypted images (base64)
+              iv: data.iv // New: Initialization vector for decryption
             }));
           }
         });

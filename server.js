@@ -4,6 +4,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken'); // New: for JWT tokens
 const validator = require('validator'); // New: for robust input sanitization
+const bcrypt = require('bcrypt'); // New: for hashing ADMIN_SECRET
 
 const http = require('http'); // Added for HTTP server to support WS upgrades
 const https = require('https'); // New: For HTTPS server
@@ -29,13 +30,20 @@ const ipRateLimits = new Map(); // Track IP-based rate limits for joins and subm
 const ipDailyLimits = new Map(); // New: Daily joins per IP
 const ipFailureCounts = new Map(); // New: Track failed attempts per IP for temporary bans
 const ipBans = new Map(); // New: Banned IPs with expiration
+let ADMIN_SECRET_HASH; // New: Hashed ADMIN_SECRET
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
+} else {
+  // New: Hash the ADMIN_SECRET on startup
+  bcrypt.hash(ADMIN_SECRET, 10, (err, hash) => {
+    if (err) throw new Error('Failed to hash ADMIN_SECRET');
+    ADMIN_SECRET_HASH = hash;
+  });
 }
 
-// New: Allowed origins for WS connections (add your domain)
-const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000']; // Adjust for your prod/local
+// New: IP whitelisting for stats access (add your allowed IPs)
+const STATS_ALLOWED_IPS = ['127.0.0.1', 'your-admin-ip-here']; // Example; set in env or hardcode securely
 
 // New: JWT secret for tokens
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback'; // Set in env for production
@@ -396,7 +404,16 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'get-stats') {
-        if (data.secret === ADMIN_SECRET) {
+        // New: HTTPS-only (already enforced by server setup) and IP whitelisting
+        if (!STATS_ALLOWED_IPS.includes(clientIp)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Access denied: IP not whitelisted for stats' }));
+          return;
+        }
+        bcrypt.compare(data.secret, ADMIN_SECRET_HASH, (err, result) => {
+          if (err || !result) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+            return;
+          }
           const now = new Date();
           const day = now.toISOString().slice(0, 10);
           let totalClients = 0;
@@ -411,9 +428,7 @@ wss.on('connection', (ws, req) => {
             activeRooms: rooms.size,
             totalClients: totalClients
           }));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
+        });
       }
 
       if (data.type === 'ping') {

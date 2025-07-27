@@ -41,7 +41,21 @@ setInterval(() => {
   console.log('Auto-cleaned random codes.');
 }, 3600000); // Every hour (3600000 ms)
 
+// Server-side ping to detect dead connections
+const pingInterval = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
 wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
   const clientIp = ws._socket.remoteAddress; // Get client IP
   let clientId, code, username;
 

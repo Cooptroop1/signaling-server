@@ -125,8 +125,11 @@ wss.on('connection', (ws) => {
           // Allow rejoin if clientId matches existing client with same username
           if (room.clients.has(clientId)) {
             if (room.clients.get(clientId).username === username) {
-              // Clean up old connection
-              room.clients.get(clientId).ws.close();
+              // Clean up old connection with a short delay to avoid race conditions
+              const oldWs = room.clients.get(clientId).ws;
+              setTimeout(() => {
+                oldWs.close();
+              }, 1000); // 1-second delay for graceful close
               room.clients.delete(clientId);
               broadcast(code, { 
                 type: 'client-disconnected', 

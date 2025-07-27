@@ -1,10 +1,13 @@
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
-const crypto = require('crypto'); // Added for IP hashing
+const uuid = require('uuid'); // Changed to full uuid require for validate
 
-const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
+const http = require('http'); // Added for HTTP server to support WS upgrades
+
+const server = http.createServer();
+const wss = new WebSocket.Server({ server });
+
 const rooms = new Map();
 const dailyUsers = new Map(); // Track unique clientIds per day
 const dailyConnections = new Map(); // Track WebRTC connections per day
@@ -19,9 +22,15 @@ if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
 
-// TURN credentials from env vars (set in Render dashboard)
-const TURN_USERNAME = process.env.TURN_USERNAME || 'default_username';
-const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || 'default_credential';
+// TURN credentials from env vars (set in Render dashboard) - Removed fallbacks, made required
+const TURN_USERNAME = process.env.TURN_USERNAME;
+if (!TURN_USERNAME) {
+  throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
+}
+const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
+if (!TURN_CREDENTIAL) {
+  throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
+}
 
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
@@ -75,11 +84,12 @@ wss.on('connection', (ws) => {
       console.log('Received:', data);
 
       if (data.type === 'connect') {
-        clientId = data.clientId || uuidv4();
-        if (!clientId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid clientId' }));
+        clientId = data.clientId;
+        if (clientId && !uuid.validate(clientId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid clientId format' }));
           return;
         }
+        clientId = clientId || uuid.v4();
         ws.clientId = clientId;
         logStats({ clientId, event: 'connect' });
         ws.send(JSON.stringify({ type: 'connected', clientId }));
@@ -109,7 +119,7 @@ wss.on('connection', (ws) => {
 
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
-          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true }));
+          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
           logStats({ clientId, username, code, event: 'init', totalClients: 1 });
         } else {
           const room = rooms.get(code);
@@ -141,7 +151,7 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline' }));
             return;
           }
-          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false }));
+          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
           logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
           // Log WebRTC connections for new client with all existing clients
           if (room.clients.size > 0) {
@@ -494,4 +504,7 @@ function broadcastRandomCodes() {
   });
 }
 
-console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+// Start the HTTP server (for WS upgrades; Render handles TLS for WSS)
+server.listen(process.env.PORT || 10000, () => {
+  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});

@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken'); // New: for JWT tokens
 
 const http = require('http'); // Added for HTTP server to support WS upgrades
 
@@ -21,6 +22,9 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
+
+// New: JWT secret for tokens
+const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback'; // Set in env for production
 
 // TURN credentials from env vars (set in Render dashboard) - Removed fallbacks, made required
 const TURN_USERNAME = process.env.TURN_USERNAME;
@@ -87,8 +91,29 @@ wss.on('connection', (ws) => {
         clientId = data.clientId || uuidv4();
         ws.clientId = clientId;
         logStats({ clientId, event: 'connect' });
-        ws.send(JSON.stringify({ type: 'connected', clientId }));
+        // New: Generate JWT token for the client
+        const token = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
+        ws.send(JSON.stringify({ type: 'connected', clientId, token }));
         return;
+      }
+
+      // New: Verify token for protected actions
+      const protectedTypes = ['join', 'leave', 'set-max-clients', 'offer', 'answer', 'candidate', 'relay-message', 'relay-image', 'submit-random'];
+      if (protectedTypes.includes(data.type)) {
+        if (!data.token) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
+          return;
+        }
+        try {
+          const decoded = jwt.verify(data.token, JWT_SECRET);
+          if (decoded.clientId !== data.clientId) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
+            return;
+          }
+        } catch (err) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+          return;
+        }
       }
 
       if (data.type === 'join') {
@@ -130,6 +155,14 @@ wss.on('connection', (ws) => {
               setTimeout(() => {
                 oldWs.close();
               }, 1000); // 1-second delay for graceful close
+              room.clients.delete(clientId);
+              broadcast(code, { 
+                type: 'client-disconnected', 
+                clientId, 
+                totalClients: room.clients.size, 
+                isInitiator: clientId === room.initiator 
+              });
+              room.clients.set(clientId, { ws, username });
               room.clients.delete(clientId);
               broadcast(code, { 
                 type: 'client-disconnected', 

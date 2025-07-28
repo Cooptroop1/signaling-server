@@ -3,18 +3,10 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken'); // New: for JWT tokens
-const validator = require('validator'); // New: for robust input sanitization
 
 const http = require('http'); // Added for HTTP server to support WS upgrades
-const https = require('https'); // New: For HTTPS server
 
-const server = process.env.NODE_ENV === 'production' 
-  ? http.createServer() // Render handles TLS
-  : https.createServer({ // Local dev: Load certs
-      key: fs.readFileSync('path/to/your/private-key.pem'),
-      cert: fs.readFileSync('path/to/your/fullchain.pem')
-    });
-
+const server = http.createServer();
 const wss = new WebSocket.Server({ server });
 
 const rooms = new Map();
@@ -26,16 +18,10 @@ const randomCodes = new Set(); // Store unique codes for random matching
 const rateLimits = new Map(); // Track message rate limits per clientId
 const allTimeUsers = new Set(); // Track all-time unique users persistently
 const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
-const ipDailyLimits = new Map(); // New: Daily joins per IP
-const ipFailureCounts = new Map(); // New: Track failed attempts per IP for temporary bans
-const ipBans = new Map(); // New: Banned IPs with expiration
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
-
-// New: Allowed origins for WS connections (add your domain)
-const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000']; // Adjust for your prod/local
 
 // New: JWT secret for tokens
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback'; // Set in env for production
@@ -81,15 +67,7 @@ const pingInterval = setInterval(() => {
   });
 }, 30000);
 
-wss.on('connection', (ws, req) => {
-  // New: Origin validation
-  const origin = req.headers.origin;
-  if (!ALLOWED_ORIGINS.includes(origin)) {
-    console.warn(`Rejected connection from invalid origin: ${origin}`);
-    ws.close(1008, 'Invalid origin');
-    return;
-  }
-
+wss.on('connection', (ws) => {
   ws.isAlive = true;
   ws.on('pong', () => {
     ws.isAlive = true;
@@ -109,13 +87,6 @@ wss.on('connection', (ws, req) => {
       const data = JSON.parse(message);
       console.log('Received:', data);
 
-      // New: Sanitize all JSON fields robustly
-      Object.keys(data).forEach(key => {
-        if (typeof data[key] === 'string') {
-          data[key] = validator.escape(validator.trim(data[key])); // Escape HTML, trim whitespace
-        }
-      });
-
       if (data.type === 'connect') {
         clientId = data.clientId || uuidv4();
         ws.clientId = clientId;
@@ -127,7 +98,7 @@ wss.on('connection', (ws, req) => {
       }
 
       // New: Verify token for protected actions
-      const protectedTypes = ['join', 'leave', 'set-max-clients', 'offer', 'answer', 'candidate', 'relay-message', 'relay-image', 'submit-random', 'public-key']; // Added public-key
+      const protectedTypes = ['join', 'leave', 'set-max-clients', 'offer', 'answer', 'candidate', 'relay-message', 'relay-image', 'submit-random'];
       if (protectedTypes.includes(data.type)) {
         if (!data.token) {
           ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
@@ -145,48 +116,10 @@ wss.on('connection', (ws, req) => {
         }
       }
 
-      // New: Check if IP is banned
-      if (ipBans.has(clientIp) && ipBans.get(clientIp) > Date.now()) {
-        ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
-        return;
-      }
-
-      if (data.type === 'public-key') {
-        // New: Handle public key from joiner, relay to initiator
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const initiatorWs = room.clients.get(room.initiator)?.ws;
-          if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
-            initiatorWs.send(JSON.stringify({ type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
-          }
-        }
-        return;
-      }
-
-      if (data.type === 'encrypted-room-key') {
-        // New: Handle encrypted room key from initiator, relay to joiner
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const targetWs = room.clients.get(data.targetId)?.ws;
-          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, clientId: data.clientId, code: data.code }));
-          }
-        }
-        return;
-      }
-
       if (data.type === 'join') {
         // IP rate limiting for joins: max 5 per minute per IP
         if (!restrictIpRate(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
-          incrementFailure(clientIp);
-          return;
-        }
-
-        // New: Daily join limit: max 100 per day per IP
-        if (!restrictIpDaily(clientIp, 'join')) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.' }));
-          incrementFailure(clientIp);
           return;
         }
 
@@ -196,13 +129,11 @@ wss.on('connection', (ws, req) => {
 
         if (!validateUsername(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
-          incrementFailure(clientIp);
           return;
         }
 
         if (!validateCode(code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
-          incrementFailure(clientIp);
           return;
         }
 
@@ -214,7 +145,6 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(code);
           if (room.clients.size >= room.maxClients) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat is full' }));
-            incrementFailure(clientIp);
             return;
           }
           // Allow rejoin if clientId matches existing client with same username
@@ -232,19 +162,24 @@ wss.on('connection', (ws, req) => {
                 totalClients: room.clients.size, 
                 isInitiator: clientId === room.initiator 
               });
+              room.clients.set(clientId, { ws, username });
+              room.clients.delete(clientId);
+              broadcast(code, { 
+                type: 'client-disconnected', 
+                clientId, 
+                totalClients: room.clients.size, 
+                isInitiator: clientId === room.initiator 
+              });
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId' }));
-              incrementFailure(clientIp);
               return;
             }
           } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
-            incrementFailure(clientIp);
             return;
           }
           if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline' }));
-            incrementFailure(clientIp);
             return;
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
@@ -334,13 +269,11 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'submit-random') {
         if (!restrictIpRate(clientIp, 'submit-random')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.' }));
-          incrementFailure(clientIp);
           return;
         }
 
         if (data.code && !rooms.get(data.code)?.clients.size) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
-          incrementFailure(clientIp);
           return;
         }
         if (rooms.get(data.code)?.initiator === data.clientId) {
@@ -348,7 +281,6 @@ wss.on('connection', (ws, req) => {
           broadcastRandomCodes();
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board' }));
-          incrementFailure(clientIp);
         }
       }
 
@@ -368,14 +300,12 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'relay-message' || data.type === 'relay-image') {
         if (!rooms.has(data.code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
-          incrementFailure(clientIp);
           return;
         }
         const room = rooms.get(data.code);
         const senderId = data.clientId;
         if (!room.clients.has(senderId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
-          incrementFailure(clientIp);
           return;
         }
         // Broadcast to all other clients in the room (no logging of content for privacy)
@@ -385,9 +315,8 @@ wss.on('connection', (ws, req) => {
               type: data.type.replace('relay-', ''), // Strip 'relay-' for client
               messageId: data.messageId,
               username: data.username,
-              encryptedContent: data.encryptedContent, // New: For encrypted text
-              encryptedData: data.encryptedData, // New: For encrypted images (base64)
-              iv: data.iv // New: Initialization vector for decryption
+              content: data.content, // for text
+              data: data.data // for images
             }));
           }
         });
@@ -396,16 +325,7 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'get-stats') {
-        // New: HTTPS-only (already enforced by server setup) and IP whitelisting
-        if (!STATS_ALLOWED_IPS.includes(clientIp)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Access denied: IP not whitelisted for stats' }));
-          return;
-        }
-        bcrypt.compare(data.secret, ADMIN_SECRET_HASH, (err, result) => {
-          if (err || !result) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-            return;
-          }
+        if (data.secret === ADMIN_SECRET) {
           const now = new Date();
           const day = now.toISOString().slice(0, 10);
           let totalClients = 0;
@@ -420,7 +340,9 @@ wss.on('connection', (ws, req) => {
             activeRooms: rooms.size,
             totalClients: totalClients
           }));
-        });
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
       }
 
       if (data.type === 'ping') {
@@ -429,7 +351,6 @@ wss.on('connection', (ws, req) => {
     } catch (error) {
       console.error('Error processing message:', error);
       ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' }));
-      incrementFailure(clientIp);
     }
   });
 
@@ -506,33 +427,6 @@ function restrictIpRate(ip, action) {
     return false;
   }
   return true;
-}
-
-// New: Daily IP limit for joins (100/day)
-function restrictIpDaily(ip, action) {
-  const day = new Date().toISOString().slice(0, 10);
-  const key = `${ip}:${action}:${day}`;
-  const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
-  dailyLimit.count += 1;
-  ipDailyLimits.set(key, dailyLimit);
-  if (dailyLimit.count > 100) {
-    console.warn(`Daily IP limit exceeded for ${action} from ${ip}: ${dailyLimit.count} in day ${day}`);
-    return false;
-  }
-  return true;
-}
-
-// New: Increment failure count and ban IP if threshold reached
-function incrementFailure(ip) {
-  const failure = ipFailureCounts.get(ip) || { count: 0 };
-  failure.count += 1;
-  ipFailureCounts.set(ip, failure);
-  if (failure.count >= 10) {
-    const banUntil = Date.now() + 300000; // Ban for 5 minutes
-    ipBans.set(ip, banUntil);
-    console.warn(`IP ${ip} banned until ${new Date(banUntil).toISOString()} due to excessive failures`);
-    ipFailureCounts.delete(ip); // Reset after ban
-  }
 }
 
 function validateUsername(username) {

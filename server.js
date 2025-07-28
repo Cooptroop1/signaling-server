@@ -1,17 +1,16 @@
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const jwt = require('jsonwebtoken'); // New: for JWT tokens
-const validator = require('validator'); // New: for robust input sanitization
+const jwt = require('jsonwebtoken');
+const validator = require('validator');
 
-const http = require('http'); // Added for HTTP server to support WS upgrades
-const https = require('https'); // New: For HTTPS server
+const http = require('http');
+const https = require('https');
 
 const server = process.env.NODE_ENV === 'production' 
-  ? http.createServer() // Render handles TLS
-  : https.createServer({ // Local dev: Load certs
+  ? http.createServer()
+  : https.createServer({
       key: fs.readFileSync('path/to/your/private-key.pem'),
       cert: fs.readFileSync('path/to/your/fullchain.pem')
     });
@@ -19,29 +18,28 @@ const server = process.env.NODE_ENV === 'production'
 const wss = new WebSocket.Server({ server });
 
 const rooms = new Map();
-const dailyUsers = new Map(); // Track unique clientIds per day
-const dailyConnections = new Map(); // Track WebRTC connections per day
+const dailyUsers = new Map();
+const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const UPDATE_INTERVAL = 30000; // 30 seconds in milliseconds for testing
-const randomCodes = new Set(); // Store unique codes for random matching
-const rateLimits = new Map(); // Track message rate limits per clientId
-const allTimeUsers = new Set(); // Track all-time unique users persistently
-const ipRateLimits = new Map(); // Track IP-based rate limits for joins and submits
-const ipDailyLimits = new Map(); // New: Daily joins per IP
-const ipFailureCounts = new Map(); // New: Track failed attempts per IP for temporary bans
-const ipBans = new Map(); // New: Banned IPs with expiration
+const UPDATE_INTERVAL = 30000;
+const randomCodes = new Set();
+const rateLimits = new Map();
+const allTimeUsers = new Set();
+const ipRateLimits = new Map();
+const ipDailyLimits = new Map();
+const ipFailureCounts = new Map();
+const ipBans = new Map();
+const revokedTokens = new Map(); // New: Blacklist for revoked tokens
+
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
 
-// New: Allowed origins for WS connections (add your domain)
-const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000']; // Adjust for your prod/local
+const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000'];
 
-// New: JWT secret for tokens
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback'; // Set in env for production
+const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback';
 
-// TURN credentials from env vars (set in Render dashboard) - Removed fallbacks, made required
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
   throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
@@ -71,7 +69,7 @@ setInterval(() => {
   });
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
-}, 3600000); // Every hour (3600000 ms)
+}, 3600000);
 
 // Server-side ping to detect dead connections
 const pingInterval = setInterval(() => {
@@ -82,8 +80,18 @@ const pingInterval = setInterval(() => {
   });
 }, 30000);
 
+// New: Cleanup expired revoked tokens
+setInterval(() => {
+  const now = Date.now();
+  revokedTokens.forEach((expiry, token) => {
+    if (expiry < now) {
+      revokedTokens.delete(token);
+    }
+  });
+  console.log(`Cleaned up expired revoked tokens. Remaining: ${revokedTokens.size}`);
+}, 3600000); // Every hour
+
 wss.on('connection', (ws, req) => {
-  // New: Origin validation
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
     console.warn(`Rejected connection from invalid origin: ${origin}`);
@@ -96,7 +104,7 @@ wss.on('connection', (ws, req) => {
     ws.isAlive = true;
   });
 
-  const clientIp = ws._socket.remoteAddress; // Get client IP
+  const clientIp = ws._socket.remoteAddress;
   let clientId, code, username;
 
   ws.on('message', async (message) => {
@@ -113,23 +121,12 @@ wss.on('connection', (ws, req) => {
       // New: Sanitize all JSON fields robustly
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string') {
-          data[key] = validator.escape(validator.trim(data[key])); // Escape HTML, trim whitespace
+          data[key] = validator.escape(validator.trim(data[key]));
         }
       });
 
-      if (data.type === 'connect') {
-        clientId = data.clientId || uuidv4();
-        ws.clientId = clientId;
-        logStats({ clientId, event: 'connect' });
-        // New: Generate JWT token for the client
-        const token = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
-        ws.send(JSON.stringify({ type: 'connected', clientId, token }));
-        return;
-      }
-
-      // New: Verify token for protected actions
-      const protectedTypes = ['join', 'leave', 'set-max-clients', 'offer', 'answer', 'candidate', 'relay-message', 'relay-image', 'submit-random', 'public-key']; // Added public-key
-      if (protectedTypes.includes(data.type)) {
+      // New: Verify token for all messages except 'connect'
+      if (data.type !== 'connect') {
         if (!data.token) {
           ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
           return;
@@ -138,6 +135,10 @@ wss.on('connection', (ws, req) => {
           const decoded = jwt.verify(data.token, JWT_SECRET);
           if (decoded.clientId !== data.clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
+            return;
+          }
+          if (revokedTokens.has(data.token)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
             return;
           }
         } catch (err) {
@@ -152,8 +153,44 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      if (data.type === 'connect') {
+        clientId = data.clientId || uuidv4();
+        ws.clientId = clientId;
+        logStats({ clientId, event: 'connect' });
+        // New: Generate access and refresh tokens
+        const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '15m' });
+        const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '24h' });
+        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+        return;
+      }
+
+      if (data.type === 'refresh-token') {
+        // New: Handle refresh token request
+        if (!data.refreshToken) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Missing refresh token' }));
+          return;
+        }
+        try {
+          const decoded = jwt.verify(data.refreshToken, JWT_SECRET);
+          if (decoded.clientId !== data.clientId) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
+            return;
+          }
+          if (revokedTokens.has(data.refreshToken)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
+            return;
+          }
+          // Generate new access token
+          const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '15m' });
+          ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken }));
+        } catch (err) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+          return;
+        }
+        return;
+      }
+
       if (data.type === 'public-key') {
-        // New: Handle public key from joiner, relay to initiator
         if (rooms.has(data.code)) {
           const room = rooms.get(data.code);
           const initiatorWs = room.clients.get(room.initiator)?.ws;
@@ -165,7 +202,6 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'encrypted-room-key') {
-        // New: Handle encrypted room key from initiator, relay to joiner
         if (rooms.has(data.code)) {
           const room = rooms.get(data.code);
           const targetWs = room.clients.get(data.targetId)?.ws;
@@ -177,14 +213,12 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'join') {
-        // IP rate limiting for joins: max 5 per minute per IP
         if (!restrictIpRate(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
           incrementFailure(clientIp);
           return;
         }
 
-        // New: Daily join limit: max 100 per day per IP
         if (!restrictIpDaily(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.' }));
           incrementFailure(clientIp);
@@ -218,14 +252,12 @@ wss.on('connection', (ws, req) => {
             incrementFailure(clientIp);
             return;
           }
-          // Allow rejoin if clientId matches existing client with same username
           if (room.clients.has(clientId)) {
             if (room.clients.get(clientId).username === username) {
-              // Clean up old connection with a short delay to avoid race conditions
               const oldWs = room.clients.get(clientId).ws;
               setTimeout(() => {
                 oldWs.close();
-              }, 1000); // 1-second delay for graceful close
+              }, 1000);
               room.clients.delete(clientId);
               broadcast(code, { 
                 type: 'client-disconnected', 
@@ -250,7 +282,6 @@ wss.on('connection', (ws, req) => {
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
           logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
-          // Log WebRTC connections for new client with all existing clients
           if (room.clients.size > 0) {
             room.clients.forEach((_, existingClientId) => {
               if (existingClientId !== clientId) {
@@ -279,9 +310,20 @@ wss.on('connection', (ws, req) => {
           const isInitiator = data.clientId === room.initiator;
           room.clients.delete(data.clientId);
           logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
+          // New: Revoke access and refresh tokens
+          if (data.token) {
+            const decoded = jwt.verify(data.token, JWT_SECRET, { ignoreExpiration: true });
+            const expiry = decoded.exp * 1000; // Convert to ms
+            revokedTokens.set(data.token, expiry);
+            if (data.refreshToken) {
+              const refreshDecoded = jwt.verify(data.refreshToken, JWT_SECRET, { ignoreExpiration: true });
+              revokedTokens.set(data.refreshToken, refreshDecoded.exp * 1000);
+            }
+          }
+          rateLimits.delete(data.clientId);
           if (room.clients.size === 0 || isInitiator) {
             rooms.delete(data.code);
-            randomCodes.delete(data.code); // Remove code from random list if room empties or initiator leaves
+            randomCodes.delete(data.code);
             broadcast(data.code, { 
               type: 'client-disconnected', 
               clientId: data.clientId, 
@@ -365,7 +407,6 @@ wss.on('connection', (ws, req) => {
         }
       }
 
-      // Relay fallback handling from the new code
       if (data.type === 'relay-message' || data.type === 'relay-image') {
         if (!rooms.has(data.code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
@@ -379,20 +420,18 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        // Broadcast to all other clients in the room (no logging of content for privacy)
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
-              type: data.type.replace('relay-', ''), // Strip 'relay-' for client
+              type: data.type.replace('relay-', ''),
               messageId: data.messageId,
               username: data.username,
-              encryptedContent: data.encryptedContent, // New: For encrypted text
-              encryptedData: data.encryptedData, // New: For encrypted images (base64)
-              iv: data.iv // New: Initialization vector for decryption
+              encryptedContent: data.encryptedContent,
+              encryptedData: data.encryptedData,
+              iv: data.iv
             }));
           }
         });
-        // Log only the event, not the content
         console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
       }
 
@@ -432,11 +471,20 @@ wss.on('connection', (ws, req) => {
       const room = rooms.get(ws.code);
       const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
-      rateLimits.delete(ws.clientId); // Clear rate limit on disconnect
+      rateLimits.delete(ws.clientId);
+      // New: Revoke access and refresh tokens on disconnect
+      if (ws.accessToken) {
+        const decoded = jwt.verify(ws.accessToken, JWT_SECRET, { ignoreExpiration: true });
+        revokedTokens.set(ws.accessToken, decoded.exp * 1000);
+      }
+      if (ws.refreshToken) {
+        const decoded = jwt.verify(ws.refreshToken, JWT_SECRET, { ignoreExpiration: true });
+        revokedTokens.set(ws.refreshToken, decoded.exp * 1000);
+      }
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
-        randomCodes.delete(ws.code); // Clean up random code on room closure or initiator disconnect
+        randomCodes.delete(ws.code);
         broadcast(ws.code, { 
           type: 'client-disconnected', 
           clientId: ws.clientId, 
@@ -468,7 +516,7 @@ wss.on('connection', (ws, req) => {
 
 // Rate limiting function: 50 messages per minute per client
 function restrictRate(ws) {
-  if (!ws.clientId) return true; // Allow initial connect message
+  if (!ws.clientId) return true;
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
@@ -522,10 +570,10 @@ function incrementFailure(ip) {
   failure.count += 1;
   ipFailureCounts.set(ip, failure);
   if (failure.count >= 10) {
-    const banUntil = Date.now() + 300000; // Ban for 5 minutes
+    const banUntil = Date.now() + 300000;
     ipBans.set(ip, banUntil);
     console.warn(`IP ${ip} banned until ${new Date(banUntil).toISOString()} due to excessive failures`);
-    ipFailureCounts.delete(ip); // Reset after ban
+    ipFailureCounts.delete(ip);
   }
 }
 
@@ -545,7 +593,7 @@ function logStats(data) {
   const stats = {
     clientId: data.clientId,
     username: data.username || '',
-    targetId: data.targetId || '', // For webrtc-connection events
+    targetId: data.targetId || '',
     code: data.code || '',
     event: data.event || '',
     totalClients: data.totalClients || 0,
@@ -562,11 +610,10 @@ function logStats(data) {
       dailyConnections.set(day, new Set());
     }
     dailyUsers.get(day).add(data.clientId);
-    allTimeUsers.add(data.clientId); // Add to all-time unique users
+    allTimeUsers.add(data.clientId);
     if (data.event === 'webrtc-connection' && data.targetId) {
-      dailyUsers.get(day).add(data.targetId); // Add targetId to unique users
-      allTimeUsers.add(data.targetId); // Add to all-time unique users
-      // Log connection with unique key
+      dailyUsers.get(day).add(data.targetId);
+      allTimeUsers.add(data.targetId);
       const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
       dailyConnections.get(day).add(connectionKey);
     }
@@ -597,12 +644,11 @@ function updateLogFile() {
   });
 }
 
-// Initial file creation and 30-second updates for testing
 fs.writeFile(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
-    updateLogFile(); // Initial write
-    setInterval(updateLogFile, UPDATE_INTERVAL); // Update every 30 seconds
+    updateLogFile();
+    setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
 
@@ -635,7 +681,6 @@ function broadcastRandomCodes() {
   });
 }
 
-// Start the HTTP server (for WS upgrades; Render handles TLS for WSS)
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });

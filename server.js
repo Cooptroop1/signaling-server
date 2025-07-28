@@ -29,7 +29,7 @@ const ipRateLimits = new Map();
 const ipDailyLimits = new Map();
 const ipFailureCounts = new Map();
 const ipBans = new Map();
-const revokedTokens = new Map(); // New: Blacklist for revoked tokens
+const revokedTokens = new Map();
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
@@ -80,7 +80,7 @@ const pingInterval = setInterval(() => {
   });
 }, 30000);
 
-// New: Cleanup expired revoked tokens
+// Cleanup expired revoked tokens
 setInterval(() => {
   const now = Date.now();
   revokedTokens.forEach((expiry, token) => {
@@ -89,7 +89,7 @@ setInterval(() => {
     }
   });
   console.log(`Cleaned up expired revoked tokens. Remaining: ${revokedTokens.size}`);
-}, 3600000); // Every hour
+}, 3600000);
 
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
@@ -108,7 +108,6 @@ wss.on('connection', (ws, req) => {
   let clientId, code, username;
 
   ws.on('message', async (message) => {
-    // Rate limiting: 50 messages per minute per client
     if (!restrictRate(ws)) {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
       return;
@@ -118,14 +117,12 @@ wss.on('connection', (ws, req) => {
       const data = JSON.parse(message);
       console.log('Received:', data);
 
-      // New: Sanitize all JSON fields robustly
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string') {
           data[key] = validator.escape(validator.trim(data[key]));
         }
       });
 
-      // New: Verify token for all messages except 'connect'
       if (data.type !== 'connect') {
         if (!data.token) {
           ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
@@ -147,7 +144,6 @@ wss.on('connection', (ws, req) => {
         }
       }
 
-      // New: Check if IP is banned
       if (ipBans.has(clientIp) && ipBans.get(clientIp) > Date.now()) {
         ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
         return;
@@ -157,7 +153,6 @@ wss.on('connection', (ws, req) => {
         clientId = data.clientId || uuidv4();
         ws.clientId = clientId;
         logStats({ clientId, event: 'connect' });
-        // New: Generate access and refresh tokens
         const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '15m' });
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '24h' });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
@@ -165,7 +160,6 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'refresh-token') {
-        // New: Handle refresh token request
         if (!data.refreshToken) {
           ws.send(JSON.stringify({ type: 'error', message: 'Missing refresh token' }));
           return;
@@ -180,7 +174,6 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
             return;
           }
-          // Generate new access token
           const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '15m' });
           ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken }));
         } catch (err) {
@@ -310,10 +303,9 @@ wss.on('connection', (ws, req) => {
           const isInitiator = data.clientId === room.initiator;
           room.clients.delete(data.clientId);
           logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
-          // New: Revoke access and refresh tokens
           if (data.token) {
             const decoded = jwt.verify(data.token, JWT_SECRET, { ignoreExpiration: true });
-            const expiry = decoded.exp * 1000; // Convert to ms
+            const expiry = decoded.exp * 1000;
             revokedTokens.set(data.token, expiry);
             if (data.refreshToken) {
               const refreshDecoded = jwt.verify(data.refreshToken, JWT_SECRET, { ignoreExpiration: true });
@@ -408,6 +400,14 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'relay-message' || data.type === 'relay-image') {
+        // New: Limit relay payloads to 10KB (base64 length check)
+        const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
+        if (payload && payload.length > 13653) { // ~10KB base64 = 13653 chars (10*1024*4/3)
+          ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 10KB)' }));
+          incrementFailure(clientIp);
+          return;
+        }
+
         if (!rooms.has(data.code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
           incrementFailure(clientIp);
@@ -472,15 +472,6 @@ wss.on('connection', (ws, req) => {
       const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
       rateLimits.delete(ws.clientId);
-      // New: Revoke access and refresh tokens on disconnect
-      if (ws.accessToken) {
-        const decoded = jwt.verify(ws.accessToken, JWT_SECRET, { ignoreExpiration: true });
-        revokedTokens.set(ws.accessToken, decoded.exp * 1000);
-      }
-      if (ws.refreshToken) {
-        const decoded = jwt.verify(ws.refreshToken, JWT_SECRET, { ignoreExpiration: true });
-        revokedTokens.set(ws.refreshToken, decoded.exp * 1000);
-      }
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
@@ -550,7 +541,7 @@ function restrictIpRate(ip, action) {
   return true;
 }
 
-// New: Daily IP limit for joins (100/day)
+// Daily IP limit for joins (100/day)
 function restrictIpDaily(ip, action) {
   const day = new Date().toISOString().slice(0, 10);
   const key = `${ip}:${action}:${day}`;
@@ -564,11 +555,15 @@ function restrictIpDaily(ip, action) {
   return true;
 }
 
-// New: Increment failure count and ban IP if threshold reached
+// Increment failure count and ban IP if threshold reached
 function incrementFailure(ip) {
   const failure = ipFailureCounts.get(ip) || { count: 0 };
   failure.count += 1;
   ipFailureCounts.set(ip, failure);
+  // New: Log anomalies for high failure rates
+  if (failure.count % 5 === 0) {
+    console.warn(`High failure rate for IP ${ip}: ${failure.count} failures`);
+  }
   if (failure.count >= 10) {
     const banUntil = Date.now() + 300000;
     ipBans.set(ip, banUntil);

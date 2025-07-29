@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const validator = require('validator');
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto'); // Added for IP hashing
 
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
@@ -60,9 +61,13 @@ if (!TURN_CREDENTIAL) {
 // Validate base64 string
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
-  // Base64 regex: A-Z, a-z, 0-9, +, /, = (padded to multiple of 4)
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   return base64Regex.test(str) && str.length % 4 === 0;
+}
+
+// Hash IP address for logging
+function hashIp(ip) {
+  return crypto.createHash('sha256').update(ip).digest('hex');
 }
 
 // Load historical unique users from log on startup
@@ -121,6 +126,7 @@ wss.on('connection', (ws, req) => {
   });
 
   const clientIp = ws._socket.remoteAddress;
+  const hashedIp = hashIp(clientIp); // Hash IP for logging
   let clientId, code, username;
 
   ws.on('message', async (message) => {
@@ -170,7 +176,7 @@ wss.on('connection', (ws, req) => {
         }
       }
 
-      if (ipBans.has(clientIp) && ipBans.get(clientIp).expiry > Date.now()) {
+      if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) { // Use hashed IP
         ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
         return;
       }
@@ -178,7 +184,7 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'connect') {
         clientId = data.clientId || uuidv4();
         ws.clientId = clientId;
-        logStats({ clientId, event: 'connect' });
+        logStats({ clientId, event: 'connect', hashedIp }); // Pass hashed IP
         const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '15m' });
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '24h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
@@ -265,7 +271,7 @@ wss.on('connection', (ws, req) => {
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
-          logStats({ clientId, username, code, event: 'init', totalClients: 1 });
+          logStats({ clientId, username, code, event: 'init', totalClients: 1, hashedIp });
         } else {
           const room = rooms.get(code);
           if (room.clients.size >= room.maxClients) {
@@ -302,7 +308,7 @@ wss.on('connection', (ws, req) => {
             return;
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
-          logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
+          logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1, hashedIp });
           if (room.clients.size > 0) {
             room.clients.forEach((_, existingClientId) => {
               if (existingClientId !== clientId) {
@@ -311,7 +317,8 @@ wss.on('connection', (ws, req) => {
                   targetId: existingClientId,
                   code,
                   event: 'webrtc-connection',
-                  totalClients: room.clients.size + 1
+                  totalClients: room.clients.size + 1,
+                  hashedIp
                 });
               }
             });
@@ -330,7 +337,7 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(data.code);
           const isInitiator = data.clientId === room.initiator;
           room.clients.delete(data.clientId);
-          logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
+          logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator, hashedIp });
           if (data.token) {
             const decoded = jwt.verify(data.token, JWT_SECRET, { ignoreExpiration: true });
             const expiry = decoded.exp * 1000;
@@ -378,7 +385,7 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(data.code);
           room.maxClients = Math.min(data.maxClients, 10);
           broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
-          logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
+          logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size, hashedIp });
         }
       }
 
@@ -430,7 +437,7 @@ wss.on('connection', (ws, req) => {
 
       if (data.type === 'relay-message' || data.type === 'relay-image') {
         const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
-        if (payload && payload.length > 13653) { // ~10KB base64 = 13653 chars (10*1024*4/3)
+        if (payload && payload.length > 13653) {
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 10KB)' }));
           incrementFailure(clientIp);
           return;
@@ -518,7 +525,7 @@ wss.on('connection', (ws, req) => {
       const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
       rateLimits.delete(ws.clientId);
-      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
+      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator, hashedIp });
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
         randomCodes.delete(ws.code);
@@ -571,8 +578,9 @@ function restrictRate(ws) {
 
 // IP rate limiting function: max 5 actions (join/submit) per minute per IP
 function restrictIpRate(ip, action) {
+  const hashedIp = hashIp(ip); // Hash IP
   const now = Date.now();
-  const key = `${ip}:${action}`;
+  const key = `${hashedIp}:${action}`;
   const rateLimit = ipRateLimits.get(key) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
     rateLimit.count = 0;
@@ -581,7 +589,7 @@ function restrictIpRate(ip, action) {
   rateLimit.count += 1;
   ipRateLimits.set(key, rateLimit);
   if (rateLimit.count > 5) {
-    console.warn(`IP rate limit exceeded for ${action} from ${ip}: ${rateLimit.count} in 60s`);
+    console.warn(`IP rate limit exceeded for ${action} from hashed IP: ${hashedIp}: ${rateLimit.count} in 60s`);
     return false;
   }
   return true;
@@ -589,13 +597,14 @@ function restrictIpRate(ip, action) {
 
 // Daily IP limit for joins (100/day)
 function restrictIpDaily(ip, action) {
+  const hashedIp = hashIp(ip); // Hash IP
   const day = new Date().toISOString().slice(0, 10);
-  const key = `${ip}:${action}:${day}`;
+  const key = `${hashedIp}:${action}:${day}`;
   const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
   dailyLimit.count += 1;
   ipDailyLimits.set(key, dailyLimit);
   if (dailyLimit.count > 100) {
-    console.warn(`Daily IP limit exceeded for ${action} from ${ip}: ${dailyLimit.count} in day ${day}`);
+    console.warn(`Daily IP limit exceeded for ${action} from hashed IP: ${hashedIp}: ${dailyLimit.count} in day ${day}`);
     return false;
   }
   return true;
@@ -603,29 +612,29 @@ function restrictIpDaily(ip, action) {
 
 // Increment failure count and ban IP with exponential duration if threshold reached
 function incrementFailure(ip) {
-  const failure = ipFailureCounts.get(ip) || { count: 0, banLevel: 0 };
+  const hashedIp = hashIp(ip); // Hash IP
+  const failure = ipFailureCounts.get(hashedIp) || { count: 0, banLevel: 0 };
   failure.count += 1;
-  ipFailureCounts.set(ip, failure);
+  ipFailureCounts.set(hashedIp, failure);
   if (failure.count % 5 === 0) {
-    console.warn(`High failure rate for IP ${ip}: ${failure.count} failures`);
+    console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
   }
   if (failure.count >= 10) {
-    // Exponential ban durations: 5min, 30min, 1hr
-    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]; // 5min, 30min, 1hr
-    failure.banLevel = Math.min(failure.banLevel + 1, 2); // Cap at level 2 (1hr)
+    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+    failure.banLevel = Math.min(failure.banLevel + 1, 2);
     const duration = banDurations[failure.banLevel];
     const expiry = Date.now() + duration;
-    ipBans.set(ip, { expiry, banLevel: failure.banLevel });
+    ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
     const timestamp = new Date().toISOString();
-    const banLogEntry = `${timestamp} - IP Banned: ${ip}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+    const banLogEntry = `${timestamp} - IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
     fs.appendFile(LOG_FILE, banLogEntry, (err) => {
       if (err) {
         console.error('Error appending ban log:', err);
       } else {
-        console.warn(`IP ${ip} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+        console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
       }
     });
-    ipFailureCounts.delete(ip); // Reset failure count after ban
+    ipFailureCounts.delete(hashedIp);
   }
 }
 
@@ -650,6 +659,7 @@ function logStats(data) {
     event: data.event || '',
     totalClients: data.totalClients || 0,
     isInitiator: data.isInitiator || false,
+    hashedIp: data.hashedIp || '', // Include hashed IP
     timestamp,
     day
   };
@@ -671,7 +681,7 @@ function logStats(data) {
     }
   }
 
-  const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
+  const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}, HashedIP: ${stats.hashedIp}\n`;
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
       console.error('Error appending to log file:', err);

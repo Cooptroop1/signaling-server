@@ -4,16 +4,23 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const validator = require('validator');
-
 const http = require('http');
 const https = require('https');
 
-const server = process.env.NODE_ENV === 'production' 
-  ? http.createServer()
-  : https.createServer({
-      key: fs.readFileSync('path/to/your/private-key.pem'),
-      cert: fs.readFileSync('path/to/your/fullchain.pem')
-    });
+// Check for certificate files for local HTTPS
+const CERT_KEY_PATH = 'path/to/your/private-key.pem';
+const CERT_PATH = 'path/to/your/fullchain.pem';
+let server;
+if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
+  server = http.createServer();
+  console.log('Using HTTP server (production or missing certificates)');
+} else {
+  server = https.createServer({
+    key: fs.readFileSync(CERT_KEY_PATH),
+    cert: fs.readFileSync(CERT_PATH)
+  });
+  console.log('Using HTTPS server for local development');
+}
 
 const wss = new WebSocket.Server({ server });
 
@@ -30,6 +37,7 @@ const ipDailyLimits = new Map();
 const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
+const clientTokens = new Map();
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
@@ -47,6 +55,14 @@ if (!TURN_USERNAME) {
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
 if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
+}
+
+// Validate base64 string
+function isValidBase64(str) {
+  if (typeof str !== 'string') return false;
+  // Base64 regex: A-Z, a-z, 0-9, +, /, = (padded to multiple of 4)
+  const base64Regex = /^[A-Za-z0-9+/=]+$/;
+  return base64Regex.test(str) && str.length % 4 === 0;
 }
 
 // Load historical unique users from log on startup
@@ -117,11 +133,21 @@ wss.on('connection', (ws, req) => {
       const data = JSON.parse(message);
       console.log('Received:', data);
 
+      // Sanitize string fields, but skip publicKey for public-key messages
       Object.keys(data).forEach(key => {
-        if (typeof data[key] === 'string') {
+        if (typeof data[key] === 'string' && !(data.type === 'public-key' && key === 'publicKey')) {
           data[key] = validator.escape(validator.trim(data[key]));
         }
       });
+
+      // Validate publicKey for public-key messages
+      if (data.type === 'public-key' && data.publicKey) {
+        if (!isValidBase64(data.publicKey)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format' }));
+          incrementFailure(clientIp);
+          return;
+        }
+      }
 
       if (data.type !== 'connect') {
         if (!data.token) {
@@ -155,6 +181,7 @@ wss.on('connection', (ws, req) => {
         logStats({ clientId, event: 'connect' });
         const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '15m' });
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '24h' });
+        clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
         return;
       }
@@ -175,6 +202,7 @@ wss.on('connection', (ws, req) => {
             return;
           }
           const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '15m' });
+          clientTokens.set(data.clientId, { ...clientTokens.get(data.clientId), accessToken: newAccessToken });
           ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken }));
         } catch (err) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
@@ -311,6 +339,7 @@ wss.on('connection', (ws, req) => {
               const refreshDecoded = jwt.verify(data.refreshToken, JWT_SECRET, { ignoreExpiration: true });
               revokedTokens.set(data.refreshToken, refreshDecoded.exp * 1000);
             }
+            clientTokens.delete(data.clientId);
           }
           rateLimits.delete(data.clientId);
           if (room.clients.size === 0 || isInitiator) {
@@ -400,7 +429,6 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'relay-message' || data.type === 'relay-image') {
-        // New: Limit relay payloads to 10KB (base64 length check)
         const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
         if (payload && payload.length > 13653) { // ~10KB base64 = 13653 chars (10*1024*4/3)
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 10KB)' }));
@@ -467,6 +495,24 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    if (ws.clientId) {
+      const tokens = clientTokens.get(ws.clientId);
+      if (tokens) {
+        try {
+          const decodedAccess = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
+          revokedTokens.set(tokens.accessToken, decodedAccess.exp * 1000);
+          if (tokens.refreshToken) {
+            const decodedRefresh = jwt.verify(tokens.refreshToken, JWT_SECRET, { ignoreExpiration: true });
+            revokedTokens.set(tokens.refreshToken, decodedRefresh.exp * 1000);
+          }
+          clientTokens.delete(ws.clientId);
+          console.log(`Revoked tokens for client ${ws.clientId} on disconnect`);
+        } catch (err) {
+          console.warn(`Failed to revoke tokens for client ${ws.clientId}: ${err.message}`);
+        }
+      }
+    }
+
     if (ws.code && rooms.has(ws.code)) {
       const room = rooms.get(ws.code);
       const isInitiator = ws.clientId === room.initiator;
@@ -560,7 +606,6 @@ function incrementFailure(ip) {
   const failure = ipFailureCounts.get(ip) || { count: 0 };
   failure.count += 1;
   ipFailureCounts.set(ip, failure);
-  // New: Log anomalies for high failure rates
   if (failure.count % 5 === 0) {
     console.warn(`High failure rate for IP ${ip}: ${failure.count} failures`);
   }

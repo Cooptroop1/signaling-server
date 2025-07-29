@@ -170,7 +170,7 @@ wss.on('connection', (ws, req) => {
         }
       }
 
-      if (ipBans.has(clientIp) && ipBans.get(clientIp) > Date.now()) {
+      if (ipBans.has(clientIp) && ipBans.get(clientIp).expiry > Date.now()) {
         ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
         return;
       }
@@ -601,19 +601,31 @@ function restrictIpDaily(ip, action) {
   return true;
 }
 
-// Increment failure count and ban IP if threshold reached
+// Increment failure count and ban IP with exponential duration if threshold reached
 function incrementFailure(ip) {
-  const failure = ipFailureCounts.get(ip) || { count: 0 };
+  const failure = ipFailureCounts.get(ip) || { count: 0, banLevel: 0 };
   failure.count += 1;
   ipFailureCounts.set(ip, failure);
   if (failure.count % 5 === 0) {
     console.warn(`High failure rate for IP ${ip}: ${failure.count} failures`);
   }
   if (failure.count >= 10) {
-    const banUntil = Date.now() + 300000;
-    ipBans.set(ip, banUntil);
-    console.warn(`IP ${ip} banned until ${new Date(banUntil).toISOString()} due to excessive failures`);
-    ipFailureCounts.delete(ip);
+    // Exponential ban durations: 5min, 30min, 1hr
+    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]; // 5min, 30min, 1hr
+    failure.banLevel = Math.min(failure.banLevel + 1, 2); // Cap at level 2 (1hr)
+    const duration = banDurations[failure.banLevel];
+    const expiry = Date.now() + duration;
+    ipBans.set(ip, { expiry, banLevel: failure.banLevel });
+    const timestamp = new Date().toISOString();
+    const banLogEntry = `${timestamp} - IP Banned: ${ip}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+    fs.appendFile(LOG_FILE, banLogEntry, (err) => {
+      if (err) {
+        console.error('Error appending ban log:', err);
+      } else {
+        console.warn(`IP ${ip} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+      }
+    });
+    ipFailureCounts.delete(ip); // Reset failure count after ban
   }
 }
 

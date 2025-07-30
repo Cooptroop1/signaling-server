@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const validator = require('validator');
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
@@ -55,6 +56,12 @@ if (!TURN_USERNAME) {
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
 if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
+}
+
+const IP_SALT = process.env.IP_SALT || 'your-random-salt-here'; // Set in .env for security
+
+function hashIp(ip) {
+  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
 
 // Validate base64 string
@@ -120,7 +127,14 @@ wss.on('connection', (ws, req) => {
     ws.isAlive = true;
   });
 
-  const clientIp = ws._socket.remoteAddress;
+  const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress; // Handle proxies
+  const hashedIp = hashIp(clientIp);
+
+  if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) {
+    ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
+    return;
+  }
+
   let clientId, code, username;
 
   ws.on('message', async (message) => {
@@ -168,11 +182,6 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
           return;
         }
-      }
-
-      if (ipBans.has(clientIp) && ipBans.get(clientIp).expiry > Date.now()) {
-        ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
-        return;
       }
 
       if (data.type === 'connect') {
@@ -571,8 +580,9 @@ function restrictRate(ws) {
 
 // IP rate limiting function: max 5 actions (join/submit) per minute per IP
 function restrictIpRate(ip, action) {
+  const hashedIp = hashIp(ip);
   const now = Date.now();
-  const key = `${ip}:${action}`;
+  const key = `${hashedIp}:${action}`;
   const rateLimit = ipRateLimits.get(key) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
     rateLimit.count = 0;
@@ -581,7 +591,7 @@ function restrictIpRate(ip, action) {
   rateLimit.count += 1;
   ipRateLimits.set(key, rateLimit);
   if (rateLimit.count > 5) {
-    console.warn(`IP rate limit exceeded for ${action} from ${ip}: ${rateLimit.count} in 60s`);
+    console.warn(`IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count} in 60s`);
     return false;
   }
   return true;
@@ -589,13 +599,14 @@ function restrictIpRate(ip, action) {
 
 // Daily IP limit for joins (100/day)
 function restrictIpDaily(ip, action) {
+  const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
-  const key = `${ip}:${action}:${day}`;
+  const key = `${hashedIp}:${action}:${day}`;
   const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
   dailyLimit.count += 1;
   ipDailyLimits.set(key, dailyLimit);
   if (dailyLimit.count > 100) {
-    console.warn(`Daily IP limit exceeded for ${action} from ${ip}: ${dailyLimit.count} in day ${day}`);
+    console.warn(`Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count} in day ${day}`);
     return false;
   }
   return true;
@@ -603,11 +614,12 @@ function restrictIpDaily(ip, action) {
 
 // Increment failure count and ban IP with exponential duration if threshold reached
 function incrementFailure(ip) {
-  const failure = ipFailureCounts.get(ip) || { count: 0, banLevel: 0 };
+  const hashedIp = hashIp(ip);
+  const failure = ipFailureCounts.get(hashedIp) || { count: 0, banLevel: 0 };
   failure.count += 1;
-  ipFailureCounts.set(ip, failure);
+  ipFailureCounts.set(hashedIp, failure);
   if (failure.count % 5 === 0) {
-    console.warn(`High failure rate for IP ${ip}: ${failure.count} failures`);
+    console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
   }
   if (failure.count >= 10) {
     // Exponential ban durations: 5min, 30min, 1hr
@@ -615,17 +627,17 @@ function incrementFailure(ip) {
     failure.banLevel = Math.min(failure.banLevel + 1, 2); // Cap at level 2 (1hr)
     const duration = banDurations[failure.banLevel];
     const expiry = Date.now() + duration;
-    ipBans.set(ip, { expiry, banLevel: failure.banLevel });
+    ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
     const timestamp = new Date().toISOString();
-    const banLogEntry = `${timestamp} - IP Banned: ${ip}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
     fs.appendFile(LOG_FILE, banLogEntry, (err) => {
       if (err) {
         console.error('Error appending ban log:', err);
       } else {
-        console.warn(`IP ${ip} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+        console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
       }
     });
-    ipFailureCounts.delete(ip); // Reset failure count after ban
+    ipFailureCounts.delete(hashedIp); // Reset failure count after ban
   }
 }
 

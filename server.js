@@ -67,6 +67,7 @@ function hashIp(ip) {
 // Validate base64 string
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
+  // Base64 regex: A-Z, a-z, 0-9, +, /, = (padded to multiple of 4)
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   return base64Regex.test(str) && str.length % 4 === 0;
 }

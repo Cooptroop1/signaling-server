@@ -160,73 +160,14 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    // Sanitize and validate string fields
+    // Sanitize and validate string fields, but skip publicKey for now
     Object.keys(data).forEach(key => {
-      if (typeof data[key] === 'string') {
+      if (typeof data[key] === 'string' && !(data.type === 'public-key' && key === 'publicKey')) {
         data[key] = validator.escape(validator.trim(data[key]));
-        if (data.type === 'public-key' && key === 'publicKey') {
-          if (!isValidBase64(data[key]) || data[key].length > 512) { // Reasonable upper limit for public keys
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format or length' }));
-            incrementFailure(clientIp);
-            return;
-          }
-        } else if (key === 'encryptedContent' || key === 'encryptedData' || key === 'encryptedKey') {
-          if (data[key].length > 13653) { // Strict 10KB limit for base64
-            ws.send(JSON.stringify({ type: 'error', message: 'Encrypted payload too large (max 10KB)' }));
-            incrementFailure(clientIp);
-            return;
-          }
-        } else if (key === 'iv' && !isValidBase64(data[key])) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid IV format' }));
-          incrementFailure(clientIp);
-          return;
-        } else if (key === 'code' && !validateCode(data[key])) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
-          incrementFailure(clientIp);
-          return;
-        } else if (key === 'username' && !validateUsername(data[key])) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
-          incrementFailure(clientIp);
-          return;
-        }
       }
     });
 
-    // Check required fields based on type
-    const requiredFields = {
-      connect: ['clientId'],
-      'refresh-token': ['refreshToken', 'clientId'],
-      'public-key': ['publicKey', 'clientId', 'code'],
-      'encrypted-room-key': ['encryptedKey', 'iv', 'clientId', 'code', 'targetId'],
-      join: ['code', 'clientId', 'username'],
-      leave: ['code', 'clientId'],
-      'set-max-clients': ['maxClients', 'code', 'clientId'],
-      offer: ['offer', 'code', 'targetId', 'clientId'],
-      answer: ['answer', 'code', 'targetId', 'clientId'],
-      candidate: ['candidate', 'code', 'targetId', 'clientId'],
-      'submit-random': ['code', 'clientId'],
-      'remove-random-code': ['code'],
-      'relay-message': ['encryptedContent', 'iv', 'messageId', 'username', 'code', 'clientId'],
-      'relay-image': ['encryptedData', 'iv', 'messageId', 'username', 'code', 'clientId'],
-      'get-stats': ['secret'],
-      ping: ['clientId']
-    };
-
-    if (requiredFields[data.type]) {
-      for (const field of requiredFields[data.type]) {
-        if (!data[field]) {
-          ws.send(JSON.stringify({ type: 'error', message: `Missing required field: ${field}` }));
-          incrementFailure(clientIp);
-          return;
-        }
-      }
-    } else {
-      ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }));
-      incrementFailure(clientIp);
-      return;
-    }
-
-    // Validate publicKey for public-key messages (already in code, but reinforced)
+    // Validate publicKey for public-key messages
     if (data.type === 'public-key' && data.publicKey) {
       if (!isValidBase64(data.publicKey)) {
         ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format' }));
@@ -254,6 +195,11 @@ wss.on('connection', (ws, req) => {
         ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
         return;
       }
+    }
+
+    if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) {
+      ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
+      return;
     }
 
     if (data.type === 'connect') {

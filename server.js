@@ -30,7 +30,8 @@ const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const UPDATE_INTERVAL = 30000;
-const randomCodes = new Set();
+// Changed from Set to Map to store codes with timestamps
+const randomCodes = new Map(); // Map<code, timestamp>
 const rateLimits = new Map();
 const allTimeUsers = new Set();
 const ipRateLimits = new Map();
@@ -85,9 +86,11 @@ if (fs.existsSync(LOG_FILE)) {
 
 // Auto-cleanup for random codes every hour
 setInterval(() => {
-  randomCodes.forEach(code => {
-    if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
+  const now = Date.now();
+  randomCodes.forEach((timestamp, code) => {
+    if (now - timestamp > 3600000) { // 1 hour expiration
       randomCodes.delete(code);
+      console.log(`Expired random code ${code}`);
     }
   });
   broadcastRandomCodes();
@@ -143,421 +146,430 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
+    let data;
     try {
-      const data = JSON.parse(message);
+      data = JSON.parse(message);
       console.log('Received:', data);
+    } catch (error) {
+      console.error('Malformed JSON:', error);
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON format' }));
+      incrementFailure(clientIp);
+      return;
+    }
 
-      // Sanitize string fields, but skip publicKey for public-key messages
-      Object.keys(data).forEach(key => {
-        if (typeof data[key] === 'string' && !(data.type === 'public-key' && key === 'publicKey')) {
-          data[key] = validator.escape(validator.trim(data[key]));
+    // Sanitize string fields, but skip publicKey for public-key messages
+    Object.keys(data).forEach(key => {
+      if (typeof data[key] === 'string' && !(data.type === 'public-key' && key === 'publicKey')) {
+        data[key] = validator.escape(validator.trim(data[key]));
+      }
+    });
+
+    // Validate publicKey for public-key messages
+    if (data.type === 'public-key' && data.publicKey) {
+      if (!isValidBase64(data.publicKey)) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format' }));
+        incrementFailure(clientIp);
+        return;
+      }
+    }
+
+    if (data.type !== 'connect') {
+      if (!data.token) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
+        return;
+      }
+      try {
+        const decoded = jwt.verify(data.token, JWT_SECRET);
+        if (decoded.clientId !== data.clientId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
+          return;
+        }
+        if (revokedTokens.has(data.token)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
+          return;
+        }
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+        return;
+      }
+    }
+
+    if (data.type === 'connect') {
+      clientId = data.clientId || uuidv4();
+      ws.clientId = clientId;
+      logStats({ clientId, event: 'connect' });
+      const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '15m' });
+      const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '24h' });
+      clientTokens.set(clientId, { accessToken, refreshToken });
+      ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+      // Broadcast random codes to new client
+      ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes.keys()) }));
+      return;
+    }
+
+    if (data.type === 'refresh-token') {
+      if (!data.refreshToken) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Missing refresh token' }));
+        return;
+      }
+      try {
+        const decoded = jwt.verify(data.refreshToken, JWT_SECRET);
+        if (decoded.clientId !== data.clientId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
+          return;
+        }
+        if (revokedTokens.has(data.refreshToken)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
+          return;
+        }
+        const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '15m' });
+        clientTokens.set(data.clientId, { ...clientTokens.get(data.clientId), accessToken: newAccessToken });
+        ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken }));
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+        return;
+      }
+      return;
+    }
+
+    if (data.type === 'public-key') {
+      if (rooms.has(data.code)) {
+        const room = rooms.get(data.code);
+        const initiatorWs = room.clients.get(room.initiator)?.ws;
+        if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
+          initiatorWs.send(JSON.stringify({ type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'encrypted-room-key') {
+      if (rooms.has(data.code)) {
+        const room = rooms.get(data.code);
+        const targetWs = room.clients.get(data.targetId)?.ws;
+        if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+          targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, clientId: data.clientId, code: data.code }));
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'join') {
+      if (!restrictIpRate(clientIp, 'join')) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
+        incrementFailure(clientIp);
+        return;
+      }
+
+      if (!restrictIpDaily(clientIp, 'join')) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.' }));
+        incrementFailure(clientIp);
+        return;
+      }
+
+      code = data.code;
+      clientId = data.clientId;
+      username = data.username;
+
+      if (!validateUsername(username)) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
+        incrementFailure(clientIp);
+        return;
+      }
+
+      if (!validateCode(code)) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
+        incrementFailure(clientIp);
+        return;
+      }
+
+      if (!rooms.has(code)) {
+        rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
+        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
+        logStats({ clientId, username, code, event: 'init', totalClients: 1 });
+      } else {
+        const room = rooms.get(code);
+        if (room.clients.size >= room.maxClients) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Chat is full' }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (room.clients.has(clientId)) {
+          if (room.clients.get(clientId).username === username) {
+            const oldWs = room.clients.get(clientId).ws;
+            setTimeout(() => {
+              oldWs.close();
+            }, 1000);
+            room.clients.delete(clientId);
+            broadcast(code, { 
+              type: 'client-disconnected', 
+              clientId, 
+              totalClients: room.clients.size, 
+              isInitiator: clientId === room.initiator 
+            });
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId' }));
+            incrementFailure(clientIp);
+            return;
+          }
+        } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline' }));
+          incrementFailure(clientIp);
+          return;
+        }
+        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
+        logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
+        if (room.clients.size > 0) {
+          room.clients.forEach((_, existingClientId) => {
+            if (existingClientId !== clientId) {
+              logStats({
+                clientId,
+                targetId: existingClientId,
+                code,
+                event: 'webrtc-connection',
+                totalClients: room.clients.size + 1
+              });
+            }
+          });
+        }
+      }
+
+      const room = rooms.get(code);
+      room.clients.set(clientId, { ws, username });
+      ws.code = code;
+      ws.username = username;
+      broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
+    }
+
+    if (data.type === 'leave') {
+      if (rooms.has(data.code)) {
+        const room = rooms.get(data.code);
+        const isInitiator = data.clientId === room.initiator;
+        room.clients.delete(data.clientId);
+        logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
+        if (data.token) {
+          const decoded = jwt.verify(data.token, JWT_SECRET, { ignoreExpiration: true });
+          const expiry = decoded.exp * 1000;
+          revokedTokens.set(data.token, expiry);
+          if (data.refreshToken) {
+            const refreshDecoded = jwt.verify(data.refreshToken, JWT_SECRET, { ignoreExpiration: true });
+            revokedTokens.set(data.refreshToken, refreshDecoded.exp * 1000);
+          }
+          clientTokens.delete(data.clientId);
+        }
+        rateLimits.delete(data.clientId);
+        if (room.clients.size === 0 || isInitiator) {
+          rooms.delete(data.code);
+          randomCodes.delete(data.code);
+          broadcast(data.code, { 
+            type: 'client-disconnected', 
+            clientId: data.clientId, 
+            totalClients: 0, 
+            isInitiator 
+          });
+        } else {
+          if (isInitiator) {
+            const newInitiator = room.clients.keys().next().value;
+            if (newInitiator) {
+              room.initiator = newInitiator;
+              broadcast(data.code, { 
+                type: 'initiator-changed', 
+                newInitiator, 
+                totalClients: room.clients.size 
+              });
+            }
+          }
+          broadcast(data.code, { 
+            type: 'client-disconnected', 
+            clientId: data.clientId, 
+            totalClients: room.clients.size, 
+            isInitiator 
+          });
+        }
+      }
+    }
+
+    if (data.type === 'set-max-clients') {
+      if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
+        const room = rooms.get(data.code);
+        room.maxClients = Math.min(data.maxClients, 10);
+        broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
+        logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
+      }
+    }
+
+    if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
+      if (rooms.has(data.code)) {
+        const room = rooms.get(data.code);
+        const target = room.clients.get(data.targetId);
+        if (target && target.ws.readyState === WebSocket.OPEN) {
+          console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
+          target.ws.send(JSON.stringify({ ...data, clientId }));
+        } else {
+          console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
+        }
+      }
+    }
+
+    if (data.type === 'submit-random') {
+      if (!restrictIpRate(clientIp, 'submit-random')) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.' }));
+        incrementFailure(clientIp);
+        return;
+      }
+
+      if (!rooms.has(data.code)) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Room does not exist' }));
+        incrementFailure(clientIp);
+        return;
+      }
+      if (rooms.get(data.code)?.initiator === data.clientId) {
+        randomCodes.set(data.code, Date.now()); // Store with timestamp
+        broadcastRandomCodes();
+        console.log(`Added code ${data.code} to random board`);
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board' }));
+        incrementFailure(clientIp);
+      }
+    }
+
+    if (data.type === 'get-random-codes') {
+      ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes.keys()) }));
+    }
+
+    if (data.type === 'remove-random-code') {
+      if (randomCodes.has(data.code)) {
+        randomCodes.delete(data.code);
+        broadcastRandomCodes();
+        console.log(`Removed code ${data.code} from randomCodes`);
+      }
+    }
+
+    if (data.type === 'relay-message' || data.type === 'relay-image') {
+      const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
+      if (payload && payload.length > 13653) { // ~10KB base64 = 13653 chars (10*1024*4/3)
+        ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 10KB)' }));
+        incrementFailure(clientIp);
+        return;
+      }
+
+      if (!rooms.has(data.code)) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
+        incrementFailure(clientIp);
+        return;
+      }
+      const room = rooms.get(data.code);
+      const senderId = data.clientId;
+      if (!room.clients.has(senderId)) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
+        incrementFailure(clientIp);
+        return;
+      }
+      room.clients.forEach((client, clientId) => {
+        if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+          client.ws.send(JSON.stringify({
+            type: data.type.replace('relay-', ''),
+            messageId: data.messageId,
+            username: data.username,
+            encryptedContent: data.encryptedContent,
+            encryptedData: data.encryptedData,
+            iv: data.iv
+          }));
         }
       });
-
-      // Validate publicKey for public-key messages
-      if (data.type === 'public-key' && data.publicKey) {
-        if (!isValidBase64(data.publicKey)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format' }));
-          incrementFailure(clientIp);
-          return;
-        }
-      }
-
-      if (data.type !== 'connect') {
-        if (!data.token) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
-          return;
-        }
-        try {
-          const decoded = jwt.verify(data.token, JWT_SECRET);
-          if (decoded.clientId !== data.clientId) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
-            return;
-          }
-          if (revokedTokens.has(data.token)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
-            return;
-          }
-        } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-          return;
-        }
-      }
-
-      if (data.type === 'connect') {
-        clientId = data.clientId || uuidv4();
-        ws.clientId = clientId;
-        logStats({ clientId, event: 'connect' });
-        const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '15m' });
-        const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '24h' });
-        clientTokens.set(clientId, { accessToken, refreshToken });
-        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
-        return;
-      }
-
-      if (data.type === 'refresh-token') {
-        if (!data.refreshToken) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Missing refresh token' }));
-          return;
-        }
-        try {
-          const decoded = jwt.verify(data.refreshToken, JWT_SECRET);
-          if (decoded.clientId !== data.clientId) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
-            return;
-          }
-          if (revokedTokens.has(data.refreshToken)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
-            return;
-          }
-          const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '15m' });
-          clientTokens.set(data.clientId, { ...clientTokens.get(data.clientId), accessToken: newAccessToken });
-          ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken }));
-        } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
-          return;
-        }
-        return;
-      }
-
-      if (data.type === 'public-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const initiatorWs = room.clients.get(room.initiator)?.ws;
-          if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
-            initiatorWs.send(JSON.stringify({ type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
-          }
-        }
-        return;
-      }
-
-      if (data.type === 'encrypted-room-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const targetWs = room.clients.get(data.targetId)?.ws;
-          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, clientId: data.clientId, code: data.code }));
-          }
-        }
-        return;
-      }
-
-      if (data.type === 'join') {
-        if (!restrictIpRate(clientIp, 'join')) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
-          incrementFailure(clientIp);
-          return;
-        }
-
-        if (!restrictIpDaily(clientIp, 'join')) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.' }));
-          incrementFailure(clientIp);
-          return;
-        }
-
-        code = data.code;
-        clientId = data.clientId;
-        username = data.username;
-
-        if (!validateUsername(username)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
-          incrementFailure(clientIp);
-          return;
-        }
-
-        if (!validateCode(code)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
-          incrementFailure(clientIp);
-          return;
-        }
-
-        if (!rooms.has(code)) {
-          rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
-          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
-          logStats({ clientId, username, code, event: 'init', totalClients: 1 });
-        } else {
-          const room = rooms.get(code);
-          if (room.clients.size >= room.maxClients) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Chat is full' }));
-            incrementFailure(clientIp);
-            return;
-          }
-          if (room.clients.has(clientId)) {
-            if (room.clients.get(clientId).username === username) {
-              const oldWs = room.clients.get(clientId).ws;
-              setTimeout(() => {
-                oldWs.close();
-              }, 1000);
-              room.clients.delete(clientId);
-              broadcast(code, { 
-                type: 'client-disconnected', 
-                clientId, 
-                totalClients: room.clients.size, 
-                isInitiator: clientId === room.initiator 
-              });
-            } else {
-              ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId' }));
-              incrementFailure(clientIp);
-              return;
-            }
-          } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
-            incrementFailure(clientIp);
-            return;
-          }
-          if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline' }));
-            incrementFailure(clientIp);
-            return;
-          }
-          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
-          logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
-          if (room.clients.size > 0) {
-            room.clients.forEach((_, existingClientId) => {
-              if (existingClientId !== clientId) {
-                logStats({
-                  clientId,
-                  targetId: existingClientId,
-                  code,
-                  event: 'webrtc-connection',
-                  totalClients: room.clients.size + 1
-                });
-              }
-            });
-          }
-        }
-
-        const room = rooms.get(code);
-        room.clients.set(clientId, { ws, username });
-        ws.code = code;
-        ws.username = username;
-        broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
-      }
-
-      if (data.type === 'leave') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const isInitiator = data.clientId === room.initiator;
-          room.clients.delete(data.clientId);
-          logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
-          if (data.token) {
-            const decoded = jwt.verify(data.token, JWT_SECRET, { ignoreExpiration: true });
-            const expiry = decoded.exp * 1000;
-            revokedTokens.set(data.token, expiry);
-            if (data.refreshToken) {
-              const refreshDecoded = jwt.verify(data.refreshToken, JWT_SECRET, { ignoreExpiration: true });
-              revokedTokens.set(data.refreshToken, refreshDecoded.exp * 1000);
-            }
-            clientTokens.delete(data.clientId);
-          }
-          rateLimits.delete(data.clientId);
-          if (room.clients.size === 0 || isInitiator) {
-            rooms.delete(data.code);
-            randomCodes.delete(data.code);
-            broadcast(data.code, { 
-              type: 'client-disconnected', 
-              clientId: data.clientId, 
-              totalClients: 0, 
-              isInitiator 
-            });
-          } else {
-            if (isInitiator) {
-              const newInitiator = room.clients.keys().next().value;
-              if (newInitiator) {
-                room.initiator = newInitiator;
-                broadcast(data.code, { 
-                  type: 'initiator-changed', 
-                  newInitiator, 
-                  totalClients: room.clients.size 
-                });
-              }
-            }
-            broadcast(data.code, { 
-              type: 'client-disconnected', 
-              clientId: data.clientId, 
-              totalClients: room.clients.size, 
-              isInitiator 
-            });
-          }
-        }
-      }
-
-      if (data.type === 'set-max-clients') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          const room = rooms.get(data.code);
-          room.maxClients = Math.min(data.maxClients, 10);
-          broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
-          logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
-        }
-      }
-
-      if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const target = room.clients.get(data.targetId);
-          if (target && target.ws.readyState === WebSocket.OPEN) {
-            console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
-            target.ws.send(JSON.stringify({ ...data, clientId }));
-          } else {
-            console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
-          }
-        }
-      }
-
-      if (data.type === 'submit-random') {
-        if (!restrictIpRate(clientIp, 'submit-random')) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.' }));
-          incrementFailure(clientIp);
-          return;
-        }
-
-        if (data.code && !rooms.get(data.code)?.clients.size) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
-          incrementFailure(clientIp);
-          return;
-        }
-        if (rooms.get(data.code)?.initiator === data.clientId) {
-          randomCodes.add(data.code);
-          broadcastRandomCodes();
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board' }));
-          incrementFailure(clientIp);
-        }
-      }
-
-      if (data.type === 'get-random-codes') {
-        ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
-      }
-
-      if (data.type === 'remove-random-code') {
-        if (randomCodes.has(data.code)) {
-          randomCodes.delete(data.code);
-          broadcastRandomCodes();
-          console.log(`Removed code ${data.code} from randomCodes`);
-        }
-      }
-
-      if (data.type === 'relay-message' || data.type === 'relay-image') {
-        const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
-        if (payload && payload.length > 13653) { // ~10KB base64 = 13653 chars (10*1024*4/3)
-          ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 10KB)' }));
-          incrementFailure(clientIp);
-          return;
-        }
-
-        if (!rooms.has(data.code)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
-          incrementFailure(clientIp);
-          return;
-        }
-        const room = rooms.get(data.code);
-        const senderId = data.clientId;
-        if (!room.clients.has(senderId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
-          incrementFailure(clientIp);
-          return;
-        }
-        room.clients.forEach((client, clientId) => {
-          if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
-            client.ws.send(JSON.stringify({
-              type: data.type.replace('relay-', ''),
-              messageId: data.messageId,
-              username: data.username,
-              encryptedContent: data.encryptedContent,
-              encryptedData: data.encryptedData,
-              iv: data.iv
-            }));
-          }
-        });
-        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
-      }
-
-      if (data.type === 'get-stats') {
-        if (data.secret === ADMIN_SECRET) {
-          const now = new Date();
-          const day = now.toISOString().slice(0, 10);
-          let totalClients = 0;
-          rooms.forEach(room => {
-            totalClients += room.clients.size;
-          });
-          ws.send(JSON.stringify({
-            type: 'stats',
-            dailyUsers: dailyUsers.get(day)?.size || 0,
-            dailyConnections: dailyConnections.get(day)?.size || 0,
-            allTimeUsers: allTimeUsers.size,
-            activeRooms: rooms.size,
-            totalClients: totalClients
-          }));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
-      }
-
-      if (data.type === 'ping') {
-        ws.send(JSON.stringify({ type: 'pong' }));
-      }
-    } catch (error) {
-      console.error('Error processing message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' }));
-      incrementFailure(clientIp);
-    }
-  });
-
-  ws.on('close', () => {
-    if (ws.clientId) {
-      const tokens = clientTokens.get(ws.clientId);
-      if (tokens) {
-        try {
-          const decodedAccess = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
-          revokedTokens.set(tokens.accessToken, decodedAccess.exp * 1000);
-          if (tokens.refreshToken) {
-            const decodedRefresh = jwt.verify(tokens.refreshToken, JWT_SECRET, { ignoreExpiration: true });
-            revokedTokens.set(tokens.refreshToken, decodedRefresh.exp * 1000);
-          }
-          clientTokens.delete(ws.clientId);
-          console.log(`Revoked tokens for client ${ws.clientId} on disconnect`);
-        } catch (err) {
-          console.warn(`Failed to revoke tokens for client ${ws.clientId}: ${err.message}`);
-        }
-      }
+      console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
     }
 
-    if (ws.code && rooms.has(ws.code)) {
-      const room = rooms.get(ws.code);
-      const isInitiator = ws.clientId === room.initiator;
-      room.clients.delete(ws.clientId);
-      rateLimits.delete(ws.clientId);
-      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
-      if (room.clients.size === 0 || isInitiator) {
-        rooms.delete(ws.code);
-        randomCodes.delete(ws.code);
-        broadcast(ws.code, { 
-          type: 'client-disconnected', 
-          clientId: ws.clientId, 
-          totalClients: 0, 
-          isInitiator 
+    if (data.type === 'get-stats') {
+      if (data.secret === ADMIN_SECRET) {
+        const now = Date.now();
+        const day = new Date().toISOString().slice(0, 10);
+        let totalClients = 0;
+        rooms.forEach(room => {
+          totalClients += room.clients.size;
         });
+        ws.send(JSON.stringify({
+          type: 'stats',
+          dailyUsers: dailyUsers.get(day)?.size || 0,
+          dailyConnections: dailyConnections.get(day)?.size || 0,
+          allTimeUsers: allTimeUsers.size,
+          activeRooms: rooms.size,
+          totalClients: totalClients
+        }));
       } else {
-        if (isInitiator) {
-          const newInitiator = room.clients.keys().next().value;
-          if (newInitiator) {
-            room.initiator = newInitiator;
-            broadcast(ws.code, { 
-              type: 'initiator-changed', 
-              newInitiator, 
-              totalClients: room.clients.size 
-            });
-          }
-        }
-        broadcast(ws.code, { 
-          type: 'client-disconnected', 
-          clientId: ws.clientId, 
-          totalClients: room.clients.size, 
-          isInitiator 
-        });
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
       }
     }
-  });
+
+    if (data.type === 'ping') {
+      ws.send(JSON.stringify({ type: 'pong' }));
+    }
+  } catch (error) {
+    console.error('Error processing message:', error);
+    ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' }));
+    incrementFailure(clientIp);
+  }
+});
+
+ws.on('close', () => {
+  if (ws.clientId) {
+    const tokens = clientTokens.get(ws.clientId);
+    if (tokens) {
+      try {
+        const decodedAccess = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
+        revokedTokens.set(tokens.accessToken, decodedAccess.exp * 1000);
+        if (tokens.refreshToken) {
+          const decodedRefresh = jwt.verify(tokens.refreshToken, JWT_SECRET, { ignoreExpiration: true });
+          revokedTokens.set(tokens.refreshToken, decodedRefresh.exp * 1000);
+        }
+        clientTokens.delete(ws.clientId);
+        console.log(`Revoked tokens for client ${ws.clientId} on disconnect`);
+      } catch (err) {
+        console.warn(`Failed to revoke tokens for client ${ws.clientId}: ${err.message}`);
+      }
+    }
+  }
+
+  if (ws.code && rooms.has(ws.code)) {
+    const room = rooms.get(ws.code);
+    const isInitiator = ws.clientId === room.initiator;
+    room.clients.delete(ws.clientId);
+    rateLimits.delete(ws.clientId);
+    logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
+    if (room.clients.size === 0 || isInitiator) {
+      rooms.delete(ws.code);
+      randomCodes.delete(ws.code);
+      broadcast(ws.code, { 
+        type: 'client-disconnected', 
+        clientId: ws.clientId, 
+        totalClients: 0, 
+        isInitiator 
+      });
+    } else {
+      if (isInitiator) {
+        const newInitiator = room.clients.keys().next().value;
+        if (newInitiator) {
+          room.initiator = newInitiator;
+          broadcast(ws.code, { 
+            type: 'initiator-changed', 
+            newInitiator, 
+            totalClients: room.clients.size 
+          });
+        }
+      }
+      broadcast(ws.code, { 
+        type: 'client-disconnected', 
+        clientId: ws.clientId, 
+        totalClients: room.clients.size, 
+        isInitiator 
+      });
+    }
+  }
 });
 
 // Rate limiting function: 50 messages per minute per client
@@ -740,7 +752,7 @@ function broadcast(code, message) {
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+      client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes.keys()) }));
     }
   });
 }

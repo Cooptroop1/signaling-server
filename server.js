@@ -24,7 +24,6 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
 }
 
 const wss = new WebSocket.Server({ server });
-
 const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
@@ -47,9 +46,7 @@ if (!ADMIN_SECRET) {
 }
 
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000'];
-
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback';
-
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
   throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
@@ -58,7 +55,6 @@ const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
 if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
 }
-
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here'; // Set in .env for security
 
 let features = {
@@ -146,12 +142,6 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  if (!features.enableService) {
-    ws.send(JSON.stringify({ type: 'error', message: 'Service is currently disabled.' }));
-    ws.close();
-    return;
-  }
-
   ws.isAlive = true;
   ws.on('pong', () => {
     ws.isAlive = true;
@@ -166,6 +156,7 @@ wss.on('connection', (ws, req) => {
   }
 
   let clientId, code, username;
+  let isAdmin = false; // New: Track if client is admin
 
   ws.on('message', async (message) => {
     if (!restrictRate(ws)) {
@@ -191,6 +182,20 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
+      }
+
+      // New: Check for admin actions to allow connection despite enableService false
+      if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature') {
+        if (data.secret === ADMIN_SECRET) {
+          isAdmin = true; // Mark as admin
+        }
+      }
+
+      // New: Only block non-admin connections if service is disabled
+      if (!features.enableService && !isAdmin && data.type !== 'connect') {
+        ws.send(JSON.stringify({ type: 'error', message: 'Service is currently disabled.' }));
+        ws.close();
+        return;
       }
 
       if (data.type !== 'connect') {
@@ -277,35 +282,29 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Service is currently disabled.' }));
           return;
         }
-
         if (!restrictIpRate(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
           incrementFailure(clientIp);
           return;
         }
-
         if (!restrictIpDaily(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.' }));
           incrementFailure(clientIp);
           return;
         }
-
         code = data.code;
         clientId = data.clientId;
         username = data.username;
-
         if (!validateUsername(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
           incrementFailure(clientIp);
           return;
         }
-
         if (!validateCode(code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format' }));
           incrementFailure(clientIp);
           return;
         }
-
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
@@ -324,11 +323,11 @@ wss.on('connection', (ws, req) => {
                 oldWs.close();
               }, 1000);
               room.clients.delete(clientId);
-              broadcast(code, { 
-                type: 'client-disconnected', 
-                clientId, 
-                totalClients: room.clients.size, 
-                isInitiator: clientId === room.initiator 
+              broadcast(code, {
+                type: 'client-disconnected',
+                clientId,
+                totalClients: room.clients.size,
+                isInitiator: clientId === room.initiator
               });
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId' }));
@@ -361,7 +360,6 @@ wss.on('connection', (ws, req) => {
             });
           }
         }
-
         const room = rooms.get(code);
         room.clients.set(clientId, { ws, username });
         ws.code = code;
@@ -389,29 +387,29 @@ wss.on('connection', (ws, req) => {
           if (room.clients.size === 0 || isInitiator) {
             rooms.delete(data.code);
             randomCodes.delete(data.code);
-            broadcast(data.code, { 
-              type: 'client-disconnected', 
-              clientId: data.clientId, 
-              totalClients: 0, 
-              isInitiator 
+            broadcast(data.code, {
+              type: 'client-disconnected',
+              clientId: data.clientId,
+              totalClients: 0,
+              isInitiator
             });
           } else {
             if (isInitiator) {
               const newInitiator = room.clients.keys().next().value;
               if (newInitiator) {
                 room.initiator = newInitiator;
-                broadcast(data.code, { 
-                  type: 'initiator-changed', 
-                  newInitiator, 
-                  totalClients: room.clients.size 
+                broadcast(data.code, {
+                  type: 'initiator-changed',
+                  newInitiator,
+                  totalClients: room.clients.size
                 });
               }
             }
-            broadcast(data.code, { 
-              type: 'client-disconnected', 
-              clientId: data.clientId, 
-              totalClients: room.clients.size, 
-              isInitiator 
+            broadcast(data.code, {
+              type: 'client-disconnected',
+              clientId: data.clientId,
+              totalClients: room.clients.size,
+              isInitiator
             });
           }
         }
@@ -445,7 +443,6 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-
         if (data.code && !rooms.get(data.code)?.clients.size) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code' }));
           incrementFailure(clientIp);
@@ -487,7 +484,6 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-
         if (!rooms.has(data.code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
           incrementFailure(clientIp);
@@ -558,9 +554,9 @@ wss.on('connection', (ws, req) => {
               }
             });
             if (data.feature === 'service' && !features.enableService) {
-              // Close all connections if service disabled
+              // Close all non-admin connections
               wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
+                if (client.readyState === WebSocket.OPEN && !client.isAdmin) {
                   client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
                   client.close();
                 }
@@ -604,7 +600,6 @@ wss.on('connection', (ws, req) => {
         }
       }
     }
-
     if (ws.code && rooms.has(ws.code)) {
       const room = rooms.get(ws.code);
       const isInitiator = ws.clientId === room.initiator;
@@ -614,29 +609,29 @@ wss.on('connection', (ws, req) => {
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
         randomCodes.delete(ws.code);
-        broadcast(ws.code, { 
-          type: 'client-disconnected', 
-          clientId: ws.clientId, 
-          totalClients: 0, 
-          isInitiator 
+        broadcast(ws.code, {
+          type: 'client-disconnected',
+          clientId: ws.clientId,
+          totalClients: 0,
+          isInitiator
         });
       } else {
         if (isInitiator) {
           const newInitiator = room.clients.keys().next().value;
           if (newInitiator) {
             room.initiator = newInitiator;
-            broadcast(ws.code, { 
-              type: 'initiator-changed', 
-              newInitiator, 
-              totalClients: room.clients.size 
+            broadcast(ws.code, {
+              type: 'initiator-changed',
+              newInitiator,
+              totalClients: room.clients.size
             });
           }
         }
-        broadcast(ws.code, { 
-          type: 'client-disconnected', 
-          clientId: ws.clientId, 
-          totalClients: room.clients.size, 
-          isInitiator 
+        broadcast(ws.code, {
+          type: 'client-disconnected',
+          clientId: ws.clientId,
+          totalClients: room.clients.size,
+          isInitiator
         });
       }
     }
@@ -748,7 +743,6 @@ function logStats(data) {
     timestamp,
     day
   };
-
   if (data.event === 'connect' || data.event === 'join' || data.event === 'webrtc-connection') {
     if (!dailyUsers.has(day)) {
       dailyUsers.set(day, new Set());
@@ -765,7 +759,6 @@ function logStats(data) {
       dailyConnections.get(day).add(connectionKey);
     }
   }
-
   const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
@@ -781,7 +774,7 @@ function updateLogFile() {
   const connectionCount = dailyConnections.get(day)?.size || 0;
   const allTimeUserCount = allTimeUsers.size;
   const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
-  
+ 
   fs.appendFile(LOG_FILE, logEntry, (err) => {
     if (err) {
       console.error('Error writing to log file:', err);

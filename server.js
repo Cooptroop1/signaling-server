@@ -1,4 +1,3 @@
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -30,6 +29,7 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const FEATURES_FILE = path.join(__dirname, 'features.json');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -61,6 +61,30 @@ if (!TURN_CREDENTIAL) {
 
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here'; // Set in .env for security
 
+let features = {
+  enableService: true,
+  enableImages: true,
+  enableVoice: true
+};
+
+// Load features from file if exists
+if (fs.existsSync(FEATURES_FILE)) {
+  try {
+    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
+    console.log('Loaded features:', features);
+  } catch (err) {
+    console.error('Error loading features file:', err);
+  }
+} else {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+}
+
+// Function to save features to file
+function saveFeatures() {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+  console.log('Saved features:', features);
+}
+
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
@@ -68,7 +92,6 @@ function hashIp(ip) {
 // Validate base64 string
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
-  // Base64 regex: A-Z, a-z, 0-9, +, /, = (padded to multiple of 4)
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   return base64Regex.test(str) && str.length % 4 === 0;
 }
@@ -120,6 +143,12 @@ wss.on('connection', (ws, req) => {
   if (!ALLOWED_ORIGINS.includes(origin)) {
     console.warn(`Rejected connection from invalid origin: ${origin}`);
     ws.close(1008, 'Invalid origin');
+    return;
+  }
+
+  if (!features.enableService) {
+    ws.send(JSON.stringify({ type: 'error', message: 'Service is currently disabled.' }));
+    ws.close();
     return;
   }
 
@@ -244,6 +273,11 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'join') {
+        if (!features.enableService) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Service is currently disabled.' }));
+          return;
+        }
+
         if (!restrictIpRate(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.' }));
           incrementFailure(clientIp);
@@ -274,7 +308,7 @@ wss.on('connection', (ws, req) => {
 
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
-          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
+          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
           logStats({ clientId, username, code, event: 'init', totalClients: 1 });
         } else {
           const room = rooms.get(code);
@@ -311,7 +345,7 @@ wss.on('connection', (ws, req) => {
             incrementFailure(clientIp);
             return;
           }
-          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL }));
+          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
           logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
           if (room.clients.size > 0) {
             room.clients.forEach((_, existingClientId) => {
@@ -438,7 +472,15 @@ wss.on('connection', (ws, req) => {
         }
       }
 
-      if (data.type === 'relay-message' || data.type === 'relay-image') {
+      if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice') {
+        if (data.type === 'relay-image' && !features.enableImages) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Image messages are disabled.' }));
+          return;
+        }
+        if (data.type === 'relay-voice' && !features.enableVoice) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.' }));
+          return;
+        }
         const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
         if (payload && payload.length > 13653) { // ~10KB base64 = 13653 chars (10*1024*4/3)
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 10KB)' }));
@@ -489,6 +531,46 @@ wss.on('connection', (ws, req) => {
             activeRooms: rooms.size,
             totalClients: totalClients
           }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+      }
+
+      if (data.type === 'get-features') {
+        if (data.secret === ADMIN_SECRET) {
+          ws.send(JSON.stringify({ type: 'features', ...features }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+      }
+
+      if (data.type === 'toggle-feature') {
+        if (data.secret === ADMIN_SECRET) {
+          const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
+          if (features.hasOwnProperty(featureKey)) {
+            features[featureKey] = !features[featureKey];
+            saveFeatures();
+            ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
+            // Broadcast feature update to all clients
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'features-update', ...features }));
+              }
+            });
+            if (data.feature === 'service' && !features.enableService) {
+              // Close all connections if service disabled
+              wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+                  client.close();
+                }
+              });
+              rooms.clear();
+              randomCodes.clear();
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
+          }
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
         }

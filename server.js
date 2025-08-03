@@ -1,57 +1,51 @@
+const express = require('express');
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const validator = require('validator');
-const http = require('http');
-const https = require('https');
+const cors = require('cors');
 const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 
-// Check for certificate files for local HTTPS
-const CERT_KEY_PATH = 'path/to/your/private-key.pem';
-const CERT_PATH = 'path/to/your/fullchain.pem';
-let server;
-if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
-  server = http.createServer((req, res) => {
-    if (req.url === '/totp-secret' && req.method === 'GET') {
-      // Serve TOTP secret as a QR code URL for admin setup
-      if (!totpSecret) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'TOTP secret not initialized' }));
-        return;
-      }
-      const otpauthUrl = speakeasy.otpauthURL({
-        secret: totpSecret.base32,
-        label: 'Anonomoose Admin',
-        issuer: 'Anonomoose'
-      });
-      QRCode.toDataURL(otpauthUrl, (err, dataUrl) => {
-        if (err) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Failed to generate QR code' }));
-          return;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ qrCode: dataUrl }));
-      });
-    } else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-  console.log('Using HTTP server (production or missing certificates)');
-} else {
-  server = https.createServer({
-    key: fs.readFileSync(CERT_KEY_PATH),
-    cert: fs.readFileSync(CERT_PATH)
-  });
-  console.log('Using HTTPS server for local development');
-}
+const app = express();
+app.use(cors({ origin: ['https://anonomoose.com', 'http://localhost:3000'] }));
+app.use(express.json());
 
+// Serve favicon to suppress 404
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
+
+// Serve TOTP secret as QR code
+app.get('/totp-secret', (req, res) => {
+  if (!totpSecret) {
+    res.status(500).json({ error: 'TOTP secret not initialized' });
+    return;
+  }
+  const otpauthUrl = speakeasy.otpauthURL({
+    secret: totpSecret.base32,
+    label: 'Anonomoose Admin',
+    issuer: 'Anonomoose'
+  });
+  QRCode.toDataURL(otpauthUrl, (err, dataUrl) => {
+    if (err) {
+      console.error('Error generating QR code:', err);
+      res.status(500).json({ error: 'Failed to generate QR code' });
+      return;
+    }
+    res.status(200).json({ qrCode: dataUrl });
+  });
+});
+
+// WebSocket server
+const server = app.listen(process.env.PORT || 10000, () => {
+  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});
 const wss = new WebSocket.Server({ server });
+
 const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
@@ -840,7 +834,7 @@ function updateLogFile() {
     if (err) {
       console.error('Error writing to log file:', err);
     } else {
-      console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
+      console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC Connections, and ${allTimeUserCount} all-time unique users for ${day}`);
     }
   });
 }
@@ -881,7 +875,3 @@ function broadcastRandomCodes() {
     }
   });
 }
-
-server.listen(process.env.PORT || 10000, () => {
-  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
-});

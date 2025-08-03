@@ -106,7 +106,7 @@ if (fs.existsSync(LOG_FILE)) {
 // Auto-cleanup for random codes every hour
 setInterval(() => {
   randomCodes.forEach(code => {
-    if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
+    if (!rooms.has(code) || rooms.get(code).Guards.size === 0) {
       randomCodes.delete(code);
     }
   });
@@ -192,7 +192,7 @@ wss.on('connection', (ws, req) => {
       }
 
       if (!features.enableService && !isAdmin && data.type !== 'connect') {
-        ws.send(JSON.stringify({ type: 'error', message: 'Service is currently disabled.' }));
+        ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
         ws.close();
         return;
       }
@@ -278,7 +278,7 @@ wss.on('connection', (ws, req) => {
 
       if (data.type === 'join') {
         if (!features.enableService) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Service is currently disabled.' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
           return;
         }
         if (!restrictIpRate(clientIp, 'join')) {
@@ -491,7 +491,7 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(data.code);
         const senderId = data.clientId;
         if (!room.clients.has(senderId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Not in chat' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'Not in a chat' }));
           incrementFailure(clientIp);
           return;
         }
@@ -548,18 +548,17 @@ wss.on('connection', (ws, req) => {
             const timestamp = new Date().toISOString();
             fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
+            // New: Send features-update to all clients, error only to non-admins
             wss.clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN && (!client.isAdmin || data.feature === 'service')) {
+              if (client.readyState === WebSocket.OPEN) {
                 client.send(JSON.stringify({ type: 'features-update', ...features }));
-              }
-            });
-            if (data.feature === 'service' && !features.enableService) {
-              wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN && !client.isAdmin) {
+                if (data.feature === 'service' && !features.enableService && !client.isAdmin) {
                   client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
                   client.close();
                 }
-              });
+              }
+            });
+            if (data.feature === 'service' && !features.enableService) {
               rooms.clear();
               randomCodes.clear();
             }
@@ -639,7 +638,7 @@ wss.on('connection', (ws, req) => {
 
 // Rate limiting function: 50 messages per minute per client (non-admins)
 function restrictRate(ws) {
-  if (ws.isAdmin) return true; // New: Exempt admins
+  if (ws.isAdmin) return true;
   if (!ws.clientId) return true;
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };

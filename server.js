@@ -23,7 +23,6 @@ app.get('/favicon.ico', (req, res) => {
 // Serve TOTP secret as QR code
 app.get('/totp-secret', (req, res) => {
   if (!totpSecret) {
-    console.error('TOTP secret not initialized');
     res.status(500).json({ error: 'TOTP secret not initialized' });
     return;
   }
@@ -38,7 +37,6 @@ app.get('/totp-secret', (req, res) => {
       res.status(500).json({ error: 'Failed to generate QR code' });
       return;
     }
-    console.log('Generated TOTP QR code URL');
     res.status(200).json({ qrCode: dataUrl });
   });
 });
@@ -54,6 +52,7 @@ const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const FEATURES_FILE = path.join(__dirname, 'features.json');
+const TOTP_SECRET_FILE = path.join(__dirname, 'totp-secret.json');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -81,16 +80,38 @@ if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
 }
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here'; // Set in .env for security
-const TOTP_SECRET = process.env.TOTP_SECRET;
 
+let features = {
+  enableService: true,
+  enableImages: true,
+  enableVoice: true
+};
+
+// Load features from file if exists
+if (fs.existsSync(FEATURES_FILE)) {
+  try {
+    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
+    console.log('Loaded features:', features);
+  } catch (err) {
+    console.error('Error loading features file:', err);
+  }
+} else {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+}
+
+// Load or generate TOTP secret
 let totpSecret;
-if (TOTP_SECRET) {
-  totpSecret = { base32: TOTP_SECRET };
-  console.log('Loaded TOTP secret from TOTP_SECRET environment variable');
+if (fs.existsSync(TOTP_SECRET_FILE)) {
+  try {
+    totpSecret = JSON.parse(fs.readFileSync(TOTP_SECRET_FILE, 'utf8'));
+    console.log('Loaded TOTP secret');
+  } catch (err) {
+    console.error('Error loading TOTP secret:', err);
+  }
 } else {
   totpSecret = speakeasy.generateSecret({ length: 20 });
-  console.log('Generated new TOTP secret. Set this in Render environment variable TOTP_SECRET to persist:');
-  console.log(totpSecret.base32);
+  fs.writeFileSync(TOTP_SECRET_FILE, JSON.stringify(totpSecret));
+  console.log('Generated and saved new TOTP secret');
 }
 
 // Function to save features to file
@@ -202,7 +223,6 @@ wss.on('connection', (ws, req) => {
 
       if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature') {
         if (data.secret !== ADMIN_SECRET || !data.totp) {
-          console.warn(`Admin action rejected: Invalid secret or missing TOTP code for client ${hashedIp}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret or missing TOTP code' }));
           return;
         }
@@ -211,14 +231,12 @@ wss.on('connection', (ws, req) => {
           secret: totpSecret.base32,
           encoding: 'base32',
           token: data.totp,
-          window: 2 // Allow 60s clock drift (2 steps)
+          window: 1 // Allow 30s clock drift
         });
         if (!isValidTOTP) {
-          console.warn(`Invalid TOTP code for client ${hashedIp}: ${data.totp}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code' }));
           return;
         }
-        console.log(`Admin action authenticated for client ${hashedIp} with TOTP code ${data.totp}`);
         isAdmin = true;
       }
 

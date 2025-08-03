@@ -1,23 +1,24 @@
 {
-"name": "anonmess-signaling",
-"version": "1.0.0",
-"description": "Signaling server for AnonMess WebRTC chat",
-"main": "server.js",
-"scripts": {
-"start": "node server.js"
-},
-"dependencies": {
-"express": "^4.19.2",
-"ws": "^8.18.0",
-"cors": "^2.8.5",
-"uuid": "^10.0.0",
-"jsonwebtoken": "^9.0.2",
-"validator": "^13.12.0",
-"bcrypt": "^5.1.1"
-"speakeasy": "^2.0.0",
-"qrcode": "^1.5.3",
-},
-"engines": {
-"node": ">=18.0.0"
-}
+  "name": "anonmess-signaling",
+  "version": "1.0.0",
+  "description": "Signaling server for AnonMess WebRTC chat",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0",
+    "cors": "^2.8.5",
+    "uuid": "^10.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "validator": "^13.12.0",
+    "bcrypt": "^5.1.1",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.3",
+    "crypto": "^1.0.1"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
 }

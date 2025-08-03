@@ -106,7 +106,7 @@ if (fs.existsSync(LOG_FILE)) {
 // Auto-cleanup for random codes every hour
 setInterval(() => {
   randomCodes.forEach(code => {
-    if (!rooms.has(code) || rooms.get(code).Guards.size === 0) {
+    if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
       randomCodes.delete(code);
     }
   });
@@ -222,8 +222,8 @@ wss.on('connection', (ws, req) => {
         clientId = data.clientId || uuidv4();
         ws.clientId = clientId;
         logStats({ clientId, event: 'connect' });
-        const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '15m' });
-        const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '24h' });
+        const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '5m' });
+        const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
         return;
@@ -244,9 +244,14 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
             return;
           }
-          const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '15m' });
-          clientTokens.set(data.clientId, { ...clientTokens.get(data.clientId), accessToken: newAccessToken });
-          ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken }));
+          // Revoke old refresh token
+          const oldRefreshExpiry = decoded.exp * 1000;
+          revokedTokens.set(data.refreshToken, oldRefreshExpiry);
+          // Generate new access and refresh tokens (rotation)
+          const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '5m' });
+          const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
+          clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
+          ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
         } catch (err) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
           return;
@@ -776,7 +781,7 @@ function updateLogFile() {
   const connectionCount = dailyConnections.get(day)?.size || 0;
   const allTimeUserCount = allTimeUsers.size;
   const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
- 
+  
   fs.appendFileSync(LOG_FILE, logEntry, (err) => {
     if (err) {
       console.error('Error writing to log file:', err);

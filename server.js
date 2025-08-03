@@ -38,7 +38,7 @@ app.get('/totp-secret', (req, res) => {
       return;
     }
     console.log('Generated TOTP QR code URL');
-    res.status(200).json({ qrCode: dataUrl });
+    res.status(200).json({ qrCode: dataUrl, base32: totpSecret.base32 });
   });
 });
 
@@ -85,7 +85,7 @@ const TOTP_SECRET = process.env.TOTP_SECRET;
 let totpSecret;
 if (TOTP_SECRET) {
   totpSecret = { base32: TOTP_SECRET };
-  console.log('Loaded TOTP secret from TOTP_SECRET environment variable');
+  console.log('Loaded TOTP secret from TOTP_SECRET environment variable:', TOTP_SECRET);
 } else {
   totpSecret = speakeasy.generateSecret({ length: 20 });
   console.log('Generated new TOTP secret. Set this in Render environment variable TOTP_SECRET to persist:');
@@ -213,7 +213,7 @@ wss.on('connection', (ws, req) => {
           window: 2 // Allow 60s clock drift (2 steps)
         });
         if (!isValidTOTP) {
-          console.warn(`Invalid TOTP code for client ${hashedIp}: ${data.totp}`);
+          console.warn(`Invalid TOTP code for client ${hashedIp}: ${data.totp}, expected secret: ${totpSecret.base32}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code' }));
           return;
         }
@@ -712,7 +712,7 @@ function restrictIpRate(ip, action) {
 }
 
 // Daily IP limit for joins (100/day)
-function restrictIpDaily(ip, action) {
+function restrictIpRateDaily(ip, action) {
   const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
   const key = `${hashedIp}:${action}:${day}`;
@@ -856,4 +856,22 @@ function broadcastRandomCodes() {
       client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
     }
   });
+}
+
+let features = {
+  enableService: true,
+  enableImages: true,
+  enableVoice: true
+};
+
+// Load features from file if exists
+if (fs.existsSync(FEATURES_FILE)) {
+  try {
+    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
+    console.log('Loaded features:', features);
+  } catch (err) {
+    console.error('Error loading features file:', err);
+  }
+} else {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }

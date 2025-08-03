@@ -7,13 +7,41 @@ const validator = require('validator');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
 if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
-  server = http.createServer();
+  server = http.createServer((req, res) => {
+    if (req.url === '/totp-secret' && req.method === 'GET') {
+      // Serve TOTP secret as a QR code URL for admin setup
+      if (!totpSecret) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'TOTP secret not initialized' }));
+        return;
+      }
+      const otpauthUrl = speakeasy.otpauthURL({
+        secret: totpSecret.base32,
+        label: 'Anonomoose Admin',
+        issuer: 'Anonomoose'
+      });
+      QRCode.toDataURL(otpauthUrl, (err, dataUrl) => {
+        if (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to generate QR code' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ qrCode: dataUrl }));
+      });
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
   console.log('Using HTTP server (production or missing certificates)');
 } else {
   server = https.createServer({
@@ -29,6 +57,7 @@ const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const FEATURES_FILE = path.join(__dirname, 'features.json');
+const TOTP_SECRET_FILE = path.join(__dirname, 'totp-secret.json');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -73,6 +102,21 @@ if (fs.existsSync(FEATURES_FILE)) {
   }
 } else {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+}
+
+// Load or generate TOTP secret
+let totpSecret;
+if (fs.existsSync(TOTP_SECRET_FILE)) {
+  try {
+    totpSecret = JSON.parse(fs.readFileSync(TOTP_SECRET_FILE, 'utf8'));
+    console.log('Loaded TOTP secret');
+  } catch (err) {
+    console.error('Error loading TOTP secret:', err);
+  }
+} else {
+  totpSecret = speakeasy.generateSecret({ length: 20 });
+  fs.writeFileSync(TOTP_SECRET_FILE, JSON.stringify(totpSecret));
+  console.log('Generated and saved new TOTP secret');
 }
 
 // Function to save features to file
@@ -183,12 +227,22 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature') {
-        if (data.secret === ADMIN_SECRET) {
-          isAdmin = true;
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        if (data.secret !== ADMIN_SECRET || !data.totp) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret or missing TOTP code' }));
           return;
         }
+        // Verify TOTP code
+        const isValidTOTP = speakeasy.totp.verify({
+          secret: totpSecret.base32,
+          encoding: 'base32',
+          token: data.totp,
+          window: 1 // Allow 30s clock drift
+        });
+        if (!isValidTOTP) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code' }));
+          return;
+        }
+        isAdmin = true;
       }
 
       if (!features.enableService && !isAdmin && data.type !== 'connect') {
@@ -482,7 +536,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.' }));
           return;
         }
-        const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
+        const payload = data.encryptedContent || data.encryptedData;
         if (payload && payload.length > 13653) { // ~10KB base64 = 13653 chars (10*1024*4/3)
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 10KB)' }));
           incrementFailure(clientIp);
@@ -516,7 +570,7 @@ wss.on('connection', (ws, req) => {
       }
 
       if (data.type === 'get-stats') {
-        if (data.secret === ADMIN_SECRET) {
+        if (data.secret === ADMIN_SECRET && isValidTOTP) {
           const now = new Date();
           const day = now.toISOString().slice(0, 10);
           let totalClients = 0;
@@ -532,20 +586,20 @@ wss.on('connection', (ws, req) => {
             totalClients: totalClients
           }));
         } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret or TOTP code' }));
         }
       }
 
       if (data.type === 'get-features') {
-        if (data.secret === ADMIN_SECRET) {
+        if (data.secret === ADMIN_SECRET && isValidTOTP) {
           ws.send(JSON.stringify({ type: 'features', ...features }));
         } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret or TOTP code' }));
         }
       }
 
       if (data.type === 'toggle-feature') {
-        if (data.secret === ADMIN_SECRET) {
+        if (data.secret === ADMIN_SECRET && isValidTOTP) {
           const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
@@ -553,7 +607,7 @@ wss.on('connection', (ws, req) => {
             const timestamp = new Date().toISOString();
             fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
-            // New: Send features-update to all clients, error only to non-admins
+            // Send features-update to all clients, error only to non-admins
             wss.clients.forEach(client => {
               if (client.readyState === WebSocket.OPEN) {
                 client.send(JSON.stringify({ type: 'features-update', ...features }));
@@ -571,7 +625,7 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
           }
         } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret or TOTP code' }));
         }
       }
 

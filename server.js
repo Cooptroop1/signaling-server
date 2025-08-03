@@ -32,6 +32,7 @@ const FEATURES_FILE = path.join(__dirname, 'features.json');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
+const adminRateLimits = new Map(); // New: Separate rate limiting for admin actions
 const allTimeUsers = new Set();
 const ipRateLimits = new Map();
 const ipDailyLimits = new Map();
@@ -90,6 +91,24 @@ function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   return base64Regex.test(str) && str.length % 4 === 0;
+}
+
+// New: Rate limiting for admin actions (5 per minute)
+function restrictAdminRate(ws) {
+  if (!ws.clientId) return true;
+  const now = Date.now();
+  const rateLimit = adminRateLimits.get(ws.clientId) || { count: 0, startTime: now };
+  if (now - rateLimit.startTime >= 60000) {
+    rateLimit.count = 0;
+    rateLimit.startTime = now;
+  }
+  rateLimit.count += 1;
+  adminRateLimits.set(ws.clientId, rateLimit);
+  if (rateLimit.count > 5) {
+    console.warn(`Admin rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} actions in 60s`);
+    return false;
+  }
+  return true;
 }
 
 // Load historical unique users from log on startup
@@ -185,6 +204,10 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature') {
         if (data.secret === ADMIN_SECRET) {
           isAdmin = true;
+        }
+        if (!restrictAdminRate(ws)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Admin action rate limit exceeded (5/min). Please wait.' }));
+          return;
         }
       }
 
@@ -380,6 +403,7 @@ wss.on('connection', (ws, req) => {
             clientTokens.delete(data.clientId);
           }
           rateLimits.delete(data.clientId);
+          adminRateLimits.delete(data.clientId); // New: Clear admin rate limits
           if (room.clients.size === 0 || isInitiator) {
             rooms.delete(data.code);
             randomCodes.delete(data.code);
@@ -542,9 +566,13 @@ wss.on('connection', (ws, req) => {
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
             saveFeatures();
+            // New: Log toggle action
+            const timestamp = new Date().toISOString();
+            fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
+            // New: Selective broadcast (exclude admins for non-service toggles)
             wss.clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
+              if (client.readyState === WebSocket.OPEN && (!client.isAdmin || data.feature === 'service')) {
                 client.send(JSON.stringify({ type: 'features-update', ...features }));
               }
             });
@@ -599,6 +627,7 @@ wss.on('connection', (ws, req) => {
       const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
       rateLimits.delete(ws.clientId);
+      adminRateLimits.delete(ws.clientId); // New: Clear admin rate limits
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
@@ -754,7 +783,7 @@ function logStats(data) {
     }
   }
   const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
-  fs.appendFile(LOG_FILE, logEntry, (err) => {
+  fs.appendFileSync(LOG_FILE, logEntry, (err) => {
     if (err) {
       console.error('Error appending to log file:', err);
     }
@@ -769,7 +798,7 @@ function updateLogFile() {
   const allTimeUserCount = allTimeUsers.size;
   const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
  
-  fs.appendFile(LOG_FILE, logEntry, (err) => {
+  fs.appendFileSync(LOG_FILE, logEntry, (err) => {
     if (err) {
       console.error('Error writing to log file:', err);
     } else {
@@ -778,7 +807,7 @@ function updateLogFile() {
   });
 }
 
-fs.writeFile(LOG_FILE, '', (err) => {
+fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
     updateLogFile();

@@ -223,7 +223,7 @@ wss.on('connection', (ws, req) => {
                 clientId = data.clientId || uuidv4();
                 ws.clientId = clientId;
                 logStats({ clientId, event: 'connect' });
-                const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '5m' });
+                const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '10m' });
                 const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
                 clientTokens.set(clientId, { accessToken, refreshToken });
                 ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
@@ -832,3 +832,4 @@ function broadcastRandomCodes() {
 server.listen(process.env.PORT || 10000, () => {
     console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

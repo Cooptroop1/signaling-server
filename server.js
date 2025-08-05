@@ -56,8 +56,7 @@ let features = {
     enableService: true,
     enableImages: true,
     enableVoice: true,
-    enableVoiceCalls: true,
-    enableVideoCalls: true
+    enableVoiceCalls: true
 };
 // Load features from file if exists
 if (fs.existsSync(FEATURES_FILE)) {

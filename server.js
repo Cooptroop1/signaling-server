@@ -7,7 +7,6 @@ const validator = require('validator');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
-
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -22,7 +21,6 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
     });
     console.log('Using HTTPS server for local development');
 }
-
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
@@ -39,12 +37,10 @@ const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
-
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
     throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
-
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000'];
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback';
 const TURN_USERNAME = process.env.TURN_USERNAME;
@@ -56,14 +52,12 @@ if (!TURN_CREDENTIAL) {
     throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
 }
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here'; // Set in .env for security
-
 let features = {
     enableService: true,
     enableImages: true,
     enableVoice: true,
     enableVoiceCalls: true
 };
-
 // Load features from file if exists
 if (fs.existsSync(FEATURES_FILE)) {
     try {
@@ -75,24 +69,20 @@ if (fs.existsSync(FEATURES_FILE)) {
 } else {
     fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
-
 // Function to save features to file
 function saveFeatures() {
     fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
     console.log('Saved features:', features);
 }
-
 function hashIp(ip) {
     return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
-
 // Validate base64 string
 function isValidBase64(str) {
     if (typeof str !== 'string') return false;
     const base64Regex = /^[A-Za-z0-9+/=]+$/;
     return base64Regex.test(str) && str.length % 4 === 0;
 }
-
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
     const logContent = fs.readFileSync(LOG_FILE, 'utf8');
@@ -103,7 +93,6 @@ if (fs.existsSync(LOG_FILE)) {
     });
     console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
-
 // Auto-cleanup for random codes every hour
 setInterval(() => {
     randomCodes.forEach(code => {
@@ -114,7 +103,6 @@ setInterval(() => {
     broadcastRandomCodes();
     console.log('Auto-cleaned random codes.');
 }, 3600000);
-
 // Server-side ping to detect dead connections
 const pingInterval = setInterval(() => {
     wss.clients.forEach(ws => {
@@ -123,7 +111,6 @@ const pingInterval = setInterval(() => {
         ws.ping();
     });
 }, 30000);
-
 // Cleanup expired revoked tokens
 setInterval(() => {
     const now = Date.now();
@@ -134,7 +121,6 @@ setInterval(() => {
     });
     console.log(`Cleaned up expired revoked tokens. Remaining: ${revokedTokens.size}`);
 }, 3600000);
-
 wss.on('connection', (ws, req) => {
     const origin = req.headers.origin;
     if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -142,39 +128,31 @@ wss.on('connection', (ws, req) => {
         ws.close(1008, 'Invalid origin');
         return;
     }
-
     ws.isAlive = true;
     ws.on('pong', () => {
         ws.isAlive = true;
     });
-
     const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress; // Handle proxies
     const hashedIp = hashIp(clientIp);
-
     if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) {
         ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
         return;
     }
-
     let clientId, code, username;
     let isAdmin = false;
-
     ws.on('message', async (message) => {
         if (!restrictRate(ws)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
             return;
         }
-
         try {
             const data = JSON.parse(message);
             console.log('Received:', data);
-
             Object.keys(data).forEach(key => {
                 if (typeof data[key] === 'string' && !(data.type === 'public-key' && key === 'publicKey')) {
                     data[key] = validator.escape(validator.trim(data[key]));
                 }
             });
-
             if (data.type === 'public-key' && data.publicKey) {
                 if (!isValidBase64(data.publicKey)) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format' }));
@@ -182,7 +160,6 @@ wss.on('connection', (ws, req) => {
                     return;
                 }
             }
-
             if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature') {
                 if (data.secret === ADMIN_SECRET) {
                     isAdmin = true;
@@ -191,13 +168,11 @@ wss.on('connection', (ws, req) => {
                     return;
                 }
             }
-
             if (!features.enableService && !isAdmin && data.type !== 'connect') {
                 ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
                 ws.close();
                 return;
             }
-
             if (data.type !== 'connect') {
                 if (!data.token) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
@@ -218,7 +193,6 @@ wss.on('connection', (ws, req) => {
                     return;
                 }
             }
-
             if (data.type === 'connect') {
                 clientId = data.clientId || uuidv4();
                 ws.clientId = clientId;
@@ -229,7 +203,6 @@ wss.on('connection', (ws, req) => {
                 ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
                 return;
             }
-
             if (data.type === 'refresh-token') {
                 if (!data.refreshToken) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Missing refresh token' }));
@@ -249,7 +222,7 @@ wss.on('connection', (ws, req) => {
                     const oldRefreshExpiry = decoded.exp * 1000;
                     revokedTokens.set(data.refreshToken, oldRefreshExpiry);
                     // Generate new access and refresh tokens (rotation)
-                    const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '5m' });
+                    const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
                     const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
                     clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
                     ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
@@ -259,7 +232,6 @@ wss.on('connection', (ws, req) => {
                 }
                 return;
             }
-
             if (data.type === 'public-key') {
                 if (rooms.has(data.code)) {
                     const room = rooms.get(data.code);
@@ -270,7 +242,6 @@ wss.on('connection', (ws, req) => {
                 }
                 return;
             }
-
             if (data.type === 'encrypted-room-key') {
                 if (rooms.has(data.code)) {
                     const room = rooms.get(data.code);
@@ -281,7 +252,6 @@ wss.on('connection', (ws, req) => {
                 }
                 return;
             }
-
             if (data.type === 'join') {
                 if (!features.enableService) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
@@ -371,7 +341,6 @@ wss.on('connection', (ws, req) => {
                 ws.username = username;
                 broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
             }
-
             if (data.type === 'leave') {
                 if (rooms.has(data.code)) {
                     const room = rooms.get(data.code);
@@ -419,7 +388,6 @@ wss.on('connection', (ws, req) => {
                     }
                 }
             }
-
             if (data.type === 'set-max-clients') {
                 if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
                     const room = rooms.get(data.code);
@@ -428,7 +396,6 @@ wss.on('connection', (ws, req) => {
                     logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
                 }
             }
-
             if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
                 if (rooms.has(data.code)) {
                     const room = rooms.get(data.code);
@@ -441,7 +408,6 @@ wss.on('connection', (ws, req) => {
                     }
                 }
             }
-
             if (data.type === 'submit-random') {
                 if (!restrictIpRate(clientIp, 'submit-random')) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.' }));
@@ -461,11 +427,9 @@ wss.on('connection', (ws, req) => {
                     incrementFailure(clientIp);
                 }
             }
-
             if (data.type === 'get-random-codes') {
                 ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
             }
-
             if (data.type === 'remove-random-code') {
                 if (randomCodes.has(data.code)) {
                     randomCodes.delete(data.code);
@@ -473,7 +437,6 @@ wss.on('connection', (ws, req) => {
                     console.log(`Removed code ${data.code} from randomCodes`);
                 }
             }
-
             if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice') {
                 if (data.type === 'relay-image' && !features.enableImages) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Image messages are disabled.' }));
@@ -515,7 +478,6 @@ wss.on('connection', (ws, req) => {
                 });
                 console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
             }
-
             if (data.type === 'get-stats') {
                 if (data.secret === ADMIN_SECRET) {
                     const now = new Date();
@@ -536,7 +498,6 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
                 }
             }
-
             if (data.type === 'get-features') {
                 if (data.secret === ADMIN_SECRET) {
                     ws.send(JSON.stringify({ type: 'features', ...features }));
@@ -544,7 +505,6 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
                 }
             }
-
             if (data.type === 'toggle-feature') {
                 if (data.secret === ADMIN_SECRET) {
                     const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
@@ -575,7 +535,6 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
                 }
             }
-
             if (data.type === 'ping') {
                 ws.send(JSON.stringify({ type: 'pong' }));
             }
@@ -585,7 +544,6 @@ wss.on('connection', (ws, req) => {
             incrementFailure(clientIp);
         }
     });
-
     ws.on('close', () => {
         if (ws.clientId) {
             const tokens = clientTokens.get(ws.clientId);
@@ -641,7 +599,6 @@ wss.on('connection', (ws, req) => {
         }
     });
 });
-
 // Rate limiting function: 50 messages per minute per client (non-admins)
 function restrictRate(ws) {
     if (ws.isAdmin) return true;
@@ -661,7 +618,6 @@ function restrictRate(ws) {
     }
     return true;
 }
-
 // IP rate limiting function: max 5 actions (join/submit) per minute per IP
 function restrictIpRate(ip, action) {
     const hashedIp = hashIp(ip);
@@ -681,7 +637,6 @@ function restrictIpRate(ip, action) {
     }
     return true;
 }
-
 // Daily IP limit for joins (100/day)
 function restrictIpDaily(ip, action) {
     const hashedIp = hashIp(ip);
@@ -697,7 +652,6 @@ function restrictIpDaily(ip, action) {
     }
     return true;
 }
-
 // Increment failure count and ban IP with exponential duration if threshold reached
 function incrementFailure(ip) {
     const hashedIp = hashIp(ip);
@@ -726,17 +680,14 @@ function incrementFailure(ip) {
         ipFailureCounts.delete(hashedIp); // Reset failure count after ban
     }
 }
-
 function validateUsername(username) {
     const regex = /^[a-zA-Z0-9]{1,16}$/;
     return username && regex.test(username);
 }
-
 function validateCode(code) {
     const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
     return code && regex.test(code);
 }
-
 function logStats(data) {
     const timestamp = new Date().toISOString();
     const day = timestamp.slice(0, 10);
@@ -774,7 +725,6 @@ function logStats(data) {
         }
     });
 }
-
 function updateLogFile() {
     const now = new Date();
     const day = now.toISOString().slice(0, 10);
@@ -782,7 +732,7 @@ function updateLogFile() {
     const connectionCount = dailyConnections.get(day)?.size || 0;
     const allTimeUserCount = allTimeUsers.size;
     const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
-    
+   
     fs.appendFileSync(LOG_FILE, logEntry, (err) => {
         if (err) {
             console.error('Error writing to log file:', err);
@@ -791,7 +741,6 @@ function updateLogFile() {
         }
     });
 }
-
 fs.writeFileSync(LOG_FILE, '', (err) => {
     if (err) console.error('Error creating log file:', err);
     else {
@@ -799,17 +748,6 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
         setInterval(updateLogFile, UPDATE_INTERVAL);
     }
 });
-
-function generateCode() {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 16; i++) {
-        result += chars.charAt(Math.random() * chars.length);
-        if (i % 4 === 3 && i < 15) result += '-';
-    }
-    return result;
-}
-
 function broadcast(code, message) {
     const room = rooms.get(code);
     if (room) {
@@ -820,7 +758,6 @@ function broadcast(code, message) {
         });
     }
 }
-
 function broadcastRandomCodes() {
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
@@ -828,8 +765,6 @@ function broadcastRandomCodes() {
         }
     });
 }
-
 server.listen(process.env.PORT || 10000, () => {
     console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-

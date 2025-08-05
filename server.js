@@ -270,7 +270,7 @@ wss.on('connection', (ws, req) => {
                 code = data.code;
                 clientId = data.clientId;
                 username = data.username;
-                if (!validateUsername(username)) {
+                if (username !== '' && !validateUsername(username)) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Invalid username' }));
                     incrementFailure(clientIp);
                     return;
@@ -309,7 +309,7 @@ wss.on('connection', (ws, req) => {
                             incrementFailure(clientIp);
                             return;
                         }
-                    } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
+                    } else if (username !== '' && Array.from(room.clients.values()).some(c => c.username === username)) {
                         ws.send(JSON.stringify({ type: 'error', message: 'Username already taken' }));
                         incrementFailure(clientIp);
                         return;
@@ -640,8 +640,9 @@ function incrementFailure(ip) {
     }
 }
 function validateUsername(username) {
+    if (username === '') return true; // Allow empty for anonymous
     const regex = /^[a-zA-Z0-9]{1,16}$/;
-    return username && regex.test(username);
+    return regex.test(username);
 }
 function validateCode(code) {
     const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;

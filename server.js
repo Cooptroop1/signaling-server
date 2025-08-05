@@ -173,7 +173,7 @@ wss.on('connection', (ws, req) => {
                 ws.close();
                 return;
             }
-            if (data.type !== 'connect') {
+            if (data.type !== 'connect' && data.type !== 'refresh-token') {
                 if (!data.token) {
                     ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
                     return;
@@ -340,53 +340,6 @@ wss.on('connection', (ws, req) => {
                 ws.code = code;
                 ws.username = username;
                 broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
-            }
-            if (data.type === 'leave') {
-                if (rooms.has(data.code)) {
-                    const room = rooms.get(data.code);
-                    const isInitiator = data.clientId === room.initiator;
-                    room.clients.delete(data.clientId);
-                    logStats({ clientId: data.clientId, code: data.code, event: 'leave', totalClients: room.clients.size, isInitiator });
-                    if (data.token) {
-                        const decoded = jwt.verify(data.token, JWT_SECRET, { ignoreExpiration: true });
-                        const expiry = decoded.exp * 1000;
-                        revokedTokens.set(data.token, expiry);
-                        if (data.refreshToken) {
-                            const refreshDecoded = jwt.verify(data.refreshToken, JWT_SECRET, { ignoreExpiration: true });
-                            revokedTokens.set(data.refreshToken, refreshDecoded.exp * 1000);
-                        }
-                        clientTokens.delete(data.clientId);
-                    }
-                    rateLimits.delete(data.clientId);
-                    if (room.clients.size === 0 || isInitiator) {
-                        rooms.delete(data.code);
-                        randomCodes.delete(data.code);
-                        broadcast(data.code, {
-                            type: 'client-disconnected',
-                            clientId: data.clientId,
-                            totalClients: 0,
-                            isInitiator
-                        });
-                    } else {
-                        if (isInitiator) {
-                            const newInitiator = room.clients.keys().next().value;
-                            if (newInitiator) {
-                                room.initiator = newInitiator;
-                                broadcast(data.code, {
-                                    type: 'initiator-changed',
-                                    newInitiator,
-                                    totalClients: room.clients.size
-                                });
-                            }
-                        }
-                        broadcast(data.code, {
-                            type: 'client-disconnected',
-                            clientId: data.clientId,
-                            totalClients: room.clients.size,
-                            isInitiator
-                        });
-                    }
-                }
             }
             if (data.type === 'set-max-clients') {
                 if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {

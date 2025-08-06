@@ -7,6 +7,7 @@ const validator = require('validator');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -21,6 +22,7 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
  });
  console.log('Using HTTPS server for local development');
 }
+
 // Add HTTP request handler to serve static files with nonce injection
 server.on('request', (req, res) => {
  // Add HSTS header to all responses
@@ -66,6 +68,7 @@ server.on('request', (req, res) => {
  res.end(data);
  });
 });
+
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
@@ -103,6 +106,7 @@ let features = {
  enableVoice: true,
  enableVoiceCalls: true
 };
+
 // Load features from file if exists
 if (fs.existsSync(FEATURES_FILE)) {
  try {
@@ -114,20 +118,24 @@ if (fs.existsSync(FEATURES_FILE)) {
 } else {
  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
+
 // Function to save features to file
 function saveFeatures() {
  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
  console.log('Saved features:', features);
 }
+
 function hashIp(ip) {
  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
+
 // Validate base64 string
 function isValidBase64(str) {
  if (typeof str !== 'string') return false;
  const base64Regex = /^[A-Za-z0-9+/=]+$/;
  return base64Regex.test(str) && str.length % 4 === 0;
 }
+
 // Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
@@ -138,6 +146,7 @@ if (fs.existsSync(LOG_FILE)) {
  });
  console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
+
 // Auto-cleanup for random codes every hour
 setInterval(() => {
  randomCodes.forEach(code => {
@@ -148,6 +157,7 @@ setInterval(() => {
  broadcastRandomCodes();
  console.log('Auto-cleaned random codes.');
 }, 3600000);
+
 // Server-side ping to detect dead connections
 const pingInterval = setInterval(() => {
  wss.clients.forEach(ws => {
@@ -156,6 +166,7 @@ const pingInterval = setInterval(() => {
  ws.ping();
  });
 }, 30000);
+
 // Cleanup expired revoked tokens
 setInterval(() => {
  const now = Date.now();
@@ -166,6 +177,7 @@ setInterval(() => {
  });
  console.log(`Cleaned up expired revoked tokens. Remaining: ${revokedTokens.size}`);
 }, 3600000);
+
 wss.on('connection', (ws, req) => {
  const origin = req.headers.origin;
  if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -603,6 +615,7 @@ wss.on('connection', (ws, req) => {
  }
  });
 });
+
 // Rate limiting function: 50 messages per minute per client (non-admins)
 function restrictRate(ws) {
  if (ws.isAdmin) return true;
@@ -622,6 +635,7 @@ function restrictRate(ws) {
  }
  return true;
 }
+
 // IP rate limiting function: max 5 actions (join/submit) per minute per IP
 function restrictIpRate(ip, action) {
  const hashedIp = hashIp(ip);
@@ -641,6 +655,7 @@ function restrictIpRate(ip, action) {
  }
  return true;
 }
+
 // Daily IP limit for joins (100/day)
 function restrictIpDaily(ip, action) {
  const hashedIp = hashIp(ip);
@@ -656,6 +671,7 @@ function restrictIpDaily(ip, action) {
  }
  return true;
 }
+
 // Increment failure count and ban IP with exponential duration if threshold reached
 function incrementFailure(ip) {
  const hashedIp = hashIp(ip);
@@ -684,14 +700,17 @@ function incrementFailure(ip) {
  ipFailureCounts.delete(hashedIp); // Reset failure count after ban
  }
 }
+
 function validateUsername(username) {
  const regex = /^[a-zA-Z0-9]{1,16}$/;
  return username && regex.test(username);
 }
+
 function validateCode(code) {
  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
  return code && regex.test(code);
 }
+
 function logStats(data) {
  const timestamp = new Date().toISOString();
  const day = timestamp.slice(0, 10);
@@ -729,6 +748,7 @@ function logStats(data) {
  }
  });
 }
+
 function updateLogFile() {
  const now = new Date();
  const day = now.toISOString().slice(0, 10);
@@ -745,6 +765,7 @@ function updateLogFile() {
  }
  });
 }
+
 fs.writeFileSync(LOG_FILE, '', (err) => {
  if (err) console.error('Error creating log file:', err);
  else {
@@ -752,6 +773,7 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
  setInterval(updateLogFile, UPDATE_INTERVAL);
  }
 });
+
 function broadcast(code, message) {
  const room = rooms.get(code);
  if (room) {
@@ -762,6 +784,7 @@ function broadcast(code, message) {
  });
  }
 }
+
 function broadcastRandomCodes() {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN) {
@@ -769,4 +792,7 @@ function broadcastRandomCodes() {
  }
  });
 }
+
 server.listen(process.env.PORT || 10000, () => {
+ console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});

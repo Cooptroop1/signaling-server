@@ -23,6 +23,8 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
 }
 // Add HTTP request handler to serve static files with nonce injection for admin.html
 server.on('request', (req, res) => {
+  // Add HSTS header to all responses
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   const filePath = path.join(__dirname, req.url === '/' ? 'index.html' : req.url);
   fs.readFile(filePath, 'utf8', (err, data) => {
     if (err) {
@@ -45,6 +47,20 @@ server.on('request', (req, res) => {
       // Add nonce to inline <script> and <style> tags
       data = data.replace(/<script>/g, `<script nonce="${nonce}">`);
       data = data.replace(/<style>/g, `<style nonce="${nonce}">`);
+
+      // Handle secure cookies for sessions (clientId)
+      let clientIdFromCookie;
+      const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [name, value] = cookie.trim().split('=');
+        acc[name] = value;
+        return acc;
+      }, {}) : {};
+      clientIdFromCookie = cookies['clientId'];
+      if (!clientIdFromCookie) {
+        clientIdFromCookie = uuidv4();
+        // Set secure cookie for clientId
+        res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
+      }
       res.writeHead(200, { 'Content-Type': 'text/html' });
     } else {
       // Serve other files as-is (e.g., js, css)

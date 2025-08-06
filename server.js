@@ -1,4 +1,3 @@
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -38,13 +37,13 @@ server.on('request', (req, res) => {
       const nonce = crypto.randomBytes(16).toString('base64');
       // Update CSP to use nonce instead of sha256 hashes
       let updatedCSP = "default-src 'self'; " +
-                       `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-                       `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-                       "img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-                       "connect-src 'self' wss://signaling-server-zc6m.onrender.com;";
+        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        "img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com;";
       // Replace the meta CSP in the HTML
       data = data.replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
-                          `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       // Add nonce to inline <script> and <style> tags
       data = data.replace(/<script>/g, `<script nonce="${nonce}">`);
       data = data.replace(/<style>/g, `<style nonce="${nonce}">`);
@@ -481,7 +480,8 @@ wss.on('connection', (ws, req) => {
               encryptedContent: data.encryptedContent,
               encryptedData: data.encryptedData,
               iv: data.iv,
-              salt: data.salt
+              salt: data.salt,
+              signature: data.signature // Forward the signature
             }));
           }
         });

@@ -301,6 +301,16 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
+      if (data.type === 'new-room-key') {
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          const targetWs = room.clients.get(data.targetId)?.ws;
+          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code }));
+          }
+        }
+        return;
+      }
       if (data.type === 'join') {
         if (!features.enableService) {
           ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));

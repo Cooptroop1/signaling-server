@@ -545,7 +545,7 @@ wss.on('connection', (ws, req) => {
       const timestamp = new Date().toISOString();
       fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
       ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
-      // New: Send features-update to all clients, error only to non-admins
+      // Send features-update to all clients, error only to non-admins
       wss.clients.forEach(client => {
        if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({ type: 'features-update', ...features }));
@@ -594,3 +594,220 @@ wss.on('connection', (ws, req) => {
    }
   }
   if (ws.code && rooms.has(ws.code)) {
+   const room = rooms.get(ws.code);
+   const isInitiator = ws.clientId === room.initiator;
+   room.clients.delete(ws.clientId);
+   rateLimits.delete(ws.clientId);
+   logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
+   if (room.clients.size === 0 || isInitiator) {
+    rooms.delete(ws.code);
+    randomCodes.delete(ws.code);
+    broadcast(ws.code, {
+     type: 'client-disconnected',
+     clientId: ws.clientId,
+     totalClients: 0,
+     isInitiator
+    });
+   } else {
+    if (isInitiator) {
+     const newInitiator = room.clients.keys().next().value;
+     if (newInitiator) {
+      room.initiator = newInitiator;
+      broadcast(ws.code, {
+       type: 'initiator-changed',
+       newInitiator,
+       totalClients: room.clients.size
+      });
+     }
+    }
+    broadcast(ws.code, {
+     type: 'client-disconnected',
+     clientId: ws.clientId,
+     totalClients: room.clients.size,
+     isInitiator
+    });
+   }
+  }
+ });
+});
+
+// Rate limiting function: 50 messages per minute per client (non-admins)
+function restrictRate(ws) {
+ if (ws.isAdmin) return true;
+ if (!ws.clientId) return true;
+ const now = Date.now();
+ const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
+ if (now - rateLimit.startTime >= 60000) {
+  rateLimit.count = 0;
+  rateLimit.startTime = now;
+ }
+ rateLimit.count += 1;
+ rateLimits.set(ws.clientId, rateLimit);
+ if (rateLimit.count > 50) {
+  console.warn(`Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages in 60s`);
+  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages\n`);
+  return false;
+ }
+ return true;
+}
+
+// IP rate limiting function: max 5 actions (join/submit) per minute per IP
+function restrictIpRate(ip, action) {
+ const hashedIp = hashIp(ip);
+ const now = Date.now();
+ const key = `${hashedIp}:${action}`;
+ const rateLimit = ipRateLimits.get(key) || { count: 0, startTime: now };
+ if (now - rateLimit.startTime >= 60000) {
+  rateLimit.count = 0;
+  rateLimit.startTime = now;
+ }
+ rateLimit.count += 1;
+ ipRateLimits.set(key, rateLimit);
+ if (rateLimit.count > 5) {
+  console.warn(`IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count} in 60s`);
+  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count}\n`);
+  return false;
+ }
+ return true;
+}
+
+// Daily IP limit for joins (100/day)
+function restrictIpDaily(ip, action) {
+ const hashedIp = hashIp(ip);
+ const day = new Date().toISOString().slice(0, 10);
+ const key = `${hashedIp}:${action}:${day}`;
+ const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
+ dailyLimit.count += 1;
+ ipDailyLimits.set(key, dailyLimit);
+ if (dailyLimit.count > 100) {
+  console.warn(`Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count} in day ${day}`);
+  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count}\n`);
+  return false;
+ }
+ return true;
+}
+
+// Increment failure count and ban IP with exponential duration if threshold reached
+function incrementFailure(ip) {
+ const hashedIp = hashIp(ip);
+ const failure = ipFailureCounts.get(hashedIp) || { count: 0, banLevel: 0 };
+ failure.count += 1;
+ ipFailureCounts.set(hashedIp, failure);
+ if (failure.count % 5 === 0) {
+  console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
+ }
+ if (failure.count >= 10) {
+  // Exponential ban durations: 5min, 30min, 1hr
+  const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]; // 5min, 30min, 1hr
+  failure.banLevel = Math.min(failure.banLevel + 1, 2); // Cap at level 2 (1hr)
+  const duration = banDurations[failure.banLevel];
+  const expiry = Date.now() + duration;
+  ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
+  const timestamp = new Date().toISOString();
+  const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+  fs.appendFileSync(LOG_FILE, banLogEntry, (err) => {
+   if (err) {
+    console.error('Error appending ban log:', err);
+   } else {
+    console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+   }
+  });
+  ipFailureCounts.delete(hashedIp); // Reset failure count after ban
+ }
+}
+
+function validateUsername(username) {
+ const regex = /^[a-zA-Z0-9]{1,16}$/;
+ return username && regex.test(username);
+}
+
+function validateCode(code) {
+ const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+ return code && regex.test(code);
+}
+
+function logStats(data) {
+ const timestamp = new Date().toISOString();
+ const day = timestamp.slice(0, 10);
+ const stats = {
+  clientId: data.clientId,
+  username: data.username || '',
+  targetId: data.targetId || '',
+  code: data.code || '',
+  event: data.event || '',
+  totalClients: data.totalClients || 0,
+  isInitiator: data.isInitiator || false,
+  timestamp,
+  day
+ };
+ if (data.event === 'connect' || data.event === 'join' || data.event === 'webrtc-connection') {
+  if (!dailyUsers.has(day)) {
+   dailyUsers.set(day, new Set());
+  }
+  if (!dailyConnections.has(day)) {
+   dailyConnections.set(day, new Set());
+  }
+  dailyUsers.get(day).add(data.clientId);
+  allTimeUsers.add(data.clientId);
+  if (data.event === 'webrtc-connection' && data.targetId) {
+   dailyUsers.get(day).add(data.targetId);
+   allTimeUsers.add(data.targetId);
+   const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
+   dailyConnections.get(day).add(connectionKey);
+  }
+ }
+ const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
+ fs.appendFileSync(LOG_FILE, logEntry, (err) => {
+  if (err) {
+   console.error('Error appending to log file:', err);
+  }
+ });
+}
+
+function updateLogFile() {
+ const now = new Date();
+ const day = now.toISOString().slice(0, 10);
+ const userCount = dailyUsers.get(day)?.size || 0;
+ const connectionCount = dailyConnections.get(day)?.size || 0;
+ const allTimeUserCount = allTimeUsers.size;
+ const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
+ 
+ fs.appendFileSync(LOG_FILE, logEntry, (err) => {
+  if (err) {
+   console.error('Error writing to log file:', err);
+  } else {
+   console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
+  }
+ });
+}
+
+fs.writeFileSync(LOG_FILE, '', (err) => {
+ if (err) console.error('Error creating log file:', err);
+ else {
+  updateLogFile();
+  setInterval(updateLogFile, UPDATE_INTERVAL);
+ }
+});
+
+function broadcast(code, message) {
+ const room = rooms.get(code);
+ if (room) {
+  room.clients.forEach(client => {
+   if (client.ws.readyState === WebSocket.OPEN) {
+    client.ws.send(JSON.stringify(message));
+   }
+  });
+ }
+}
+
+function broadcastRandomCodes() {
+ wss.clients.forEach(client => {
+  if (client.readyState === WebSocket.OPEN) {
+   client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+  }
+ });
+}
+
+server.listen(process.env.PORT || 10000, () => {
+ console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});

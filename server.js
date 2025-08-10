@@ -39,8 +39,8 @@ server.on('request', (req, res) => {
     const nonce = crypto.randomBytes(16).toString('base64');
     // Update CSP to use nonce instead of sha256 hashes
     let updatedCSP = "default-src 'self'; " +
-     `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-     `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+     `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-inline'; ` +
+     `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-inline'; ` +
      "img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
      "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;";
     // Replace the meta CSP in the HTML

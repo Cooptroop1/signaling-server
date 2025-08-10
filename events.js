@@ -689,7 +689,7 @@
     const blob = new Blob(chunks, { type: 'audio/webm' });
     stream.getTracks().forEach(track => track.stop());
     clearInterval(voiceTimerInterval);
-    document.getElementById('voiceTimer').style.display = 'none';
+    document.getElementById('voiceTimer').classList.add('hidden');
     document.getElementById('voiceButton').classList.remove('recording');
     document.getElementById('voiceButton').textContent = '🎤';
     if (blob.size > 0) {
@@ -701,7 +701,7 @@
    mediaRecorder.start();
    document.getElementById('voiceButton').classList.add('recording');
    document.getElementById('voiceButton').textContent = '⏹';
-   document.getElementById('voiceTimer').style.display = 'flex';
+   document.getElementById('voiceTimer').classList.remove('hidden');
    document.getElementById('voiceTimer').textContent = '0:00';
    voiceTimerInterval = setInterval(() => {
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -737,8 +737,8 @@
  }
  const messageInput = document.getElementById('messageInput');
  messageInput.addEventListener('input', () => {
-  messageInput.style.height = '2.5rem';
-  messageInput.style.height = `${Math.min(messageInput.scrollHeight, 12.5 * 16)}px`;
+  // Use class toggle instead of inline style
+  messageInput.classList.add('expanded');
  });
  messageInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -777,8 +777,7 @@
   copyCodeButton.classList.add('hidden');
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   document.getElementById('messages').innerHTML = '';
-  document.getElementById('messageInput').value = '';
-  document.getElementById('messageInput').style.height = '2.5rem';
+  document.getElementById('messageInput').classList.remove('expanded');
   document.getElementById('usernameInput').value = '';
   document.getElementById('usernameConnectInput').value = '';
   document.getElementById('codeInput').value = '';
@@ -814,13 +813,13 @@
  });
  document.getElementById('usernameConnectInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
-   event.preventDefault();
+   event.preventDefault;
    document.getElementById('codeInput')?.focus();
   }
  });
  document.getElementById('codeInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
-   event.preventDefault();
+   event.preventDefault;
    document.getElementById('connectButton')?.click();
   }
  });

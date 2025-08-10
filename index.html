@@ -285,6 +285,9 @@
  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
  transition: all 0.2s ease;
  }
+ #messageInput.expanded {
+ height: auto;
+ }
  #imageButton, #voiceButton, #voiceCallButton, #sendButton, #grokButton {
  width: 2.5rem;
  height: 2.5rem;
@@ -468,6 +471,9 @@
  border-radius: 0.5rem;
  border: 1px solid #ccc;
  }
+ #imageInput {
+ display: none;
+ }
  </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
@@ -479,7 +485,7 @@
  <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">E2E Encrypted (P2P)</div>
  <div id="initialContainer">
  <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
- <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
+ <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
  </div>
  <div id="usernameContainer" class="hidden">
  <label for="usernameInput" class="sr-only">Enter your username</label>
@@ -500,7 +506,7 @@
  <div class="input-container hidden">
  <label for="messageInput" class="sr-only">Type a message</label>
  <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
- <input type="file" id="imageInput" accept="image/jpeg,image/png" style="display: none;" aria-label="Upload image" />
+ <input type="file" id="imageInput" accept="image/jpeg,image/png" aria-label="Upload image" />
  <button id="imageButton" title="Send Image" aria-label="Send image">📷</button>
  <button id="voiceButton" title="Record Voice" aria-label="Record voice message">🎤</button>
  <button id="voiceCallButton" title="Start Voice Call" aria-label="Start voice call">📞</button>
@@ -512,7 +518,7 @@
  <div id="grokKeyContainer" class="hidden">
  <label for="grokApiKey" class="text-sm text-gray-600">Enter your xAI API Key (private, stored locally):</label>
  <input id="grokApiKey" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="xai_xxxxxxxxxxxx">
- <button id="saveGrokKey" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Save Key</button>
+ <button id="saveGrokKey" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Save Key</button>
  </div>
  </div>
  <div id="connectContainer" class="hidden">
@@ -522,7 +528,7 @@
  <label for="codeInput" class="sr-only">Enter chat code</label>
  <input id="codeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter code (xxxx-xxxx-xxxx-xxxx)" aria-describedby="codeHelp" maxlength="19">
  <div id="codeHelp" class="text-sm text-gray-600 mb-2">Code format: xxxx-xxxx-xxxx-xxxx</div>
- <button id="connectButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600 transition-colors" aria-label="Connect to chat">Connect</button>
+ <button id="connectButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to chat">Connect</button>
  <button id="backButtonConnect" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
  </div>
  <div class="text-center mt-4">

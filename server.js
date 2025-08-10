@@ -90,7 +90,7 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
-const ALLOWED_ORIGINS = ['https://anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
+const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback';
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {

@@ -6,11 +6,15 @@ let localStream = null;
 let voiceCallActive = false;
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
+// New: Flag to prevent concurrent renegotiations
+let renegotiating = new Map(); // Per targetId
+// New: Track audio output mode
+let audioOutputMode = 'earpiece'; // Default to earpiece
 
 async function sendMedia(file, type) {
   const validTypes = {
-  image: ['image/jpeg', 'image/png'],
-  voice: ['audio/webm', 'audio/ogg']
+    image: ['image/jpeg', 'image/png'],
+    voice: ['audio/webm', 'audio/ogg']
   };
   // Check if feature is enabled before proceeding
   if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
@@ -232,10 +236,14 @@ function startPeerConnection(targetId, isOfferer) {
       const audio = document.createElement('audio');
       audio.srcObject = event.streams[0];
       audio.autoplay = true;
+      // Default to lower volume for earpiece simulation
+      audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
       audio.play().catch(error => console.error('Error playing remote audio:', error));
       remoteAudios.set(targetId, audio);
       document.getElementById('remoteAudioContainer').appendChild(audio);
       document.getElementById('remoteAudioContainer').classList.remove('hidden');
+      // Attempt to set audio output to default (earpiece) if supported
+      setAudioOutput(audio, targetId);
     }
   };
   peerConnection.ondatachannel = (event) => {
@@ -248,6 +256,10 @@ function startPeerConnection(targetId, isOfferer) {
     dataChannel = event.channel;
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
+  };
+  // New: Listen for signaling state changes for debugging
+  peerConnection.onsignalingstatechange = () => {
+    console.log(`Signaling state for ${targetId}: ${peerConnection.signalingState}`);
   };
   if (isOfferer) {
     peerConnection.createOffer().then(offer => {
@@ -292,6 +304,8 @@ function setupDataChannel(dataChannel, targetId) {
     retryCounts.delete(targetId);
     updateMaxClientsUI();
     document.getElementById('messageInput')?.focus();
+    // Show audio output button when call is possible
+    document.getElementById('audioOutputButton').classList.remove('hidden');
   };
   dataChannel.onmessage = async (event) => {
     const now = performance.now();
@@ -397,6 +411,7 @@ function setupDataChannel(dataChannel, targetId) {
     if (dataChannels.size === 0) {
       inputContainer.classList.add('hidden');
       messages.classList.add('waiting');
+      document.getElementById('audioOutputButton').classList.add('hidden');
     }
   };
 }
@@ -565,6 +580,7 @@ async function startVoiceCall() {
     voiceCallActive = true;
     document.getElementById('voiceCallButton').classList.add('active');
     document.getElementById('voiceCallButton').title = 'End Voice Call';
+    document.getElementById('audioOutputButton').classList.remove('hidden');
     showStatusMessage('Voice call started.');
   } catch (error) {
     console.error('Error starting voice call:', error);
@@ -588,12 +604,14 @@ function stopVoiceCall() {
   voiceCallActive = false;
   document.getElementById('voiceCallButton').classList.remove('active');
   document.getElementById('voiceCallButton').title = 'Start Voice Call';
+  document.getElementById('audioOutputButton').classList.add('hidden');
   showStatusMessage('Voice call ended.');
 }
 
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
-  if (peerConnection && peerConnection.signalingState === 'stable') {
+  if (peerConnection && peerConnection.signalingState === 'stable' && !renegotiating.get(targetId)) {
+    renegotiating.set(targetId, true);
     try {
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
@@ -601,7 +619,11 @@ async function renegotiate(targetId) {
     } catch (error) {
       console.error(`Error renegotiating with ${targetId}:`, error);
       showStatusMessage('Failed to renegotiate peer connection.');
+    } finally {
+      renegotiating.set(targetId, false);
     }
+  } else if (renegotiating.get(targetId)) {
+    console.log(`Renegotiation already in progress for ${targetId}, skipping.`);
   }
 }
 
@@ -745,6 +767,7 @@ function updateFeaturesUI() {
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
   const voiceCallButton = document.getElementById('voiceCallButton');
+  const audioOutputButton = document.getElementById('audioOutputButton');
   const grokButton = document.getElementById('grokButton');
   if (imageButton) {
     imageButton.classList.toggle('hidden', !features.enableImages);
@@ -757,6 +780,12 @@ function updateFeaturesUI() {
   if (voiceCallButton) {
     voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
     voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
+  }
+  if (audioOutputButton) {
+    audioOutputButton.classList.toggle('hidden', !features.enableVoiceCalls || !isConnected);
+    audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
+    audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
+    audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
   }
   if (grokButton) {
     grokButton.classList.toggle('hidden', !features.enableGrokBot);
@@ -835,4 +864,49 @@ function saveGrokKey() {
   } else {
     showStatusMessage('Error: Enter a valid API key.');
   }
+}
+
+// New: Function to set audio output
+async function setAudioOutput(audioElement, targetId) {
+  try {
+    if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
+      if (audioOutputs.length > 0) {
+        const targetDevice = audioOutputMode === 'speaker' 
+          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
+          : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
+        if (targetDevice) {
+          await audioElement.setSinkId(targetDevice.deviceId);
+          console.log(`Set audio output for ${targetId} to ${targetDevice.label}`);
+        } else {
+          console.warn(`No suitable ${audioOutputMode} device found for ${targetId}, using default`);
+          audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback
+        }
+      } else {
+        console.warn(`No audio output devices available for ${targetId}`);
+        audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback
+      }
+    } else {
+      console.log(`setSinkId not supported, using volume adjustment for ${targetId}`);
+      audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback for iOS or unsupported browsers
+    }
+  } catch (error) {
+    console.error(`Error setting audio output for ${targetId}:`, error);
+    audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback
+  }
+}
+
+// New: Function to toggle audio output mode
+function toggleAudioOutput() {
+  audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
+  console.log(`Toggling audio output to ${audioOutputMode}`);
+  remoteAudios.forEach((audio, targetId) => {
+    setAudioOutput(audio, targetId);
+  });
+  const audioOutputButton = document.getElementById('audioOutputButton');
+  audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
+  audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
+  audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
+  showStatusMessage(`Audio output set to ${audioOutputMode}`);
 }

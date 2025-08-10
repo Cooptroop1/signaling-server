@@ -92,6 +92,10 @@
         <button id="toggleVoiceCalls" aria-label="Toggle voice calls">Loading...</button>
       </div>
       <div class="feature-toggle">
+        <span>Audio Toggle</span>
+        <button id="toggleAudioToggle" aria-label="Toggle audio toggle">Loading...</button>
+      </div>
+      <div class="feature-toggle">
         <span>Grok Bot</span>
         <button id="toggleGrokBot" aria-label="Toggle Grok bot">Loading...</button>
       </div>
@@ -207,6 +211,8 @@
           document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
           document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
           document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
+          document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
+          document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
           document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
           document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
           if (!data.enableService) {
@@ -231,6 +237,8 @@
           document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
           document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
           document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
+          document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
+          document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
           document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
           document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
           showStatusMessage(`Features updated: ${data.enableService ? 'Service enabled' : 'Service disabled'}`);
@@ -317,6 +325,7 @@
     document.getElementById('toggleImages').onclick = () => toggleFeature('images');
     document.getElementById('toggleVoice').onclick = () => toggleFeature('voice');
     document.getElementById('toggleVoiceCalls').onclick = () => toggleFeature('voiceCalls');
+    document.getElementById('toggleAudioToggle').onclick = () => toggleFeature('audioToggle');
     document.getElementById('toggleGrokBot').onclick = () => toggleFeature('grokBot');
   </script>
 </body>

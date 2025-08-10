@@ -383,10 +383,16 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(newRoomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('New room master received and set for PFS.');
+        socket.send(JSON.stringify({ type: 'ack-new-room-key', targetId: clientId, code, clientId, token })); // Send ack
       } catch (error) {
         console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
       }
+    }
+    if (message.type === 'ack-new-room-key' && isInitiator && pendingAcks.has(message.targetId)) {
+      console.log(`Received ack for new-room-key from ${message.targetId}`);
+      clearTimeout(pendingAcks.get(message.targetId));
+      pendingAcks.delete(message.targetId);
     }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
@@ -482,6 +488,12 @@ async function triggerRatchet() {
       const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
       const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      // Set timeout for ack retry
+      const timeoutId = setTimeout(() => {
+        console.warn(`No ack for new-room-key from ${cId}, retrying...`);
+        triggerRatchet(); // Retry entire ratchet
+      }, 5000);
+      pendingAcks.set(cId, timeoutId);
       success++;
     } catch (error) {
       console.error(`Error sending new room key to ${cId}:`, error);
@@ -803,6 +815,15 @@ document.getElementById('newSessionButton').onclick = () => {
   remoteAudios.clear();
   signalingQueue.clear();
   refreshingToken = false;
+  // New: Force full reset by closing and reopening socket for new token
+  socket.close();
+  clientId = Math.random().toString(36).substr(2, 9); // New clientId
+  setCookie('clientId', clientId, 365);
+  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+  socket.onopen = socket.onopen;
+  socket.onerror = socket.onerror;
+  socket.onclose = socket.onclose;
+  socket.onmessage = socket.onmessage;
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

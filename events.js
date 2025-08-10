@@ -1,4 +1,3 @@
-
 // Reconnection attempt counter for exponential backoff
 let reconnectAttempts = 0;
 // Image rate limiting
@@ -38,7 +37,7 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true }; // Global features state
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true, enableAudioToggle: true }; // Updated features state
 let keyPair;
 let roomMaster;
 let signingKey; // New: Cached signing key for HMAC
@@ -116,7 +115,6 @@ const maxReconnectAttempts = 5; // Limit reconnect attempts
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
-  startKeepAlive();
   reconnectAttempts = 0; // Reset on successful connection
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -137,12 +135,10 @@ socket.onopen = () => {
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
-  stopKeepAlive();
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
 };
 socket.onclose = () => {
   console.error('WebSocket closed, attempting reconnect');
-  stopKeepAlive();
   showStatusMessage('Lost connection, reconnecting...');
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
@@ -168,8 +164,9 @@ socket.onmessage = async (event) => {
       showStatusMessage('Invalid server message received.');
       return;
     }
-    if (message.type === 'pong') {
-      console.log('Received keepalive pong');
+    if (message.type === 'ping') {
+      socket.send(JSON.stringify({ type: 'pong' }));
+      console.log('Received ping, sent pong');
       return;
     }
     if (message.type === 'connected') {
@@ -210,28 +207,24 @@ socket.onmessage = async (event) => {
           socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
         } else {
           console.error('No refresh token available or refresh in progress, forcing reconnect');
-          stopKeepAlive();
           socket.close();
         }
       } else if (message.message.includes('Token revoked') || message.message.includes('Invalid or expired refresh token')) {
         showStatusMessage('Session expired. Reconnecting...');
-        stopKeepAlive();
         token = '';
         refreshToken = '';
         socket.close();
       } else if (message.message.includes('Rate limit exceeded')) {
         showStatusMessage('Rate limit exceeded. Waiting before retrying...');
-        stopKeepAlive();
         setTimeout(() => {
           if (reconnectAttempts < maxReconnectAttempts) {
             socket.send(JSON.stringify({ type: 'connect', clientId }));
-            startKeepAlive();
           }
         }, 60000);
       } else if (message.message.includes('Chat is full') || 
-        message.message.includes('Username already taken') || 
-        message.message.includes('Initiator offline') || 
-        message.message.includes('Invalid code format')) {
+                 message.message.includes('Username already taken') || 
+                 message.message.includes('Initiator offline') || 
+                 message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
         showStatusMessage(`Failed to join chat: ${message.message}`);
         socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
@@ -247,7 +240,6 @@ socket.onmessage = async (event) => {
         messages.classList.remove('waiting');
         codeSentToRandom = false;
         button2.disabled = false;
-        stopKeepAlive();
         token = ''; // Clear token
         refreshToken = ''; // Clear refresh token
       } else {
@@ -446,7 +438,6 @@ socket.onmessage = async (event) => {
       setTimeout(updateFeaturesUI, 0);
       if (!features.enableService) {
         showStatusMessage('Service disabled by admin. Disconnecting...');
-        stopKeepAlive();
         token = '';
         refreshToken = '';
         socket.close();
@@ -610,7 +601,6 @@ document.getElementById('backButton').onclick = () => {
   copyCodeButton.classList.add('hidden');
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
-  stopKeepAlive();
   document.getElementById('startChatToggleButton')?.focus();
 };
 document.getElementById('backButtonConnect').onclick = () => {
@@ -623,7 +613,6 @@ document.getElementById('backButtonConnect').onclick = () => {
   copyCodeButton.classList.add('hidden');
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
-  stopKeepAlive();
   document.getElementById('connectToggleButton')?.focus();
 };
 document.getElementById('sendButton').onclick = () => {
@@ -671,64 +660,64 @@ function startVoiceRecording() {
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     console.error('Microphone not supported');
-    showStatusMessage('Error: Microphone not supported by your browser or device or device.');
+    showStatusMessage('Error: Microphone not supported by your browser or device.');
     document.getElementById('voiceButton')?.focus();
     return;
   }
   navigator.mediaDevices.getUserMedia({ audio: true })
-  .then(stream => {
-    mediaRecorder = new MediaRecorder(stream);
-    const chunks = [];
-    let startTime = Date.now();
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        chunks.push(event.data);
-      }
-    };
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(chunks, { type: 'audio/webm' });
-      stream.getTracks().forEach(track => track.stop());
-      clearInterval(voiceTimerInterval);
-      document.getElementById('voiceTimer').classList.add('hidden');
-      document.getElementById('voiceButton').classList.remove('recording');
-      document.getElementById('voiceButton').textContent = '🎤';
-      if (blob.size > 0) {
-        await sendMedia(blob, 'voice');
+    .then(stream => {
+      mediaRecorder = new MediaRecorder(stream);
+      const chunks = [];
+      let startTime = Date.now();
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        clearInterval(voiceTimerInterval);
+        document.getElementById('voiceTimer').classList.add('hidden');
+        document.getElementById('voiceButton').classList.remove('recording');
+        document.getElementById('voiceButton').textContent = '🎤';
+        if (blob.size > 0) {
+          await sendMedia(blob, 'voice');
+        } else {
+          showStatusMessage('Error: No audio recorded.');
+        }
+      };
+      mediaRecorder.start();
+      document.getElementById('voiceButton').classList.add('recording');
+      document.getElementById('voiceButton').textContent = '⏹';
+      document.getElementById('voiceTimer').classList.remove('hidden');
+      document.getElementById('voiceTimer').textContent = '0:00';
+      voiceTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        if (elapsed >= 30) {
+          mediaRecorder.stop();
+          return;
+        }
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        document.getElementById('voiceTimer').textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+      }, 1000);
+    })
+    .catch(error => {
+      console.error('Error accessing microphone:', error.name, error.message);
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        showStatusMessage('Error: Microphone permission denied. Please enable in browser or device settings.');
+      } else if (error.name === 'NotFoundError') {
+        showStatusMessage('Error: No microphone found on device.');
+      } else if (error.name === 'NotReadableError') {
+        showStatusMessage('Error: Microphone hardware error or in use by another app.');
+      } else if (error.name === 'SecurityError') {
+        showStatusMessage('Error: Insecure context. Ensure site is loaded over HTTPS.');
       } else {
-        showStatusMessage('Error: No audio recorded.');
+        showStatusMessage('Error: Could not access microphone. Check permissions and device support.');
       }
-    };
-    mediaRecorder.start();
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceButton').textContent = '⏹';
-    document.getElementById('voiceTimer').classList.remove('hidden');
-    document.getElementById('voiceTimer').textContent = '0:00';
-    voiceTimerInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      if (elapsed >= 30) {
-        mediaRecorder.stop();
-        return;
-      }
-      const minutes = Math.floor(elapsed / 60);
-      const seconds = elapsed % 60;
-      document.getElementById('voiceTimer').textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-    }, 1000);
-  })
-  .catch(error => {
-    console.error('Error accessing microphone:', error.name, error.message);
-    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      showStatusMessage('Error: Microphone permission denied. Please enable in browser or device settings.');
-    } else if (error.name === 'NotFoundError') {
-      showStatusMessage('Error: No microphone found on device.');
-    } else if (error.name === 'NotReadableError') {
-      showStatusMessage('Error: Microphone hardware error or in use by another app.');
-    } else if (error.name === 'SecurityError') {
-      showStatusMessage('Error: Insecure context. Ensure site is loaded over HTTPS.');
-    } else {
-      showStatusMessage('Error: Could not access microphone. Check permissions and device support.');
-    }
-    document.getElementById('voiceButton')?.focus();
-  });
+      document.getElementById('voiceButton')?.focus();
+    });
 }
 function stopVoiceRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -791,7 +780,6 @@ document.getElementById('newSessionButton').onclick = () => {
   messages.classList.remove('waiting');
   codeSentToRandom = false;
   button2.disabled = false;
-  stopKeepAlive();
   token = ''; // Clear token
   refreshToken = ''; // Clear refresh token
   // Clear localStorage and cookies for data minimization
@@ -813,13 +801,13 @@ document.getElementById('usernameInput').addEventListener('keydown', (event) => 
 });
 document.getElementById('usernameConnectInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
-    event.preventDefault;
+    event.preventDefault();
     document.getElementById('codeInput')?.focus();
   }
 });
 document.getElementById('codeInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
-    event.preventDefault;
+    event.preventDefault();
     document.getElementById('connectButton')?.click();
   }
 });

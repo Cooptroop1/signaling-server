@@ -1,3 +1,4 @@
+
 // Reconnection attempt counter for exponential backoff
 let reconnectAttempts = 0;
 // Image rate limiting
@@ -383,16 +384,10 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(newRoomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('New room master received and set for PFS.');
-        socket.send(JSON.stringify({ type: 'ack-new-room-key', targetId: clientId, code, clientId, token })); // Send ack
       } catch (error) {
         console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
       }
-    }
-    if (message.type === 'ack-new-room-key' && isInitiator && pendingAcks.has(message.targetId)) {
-      console.log(`Received ack for new-room-key from ${message.targetId}`);
-      clearTimeout(pendingAcks.get(message.targetId));
-      pendingAcks.delete(message.targetId);
     }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
@@ -472,38 +467,33 @@ function refreshAccessToken() {
   }
 }
 // New: Function to trigger PFS key rotation (called by initiator on new join)
-async function triggerRatchet(targetId) {
+async function triggerRatchet() {
   if (!isInitiator) return;
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-  let success = false;
-  if (targetId) {
-    const publicKey = clientPublicKeys.get(targetId);
+  let success = 0;
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
-      console.warn(`No public key for client ${targetId}, skipping ratchet send`);
-      return;
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      continue;
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
       const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
       const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId, code, clientId, token }));
-      // Set timeout for ack retry
-      const timeoutId = setTimeout(() => {
-        console.warn(`No ack for new-room-key from ${targetId}, retrying...`);
-        triggerRatchet(targetId); // Retry for this client
-      }, 5000);
-      pendingAcks.set(targetId, timeoutId);
-      success = true;
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      success++;
     } catch (error) {
-      console.error(`Error sending new room key to ${targetId}:`, error);
+      console.error(`Error sending new room key to ${cId}:`, error);
     }
   }
-  if (success) {
+  if (success > 0) {
     roomMaster = newRoomMaster;
     signingKey = await deriveSigningKey(roomMaster);
-    console.log('PFS ratchet complete for target, new roomMaster set.');
+    console.log('PFS ratchet complete, new roomMaster set.');
   } else {
-    console.warn('PFS ratchet failed: No key available for target.');
+    console.warn('PFS ratchet failed: No keys available to send to any clients.');
   }
 }
 document.getElementById('startChatToggleButton').onclick = () => {
@@ -814,15 +804,6 @@ document.getElementById('newSessionButton').onclick = () => {
   remoteAudios.clear();
   signalingQueue.clear();
   refreshingToken = false;
-  // New: Force full reset by closing and reopening socket for new token
-  socket.close();
-  clientId = Math.random().toString(36).substr(2, 9); // New clientId
-  setCookie('clientId', clientId, 365);
-  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-  socket.onopen = socket.onopen;
-  socket.onerror = socket.onerror;
-  socket.onclose = socket.onclose;
-  socket.onmessage = socket.onmessage;
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

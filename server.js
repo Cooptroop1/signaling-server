@@ -179,7 +179,7 @@ const pingInterval = setInterval(() => {
     ws.isAlive = false;
     ws.ping();
   });
-}, 30000);
+}, 50000); // Changed to 50 seconds
 
 // Cleanup expired revoked tokens
 setInterval(() => {

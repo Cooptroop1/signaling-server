@@ -128,7 +128,7 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 
-// New: Aggregated stats structure { daily: { "YYYY-MM-DD": { users: number, connections: number } } }
+// New: Aggregated stats structure { daily: { "YYYY-MM-DD": { "users": number, "connections": number } } }
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
 
 // Function to save features to file

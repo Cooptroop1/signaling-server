@@ -80,7 +80,8 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const FEATURES_FILE = path.join('/data', 'features.json'); // Use Render persistent disk mount path (change if your mount is different)
+const FEATURES_FILE = path.join('/data', 'features.json'); // Persistent disk
+const STATS_FILE = path.join('/data', 'stats.json'); // New: For aggregated stats
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -127,10 +128,19 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 
+// New: Aggregated stats structure { daily: { "YYYY-MM-DD": { users: number, connections: number } } }
+let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+
 // Function to save features to file
 function saveFeatures() {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
   console.log('Saved features:', features);
+}
+
+// New: Function to save aggregated stats
+function saveAggregatedStats() {
+  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
+  console.log('Saved aggregated stats to disk');
 }
 
 // Validate base64 string
@@ -517,10 +527,20 @@ wss.on('connection', (ws, req) => {
           rooms.forEach(room => {
             totalClients += room.clients.size;
           });
+          // Compute aggregates
+          const weekly = computeAggregate(7);
+          const monthly = computeAggregate(30);
+          const yearly = computeAggregate(365);
           ws.send(JSON.stringify({
             type: 'stats',
             dailyUsers: dailyUsers.get(day)?.size || 0,
             dailyConnections: dailyConnections.get(day)?.size || 0,
+            weeklyUsers: weekly.users,
+            weeklyConnections: weekly.connections,
+            monthlyUsers: monthly.users,
+            monthlyConnections: monthly.connections,
+            yearlyUsers: yearly.users,
+            yearlyConnections: yearly.connections,
             allTimeUsers: allTimeUsers.size,
             activeRooms: rooms.size,
             totalClients: totalClients
@@ -779,6 +799,10 @@ function updateLogFile() {
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
     }
   });
+  // New: Update aggregated stats
+  if (!aggregatedStats.daily) aggregatedStats.daily = {};
+  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
+  saveAggregatedStats();
 }
 
 fs.writeFileSync(LOG_FILE, '', (err) => {
@@ -788,6 +812,22 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
+
+// New: Compute aggregate for last N days
+function computeAggregate(days) {
+  const now = new Date();
+  let users = 0, connections = 0;
+  for (let i = 0; i < days; i++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    if (aggregatedStats.daily[key]) {
+      users += aggregatedStats.daily[key].users;
+      connections += aggregatedStats.daily[key].connections;
+    }
+  }
+  return { users, connections };
+}
 
 function broadcast(code, message) {
   const room = rooms.get(code);

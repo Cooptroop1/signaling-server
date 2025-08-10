@@ -1,4 +1,3 @@
-
 // Core logic: peer connections, message sending, handling offers, etc.
 // Global vars for dynamic TURN creds from server
 let turnUsername = '';
@@ -783,7 +782,7 @@ function updateFeaturesUI() {
     voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
   }
   if (audioOutputButton) {
-    audioOutputButton.classList.toggle('hidden', !features.enableVoiceCalls || !isConnected);
+    audioOutputButton.classList.toggle('hidden', !features.enableAudioToggle || !voiceCallActive);
     audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
     audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
     audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');

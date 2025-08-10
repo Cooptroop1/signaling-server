@@ -25,14 +25,16 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
 server.on('request', (req, res) => {
   // Add HSTS header to all responses
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  const filePath = path.join(__dirname, req.url === '/' ? 'index.html' : req.url);
-  fs.readFile(filePath, 'utf8', (err, data) => {
+  let filePath = path.join(__dirname, req.url === '/' ? 'index.html' : req.url);
+  fs.readFile(filePath, (err, data) => {
    if (err) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
     return;
    }
-   if (req.url.endsWith('.html')) {
+   let contentType = 'text/plain';
+   if (filePath.endsWith('.html')) {
+    contentType = 'text/html';
     // Generate a unique nonce for each request
     const nonce = crypto.randomBytes(16).toString('base64');
     // Update CSP to use nonce instead of sha256 hashes
@@ -40,14 +42,13 @@ server.on('request', (req, res) => {
      `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
      `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
      "img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-     "connect-src 'self' wss://signaling-server-zc6m.onrender.com;";
+     "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;";
     // Replace the meta CSP in the HTML
-    data = data.replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
+    data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
      `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
     // Add nonce to inline <script> and <style> tags
     data = data.replace(/<script>/g, `<script nonce="${nonce}">`);
     data = data.replace(/<style>/g, `<style nonce="${nonce}">`);
-
     // Handle secure cookies for sessions (clientId)
     let clientIdFromCookie;
     const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
@@ -61,12 +62,10 @@ server.on('request', (req, res) => {
      // Set secure cookie for clientId
      res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
     }
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-   } else {
-    // Serve other files as-is (e.g., js, css)
-    const contentType = req.url.endsWith('.js') ? 'application/javascript' : 'text/plain';
-    res.writeHead(200, { 'Content-Type': contentType });
+   } else if (filePath.endsWith('.js')) {
+    contentType = 'application/javascript';
    }
+   res.writeHead(200, { 'Content-Type': contentType });
    res.end(data);
   });
 });

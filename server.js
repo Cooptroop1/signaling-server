@@ -111,7 +111,8 @@ let features = {
   enableImages: true,
   enableVoice: true,
   enableVoiceCalls: true,
-  enableGrokBot: true
+  enableGrokBot: true,
+  enableAudioToggle: true // New feature toggle
 };
 
 // Load features from file if exists

@@ -12,14 +12,14 @@ const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
 if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
-  server = http.createServer();
-  console.log('Using HTTP server (production or missing certificates)');
+ server = http.createServer();
+ console.log('Using HTTP server (production or missing certificates)');
 } else {
-  server = https.createServer({
-    key: fs.readFileSync(CERT_KEY_PATH),
-    cert: fs.readFileSync(CERT_PATH)
-  });
-  console.log('Using HTTPS server for local development');
+ server = https.createServer({
+  key: fs.readFileSync(CERT_KEY_PATH),
+  cert: fs.readFileSync(CERT_PATH)
+ });
+ console.log('Using HTTPS server for local development');
 }
 // Add HTTP request handler to serve static files with nonce injection for admin.html
 server.on('request', (req, res) => {
@@ -27,47 +27,47 @@ server.on('request', (req, res) => {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   const filePath = path.join(__dirname, req.url === '/' ? 'index.html' : req.url);
   fs.readFile(filePath, 'utf8', (err, data) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not Found');
-      return;
-    }
-    if (req.url.endsWith('.html')) {
-      // Generate a unique nonce for each request
-      const nonce = crypto.randomBytes(16).toString('base64');
-      // Update CSP to use nonce instead of sha256 hashes
-      let updatedCSP = "default-src 'self'; " +
-        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        "img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com;";
-      // Replace the meta CSP in the HTML
-      data = data.replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
-        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
-      // Add nonce to inline <script> and <style> tags
-      data = data.replace(/<script>/g, `<script nonce="${nonce}">`);
-      data = data.replace(/<style>/g, `<style nonce="${nonce}">`);
+   if (err) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+    return;
+   }
+   if (req.url.endsWith('.html')) {
+    // Generate a unique nonce for each request
+    const nonce = crypto.randomBytes(16).toString('base64');
+    // Update CSP to use nonce instead of sha256 hashes
+    let updatedCSP = "default-src 'self'; " +
+     `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+     `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+     "img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+     "connect-src 'self' wss://signaling-server-zc6m.onrender.com;";
+    // Replace the meta CSP in the HTML
+    data = data.replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
+     `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+    // Add nonce to inline <script> and <style> tags
+    data = data.replace(/<script>/g, `<script nonce="${nonce}">`);
+    data = data.replace(/<style>/g, `<style nonce="${nonce}">`);
 
-      // Handle secure cookies for sessions (clientId)
-      let clientIdFromCookie;
-      const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
-        const [name, value] = cookie.trim().split('=');
-        acc[name] = value;
-        return acc;
-      }, {}) : {};
-      clientIdFromCookie = cookies['clientId'];
-      if (!clientIdFromCookie) {
-        clientIdFromCookie = uuidv4();
-        // Set secure cookie for clientId
-        res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
-      }
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-    } else {
-      // Serve other files as-is (e.g., js, css)
-      const contentType = req.url.endsWith('.js') ? 'application/javascript' : 'text/plain';
-      res.writeHead(200, { 'Content-Type': contentType });
+    // Handle secure cookies for sessions (clientId)
+    let clientIdFromCookie;
+    const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
+     const [name, value] = cookie.trim().split('=');
+     acc[name] = value;
+     return acc;
+    }, {}) : {};
+    clientIdFromCookie = cookies['clientId'];
+    if (!clientIdFromCookie) {
+     clientIdFromCookie = uuidv4();
+     // Set secure cookie for clientId
+     res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
     }
-    res.end(data);
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+   } else {
+    // Serve other files as-is (e.g., js, css)
+    const contentType = req.url.endsWith('.js') ? 'application/javascript' : 'text/plain';
+    res.writeHead(200, { 'Content-Type': contentType });
+   }
+   res.end(data);
   });
 });
 const wss = new WebSocket.Server({ server });
@@ -105,7 +105,8 @@ let features = {
   enableService: true,
   enableImages: true,
   enableVoice: true,
-  enableVoiceCalls: true
+  enableVoiceCalls: true,
+  enableGrokBot: true
 };
 // Load features from file if exists
 if (fs.existsSync(FEATURES_FILE)) {

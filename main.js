@@ -10,6 +10,8 @@ let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map(); // Per targetId
 // New: Track audio output mode
 let audioOutputMode = 'earpiece'; // Default to earpiece
+// New: For PFS ack mechanism - initiator tracks pending acks
+let pendingAcks = new Map(); // targetId -> timeoutId
 
 async function sendMedia(file, type) {
   const validTypes = {

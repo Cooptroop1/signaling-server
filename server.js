@@ -45,7 +45,8 @@ server.on('request', (req, res) => {
       let updatedCSP = "default-src 'self'; " +
         `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-inline'; ` +
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog=' 'unsafe-inline'; ` +
-        "img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "media-src 'self' blob: data:; " +
         "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;";
       // Replace the meta CSP in the HTML
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 

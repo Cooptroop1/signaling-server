@@ -780,9 +780,16 @@ function updateFeaturesUI() {
   if (voiceCallButton) {
     voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
     voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
+    if (!features.enableVoiceCalls && voiceCallActive) {
+      stopVoiceCall(); // Force stop call if feature disabled
+    }
   }
   if (audioOutputButton) {
-    audioOutputButton.classList.toggle('hidden', !features.enableAudioToggle || !voiceCallActive);
+    const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
+    audioOutputButton.classList.toggle('hidden', shouldHide);
+    if (shouldHide && voiceCallActive) {
+      stopVoiceCall(); // Force stop if toggle disabled during call
+    }
     audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
     audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
     audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');

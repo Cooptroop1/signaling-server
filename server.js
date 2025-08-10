@@ -8,6 +8,7 @@ const http = require('http');
 const https = require('https');
 const url = require('url'); // Added for parsing URL to ignore query params
 const crypto = require('crypto');
+const mongoose = require('mongoose'); // New: For MongoDB persistence
 
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
@@ -80,7 +81,6 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const FEATURES_FILE = path.join(__dirname, 'features.json');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -106,35 +106,66 @@ if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
 }
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here'; // Set in .env for security
+const MONGO_URI = process.env.MONGO_URI; // New: For MongoDB persistence
+
 let features = {
   enableService: true,
   enableImages: true,
   enableVoice: true,
   enableVoiceCalls: true,
-  enableGrokBot: true,
-  enableAudioToggle: true // New feature toggle
+  enableAudioToggle: true,
+  enableGrokBot: true
 };
 
-// Load features from file if exists
-if (fs.existsSync(FEATURES_FILE)) {
-  try {
-    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
-    console.log('Loaded features:', features);
-  } catch (err) {
-    console.error('Error loading features file:', err);
+// New: MongoDB schema for features
+const FeaturesSchema = new mongoose.Schema({
+  enableService: Boolean,
+  enableImages: Boolean,
+  enableVoice: Boolean,
+  enableVoiceCalls: Boolean,
+  enableAudioToggle: Boolean,
+  enableGrokBot: Boolean
+});
+const Features = mongoose.model('Features', FeaturesSchema);
+
+// New: Function to load/save features from/to MongoDB
+async function loadFeatures() {
+  if (!MONGO_URI) {
+    console.warn('No MONGO_URI set, using memory-only features (will reset on restart)');
+    return;
   }
-} else {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+  try {
+    let featureDoc = await Features.findOne();
+    if (!featureDoc) {
+      featureDoc = new Features(features);
+      await featureDoc.save();
+      console.log('Created default features in MongoDB');
+    }
+    features = {
+      enableService: featureDoc.enableService,
+      enableImages: featureDoc.enableImages,
+      enableVoice: featureDoc.enableVoice,
+      enableVoiceCalls: featureDoc.enableVoiceCalls,
+      enableAudioToggle: featureDoc.enableAudioToggle,
+      enableGrokBot: featureDoc.enableGrokBot
+    };
+    console.log('Loaded features from MongoDB:', features);
+  } catch (err) {
+    console.error('Error loading features from MongoDB:', err);
+  }
 }
 
-// Function to save features to file
-function saveFeatures() {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
-  console.log('Saved features:', features);
-}
-
-function hashIp(ip) {
-  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+async function saveFeatures() {
+  if (!MONGO_URI) {
+    console.warn('No MONGO_URI, skipping save');
+    return;
+  }
+  try {
+    await Features.updateOne({}, features, { upsert: true });
+    console.log('Saved features to MongoDB:', features);
+  } catch (err) {
+    console.error('Error saving features to MongoDB:', err);
+  }
 }
 
 // Validate base64 string
@@ -545,7 +576,7 @@ wss.on('connection', (ws, req) => {
           const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
-            saveFeatures();
+            await saveFeatures();
             const timestamp = new Date().toISOString();
             fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
@@ -812,6 +843,26 @@ function broadcastRandomCodes() {
   });
 }
 
-server.listen(process.env.PORT || 10000, () => {
-  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
-});
+function hashIp(ip) {
+  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+}
+
+// New: Start server after connecting to MongoDB and loading features
+(async () => {
+  if (MONGO_URI) {
+    try {
+      await mongoose.connect(MONGO_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+      });
+      console.log('Connected to MongoDB');
+    } catch (err) {
+      console.error('Failed to connect to MongoDB:', err);
+      console.warn('Falling back to memory-only features');
+    }
+  }
+  await loadFeatures(); // Load features from DB or default
+  server.listen(process.env.PORT || 10000, () => {
+    console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+  });
+})();

@@ -1,141 +1,141 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>Anonomoose Random Chat</title>
- <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;">
- <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
- <link rel="icon" type="image/png" href="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f60e.png"/>
- <style>
-  body {
-   min-height: 100vh;
-   display: flex;
-   justify-content: center;
-   align-items: center;
-   background-color: #000;
-   color: #fff;
-  }
-  .container {
-   max-width: 500px;
-   width: 100%;
-   padding: 20px;
-   background-color: #fff;
-   color: #000;
-   border-radius: 10px;
-   box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-  }
-  #randomCodes {
-   margin-top: 1rem;
-   text-align: left;
-  }
-  .code-item {
-   padding: 0.5rem;
-   margin: 0.5rem 0;
-   background-color: #f3f4f6;
-   border-radius: 0.5rem;
-   cursor: pointer;
-  }
-  .code-item:hover {
-   background-color: #e5e7eb;
-  }
-  #status {
-   margin-bottom: 1rem;
-   text-align: center;
-   color: #666;
-  }
-  .hidden {
-   display: none !important;
-  }
- </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anonomoose Random Chat</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
+  <link rel="icon" type="image/png" href="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f60e.png"/>
+  <style>
+    body {
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #000;
+      color: #fff;
+    }
+    .container {
+      max-width: 500px;
+      width: 100%;
+      padding: 20px;
+      background-color: #fff;
+      color: #000;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    }
+    #randomCodes {
+      margin-top: 1rem;
+      text-align: left;
+    }
+    .code-item {
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+      background-color: #f3f4f6;
+      border-radius: 0.5rem;
+      cursor: pointer;
+    }
+    .code-item:hover {
+      background-color: #e5e7eb;
+    }
+    #status {
+      margin-bottom: 1rem;
+      text-align: center;
+      color: #666;
+    }
+    .hidden {
+      display: none !important;
+    }
+  </style>
 </head>
 <body>
- <div class="container">
-  <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">Random Chat Board</h1>
-  <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Loading random chat codes...</div>
-  <div id="randomCodes" class="hidden"></div>
-  <div class="text-center mt-4">
-   <a href="https://anonomoose.com/index.html" class="text-blue-500 hover:underline">Back to Chat</a>
+  <div class="container">
+    <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">Random Chat Board</h1>
+    <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Loading random chat codes...</div>
+    <div id="randomCodes" class="hidden"></div>
+    <div class="text-center mt-4">
+      <a href="index.html" class="text-blue-500 hover:underline">Back to Chat</a>
+    </div>
   </div>
- </div>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
- <script src="utils.js"></script>
- <script>
-  const socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-  const statusElement = document.getElementById('status');
-  const randomCodesElement = document.getElementById('randomCodes');
-  let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
-  let token = '';
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
+  <script src="utils.js"></script>
+  <script>
+    const socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+    const statusElement = document.getElementById('status');
+    const randomCodesElement = document.getElementById('randomCodes');
+    let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
+    let token = '';
 
-  if (getCookie('clientId')) {
-   clientId = getCookie('clientId');
-  } else {
-   setCookie('clientId', clientId, 365);
-  }
-
-  socket.onopen = () => {
-   console.log('Random page WebSocket opened');
-   socket.send(JSON.stringify({ type: 'connect', clientId }));
-  };
-
-  socket.onmessage = (event) => {
-   try {
-    const message = JSON.parse(event.data);
-    if (message.type === 'connected') {
-     token = message.accessToken;
-     socket.send(JSON.stringify({ type: 'get-random-codes', clientId, token }));
-    } else if (message.type === 'random-codes') {
-     randomCodesElement.innerHTML = '';
-     if (message.codes.length === 0) {
-      statusElement.textContent = 'No random chats available.';
-      randomCodesElement.classList.add('hidden');
-     } else {
-      statusElement.textContent = 'Select a chat to join:';
-      randomCodesElement.classList.remove('hidden');
-      message.codes.forEach(code => {
-       const codeDiv = document.createElement('div');
-       codeDiv.className = 'code-item';
-       codeDiv.textContent = code;
-       codeDiv.onclick = () => {
-        window.location.href = `https://anonomoose.com/index.html?code=${code}`;
-       };
-       randomCodesElement.appendChild(codeDiv);
-      });
-     }
-    } else if (message.type === 'error') {
-     statusElement.textContent = message.message;
+    if (getCookie('clientId')) {
+      clientId = getCookie('clientId');
+    } else {
+      setCookie('clientId', clientId, 365);
     }
-   } catch (error) {
-    console.error('Error parsing message:', error);
-    statusElement.textContent = 'Error loading random chats.';
-   }
-  };
 
-  socket.onerror = () => {
-   statusElement.textContent = 'Connection error. Please refresh.';
-  };
+    socket.onopen = () => {
+      console.log('Random page WebSocket opened');
+      socket.send(JSON.stringify({ type: 'connect', clientId }));
+    };
 
-  socket.onclose = () => {
-   statusElement.textContent = 'Disconnected. Please refresh.';
-  };
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'connected') {
+          token = message.accessToken;
+          socket.send(JSON.stringify({ type: 'get-random-codes', clientId, token }));
+        } else if (message.type === 'random-codes') {
+          randomCodesElement.innerHTML = '';
+          if (message.codes.length === 0) {
+            statusElement.textContent = 'No random chats available.';
+            randomCodesElement.classList.add('hidden');
+          } else {
+            statusElement.textContent = 'Select a chat to join:';
+            randomCodesElement.classList.remove('hidden');
+            message.codes.forEach(code => {
+              const codeDiv = document.createElement('div');
+              codeDiv.className = 'code-item';
+              codeDiv.textContent = code;
+              codeDiv.onclick = () => {
+                window.location.href = `index.html?code=${code}`;
+              };
+              randomCodesElement.appendChild(codeDiv);
+            });
+          }
+        } else if (message.type === 'error') {
+          statusElement.textContent = message.message;
+        }
+      } catch (error) {
+        console.error('Error parsing message:', error);
+        statusElement.textContent = 'Error loading random chats.';
+      }
+    };
 
-  // Reuse utils.js functions
-  function getCookie(name) {
-   const value = `; ${document.cookie}`;
-   const parts = value.split(`; ${name}=`);
-   if (parts.length === 2) return parts.pop().split(';').shift();
-   return null;
-  }
+    socket.onerror = () => {
+      statusElement.textContent = 'Connection error. Please refresh.';
+    };
 
-  function setCookie(name, value, days) {
-   let expires = '';
-   if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = '; expires=' + date.toUTCString();
-   }
-   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
-  }
- </script>
+    socket.onclose = () => {
+      statusElement.textContent = 'Disconnected. Please refresh.';
+    };
+
+    // Reuse utils.js functions
+    function getCookie(name) {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(';').shift();
+      return null;
+    }
+
+    function setCookie(name, value, days) {
+      let expires = '';
+      if (days) {
+        const date = new Date();
+        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+        expires = '; expires=' + date.toUTCString();
+      }
+      document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
+    }
+  </script>
 </body>
 </html>

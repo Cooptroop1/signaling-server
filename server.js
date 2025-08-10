@@ -593,6 +593,11 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
+      if (data.type === 'pong') {
+        console.log('Received pong from client');
+        return;
       }
     } catch (error) {
       console.error('Error processing message:', error);

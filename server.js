@@ -28,8 +28,8 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
 server.on('request', (req, res) => {
   // Add HSTS header to all responses
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  const parsedUrl = url.parse(req.url, true);
-  let filePath = path.join(__dirname, parsedUrl.pathname === '/' ? 'index.html' : parsedUrl.pathname);
+  const fullUrl = new URL(req.url, `http://${req.headers.host}`);
+  let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });

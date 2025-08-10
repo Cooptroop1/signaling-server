@@ -472,39 +472,38 @@ function refreshAccessToken() {
   }
 }
 // New: Function to trigger PFS key rotation (called by initiator on new join)
-async function triggerRatchet() {
+async function triggerRatchet(targetId) {
   if (!isInitiator) return;
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-  let success = 0;
-  for (const cId of connectedClients) {
-    if (cId === clientId) continue;
-    const publicKey = clientPublicKeys.get(cId);
+  let success = false;
+  if (targetId) {
+    const publicKey = clientPublicKeys.get(targetId);
     if (!publicKey) {
-      console.warn(`No public key for client ${cId}, skipping ratchet send`);
-      continue;
+      console.warn(`No public key for client ${targetId}, skipping ratchet send`);
+      return;
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
       const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
       const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId, code, clientId, token }));
       // Set timeout for ack retry
       const timeoutId = setTimeout(() => {
-        console.warn(`No ack for new-room-key from ${cId}, retrying...`);
-        triggerRatchet(); // Retry entire ratchet
+        console.warn(`No ack for new-room-key from ${targetId}, retrying...`);
+        triggerRatchet(targetId); // Retry for this client
       }, 5000);
-      pendingAcks.set(cId, timeoutId);
-      success++;
+      pendingAcks.set(targetId, timeoutId);
+      success = true;
     } catch (error) {
-      console.error(`Error sending new room key to ${cId}:`, error);
+      console.error(`Error sending new room key to ${targetId}:`, error);
     }
   }
-  if (success > 0) {
+  if (success) {
     roomMaster = newRoomMaster;
     signingKey = await deriveSigningKey(roomMaster);
-    console.log('PFS ratchet complete, new roomMaster set.');
+    console.log('PFS ratchet complete for target, new roomMaster set.');
   } else {
-    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+    console.warn('PFS ratchet failed: No key available for target.');
   }
 }
 document.getElementById('startChatToggleButton').onclick = () => {

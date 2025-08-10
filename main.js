@@ -1,3 +1,4 @@
+
 // Core logic: peer connections, message sending, handling offers, etc.
 // Global vars for dynamic TURN creds from server
 let turnUsername = '';
@@ -10,8 +11,6 @@ let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map(); // Per targetId
 // New: Track audio output mode
 let audioOutputMode = 'earpiece'; // Default to earpiece
-// New: For PFS ack mechanism - initiator tracks pending acks
-let pendingAcks = new Map(); // targetId -> timeoutId
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -784,7 +783,7 @@ function updateFeaturesUI() {
     voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
   }
   if (audioOutputButton) {
-    audioOutputButton.classList.toggle('hidden', !features.enableAudioToggle || !voiceCallActive);
+    audioOutputButton.classList.toggle('hidden', !features.enableVoiceCalls || !isConnected);
     audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
     audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
     audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');

@@ -37,16 +37,16 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true, connectionMode: 'both' }; // Global features state
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableAudioToggle: true, enableGrokBot: true, connectionMode: 'both' }; // Global features state
 let keyPair;
 let roomMaster;
-let signingKey; // New: Cached signing key for HMAC
+let signingKey; // Cached signing key for HMAC
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
-let connectedClients = new Set(); // New: Track connected client IDs for ratchet
-let clientPublicKeys = new Map(); // New: Initiator stores public keys of clients
-let initiatorPublic; // New: Non-initiators store initiator's public key
+let connectedClients = new Set(); // Track connected client IDs for ratchet
+let clientPublicKeys = new Map(); // Initiator stores public keys of clients
+let initiatorPublic; // Non-initiators store initiator's public key
 // Declare UI variables globally
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 if (typeof window !== 'undefined') {
@@ -301,7 +301,7 @@ socket.onmessage = async (event) => {
       }
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
-      if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
+      if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId) && features.connectionMode !== 'relay') {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
@@ -325,7 +325,7 @@ socket.onmessage = async (event) => {
         }
       }
       updateMaxClientsUI();
-      if (totalClients <= 1) {
+      if (totalClients <= 1 && !useRelay) {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
       }
@@ -452,7 +452,7 @@ socket.onmessage = async (event) => {
     if (message.type === 'features-update') {
       features = message;
       console.log('Received features update:', features);
-      // New: Handle mode change
+      // Handle mode change
       if (features.connectionMode === 'relay') {
         useRelay = true;
         peerConnections.forEach((pc, id) => {
@@ -462,22 +462,23 @@ socket.onmessage = async (event) => {
         peerConnections.clear();
         dataChannels.clear();
         isConnected = true; // Keep connected
+        inputContainer.classList.remove('hidden'); // Ensure input remains visible
+        messages.classList.remove('waiting'); // Ensure messages remain visible
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
           privacyStatus.textContent = 'E2E Encrypted (Relay)';
           privacyStatus.classList.remove('hidden');
         }
-        showStatusMessage('Switched to relay mode. P2P connections closed.');
+        showStatusMessage('Switched to relay mode.');
       } else if (features.connectionMode === 'p2p') {
         useRelay = false;
-        if (dataChannels.size === 0) {
+        if (dataChannels.size === 0 && totalClients > 1) {
           showStatusMessage('Switched to P2P mode. Reconnecting peers...');
           if (isInitiator) {
             connectedClients.forEach(id => {
               if (id !== clientId) startPeerConnection(id, true);
             });
           } else {
-            // Non-initiator: wait for initiator to start
             showStatusMessage('Waiting for initiator to reconnect in P2P mode.');
           }
         }
@@ -496,7 +497,7 @@ socket.onmessage = async (event) => {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
 };
-// New: Function to refresh access token proactively
+// Function to refresh access token proactively
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
@@ -506,7 +507,7 @@ function refreshAccessToken() {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
   }
 }
-// New: Function to trigger PFS key rotation (called by initiator on new join)
+// Function to trigger PFS key rotation (called by initiator on new join)
 async function triggerRatchet() {
   if (!isInitiator) return;
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
@@ -708,206 +709,3 @@ function startVoiceRecording() {
     return;
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    console.error('Microphone not supported');
-    showStatusMessage('Error: Microphone not supported by your browser or device.');
-    document.getElementById('voiceButton')?.focus();
-    return;
-  }
-  navigator.mediaDevices.getUserMedia({ audio: true })
-  .then(stream => {
-    mediaRecorder = new MediaRecorder(stream);
-    const chunks = [];
-    let startTime = Date.now();
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        chunks.push(event.data);
-      }
-    };
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(chunks, { type: 'audio/webm' });
-      stream.getTracks().forEach(track => track.stop());
-      clearInterval(voiceTimerInterval);
-      document.getElementById('voiceTimer').classList.add('hidden');
-      document.getElementById('voiceButton').classList.remove('recording');
-      document.getElementById('voiceButton').textContent = '🎤';
-      if (blob.size > 0) {
-        await sendMedia(blob, 'voice');
-      } else {
-        showStatusMessage('Error: No audio recorded.');
-      }
-    };
-    mediaRecorder.start();
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceButton').textContent = '⏹';
-    document.getElementById('voiceTimer').classList.remove('hidden');
-    document.getElementById('voiceTimer').textContent = '0:00';
-    voiceTimerInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      if (elapsed >= 30) {
-        mediaRecorder.stop();
-        return;
-      }
-      const minutes = Math.floor(elapsed / 60);
-      const seconds = elapsed % 60;
-      document.getElementById('voiceTimer').textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-    }, 1000);
-  })
-  .catch(error => {
-    console.error('Error accessing microphone:', error.name, error.message);
-    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      showStatusMessage('Error: Microphone permission denied. Please enable in browser or device settings.');
-    } else if (error.name === 'NotFoundError') {
-      showStatusMessage('Error: No microphone found on device.');
-    } else if (error.name === 'NotReadableError') {
-      showStatusMessage('Error: Microphone hardware error or in use by another app.');
-    } else if (error.name === 'SecurityError') {
-      showStatusMessage('Error: Insecure context. Ensure site is loaded over HTTPS.');
-    } else {
-      showStatusMessage('Error: Could not access microphone. Check permissions and device support.');
-    }
-    document.getElementById('voiceButton')?.focus();
-  });
-}
-function stopVoiceRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-  }
-}
-const messageInput = document.getElementById('messageInput');
-messageInput.addEventListener('input', () => {
-  // Use class toggle instead of inline style
-  messageInput.classList.add('expanded');
-});
-messageInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    const message = event.target.value.trim();
-    if (message) {
-      sendMessage(message);
-    }
-  }
-});
-document.getElementById('newSessionButton').onclick = () => {
-  console.log('New session button clicked');
-  socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
-  peerConnections.forEach((pc) => pc.close());
-  dataChannels.forEach((dc) => dc.close());
-  peerConnections.clear();
-  dataChannels.clear();
-  candidatesQueues.clear();
-  connectionTimeouts.clear();
-  retryCounts.clear();
-  processedMessageIds.clear();
-  usernames.clear();
-  messageRateLimits.clear();
-  imageRateLimits.clear();
-  voiceRateLimits.clear();
-  connectedClients.clear(); // Clear on new session
-  clientPublicKeys.clear();
-  initiatorPublic = undefined;
-  isConnected = false;
-  isInitiator = false;
-  maxClients = 2;
-  totalClients = 0;
-  code = generateCode();
-  codeDisplayElement.textContent = '';
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
-  document.getElementById('messages').innerHTML = '';
-  document.getElementById('messageInput').classList.remove('expanded');
-  document.getElementById('usernameInput').value = '';
-  document.getElementById('usernameConnectInput').value = '';
-  document.getElementById('codeInput').value = '';
-  initialContainer.classList.remove('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  chatContainer.classList.add('hidden');
-  newSessionButton.classList.add('hidden');
-  maxClientsContainer.classList.add('hidden');
-  inputContainer.classList.add('hidden');
-  messages.classList.remove('waiting');
-  codeSentToRandom = false;
-  button2.disabled = false;
-  token = ''; // Clear token
-  refreshToken = ''; // Clear refresh token
-  // Clear localStorage and cookies for data minimization
-  localStorage.removeItem('username');
-  document.cookie = 'clientId=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; Secure; HttpOnly; SameSite=Strict';
-  document.getElementById('startChatToggleButton')?.focus();
-  // Clean up voice call
-  stopVoiceCall();
-  remoteAudios.forEach(audio => audio.remove());
-  remoteAudios.clear();
-  signalingQueue.clear();
-  refreshingToken = false;
-};
-document.getElementById('usernameInput').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    document.getElementById('joinWithUsernameButton')?.click();
-  }
-});
-document.getElementById('usernameConnectInput').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    document.getElementById('codeInput')?.focus();
-  }
-});
-document.getElementById('codeInput').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    document.getElementById('connectButton')?.click();
-  }
-});
-document.getElementById('copyCodeButton').onclick = () => {
-  const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
-  navigator.clipboard.writeText(codeText).then(() => {
-    copyCodeButton.textContent = 'Copied!';
-    setTimeout(() => {
-      copyCodeButton.textContent = 'Copy Code';
-    }, 2000);
-  }).catch(err => {
-    console.error('Failed to copy text: ', err);
-    showStatusMessage('Failed to copy code.');
-  });
-  copyCodeButton?.focus();
-};
-document.getElementById('button1').onclick = () => {
-  if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
-    socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
-    showStatusMessage(`Sent code ${code} to random board.`);
-    codeSentToRandom = true;
-    button2.disabled = true;
-  } else {
-    showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
-  }
-  document.getElementById('button1')?.focus();
-};
-document.getElementById('button2').onclick = () => {
-  if (!button2.disabled) {
-    window.location.href = 'https://anonomoose.com/random.html';
-  }
-  document.getElementById('button2')?.focus();
-};
-cornerLogo.addEventListener('click', () => {
-  document.getElementById('messages').innerHTML = '';
-  processedMessageIds.clear();
-  showStatusMessage('Chat history cleared locally.');
-});
-// Helper functions for cookies
-function getCookie(name) {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop().split(';').shift();
-  return null;
-}
-function setCookie(name, value, days) {
-  let expires = '';
-  if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = '; expires=' + date.toUTCString();
-  }
-  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
-}

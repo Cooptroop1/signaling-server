@@ -20,7 +20,6 @@ function generateCode() {
 let code = generateCode();
 let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9); // Prefer cookie
 let username = '';
-let isInitiator = false;
 let isConnected = false;
 let maxClients = 2;
 let totalClients = 0;

@@ -204,6 +204,31 @@ function validateMessage(data) {
         return { valid: false, error: 'prekey-message: targetId required as string' };
       }
       break;
+    case 'public-key':
+      if (!data.publicKey || !isValidBase64(data.publicKey)) {
+        return { valid: false, error: 'public-key: invalid publicKey' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'public-key: code required' };
+      }
+      if (data.targetId && typeof data.targetId !== 'string') {
+        return { valid: false, error: 'public-key: targetId must be string if present' };
+      }
+      break;
+    case 'new-room-key':
+      if (!data.encrypted || !isValidBase64(data.encrypted)) {
+        return { valid: false, error: 'new-room-key: invalid encrypted' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'new-room-key: invalid iv' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'new-room-key: code required' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'new-room-key: targetId required as string' };
+      }
+      break;
     case 'join':
       if (!data.code) {
         return { valid: false, error: 'join: code required' };
@@ -475,6 +500,27 @@ wss.on('connection', (ws, req) => {
           } else {
             console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
           }
+        }
+        return;
+      }
+      if (data.type === 'public-key' || data.type === 'new-room-key') {
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          let targetClient;
+          if (data.targetId) {
+            targetClient = room.clients.get(data.targetId);
+          } else {
+            // Forward to initiator if no targetId
+            targetClient = room.clients.get(room.initiator);
+          }
+          if (targetClient && targetClient.ws.readyState === WebSocket.OPEN) {
+            console.log(`Forwarding ${data.type} to ${data.targetId || room.initiator} from ${data.clientId} for code: ${data.code}`);
+            targetClient.ws.send(JSON.stringify({ ...data, clientId: data.clientId }));
+          } else {
+            console.warn(`Target not found or not open for ${data.type}: ${data.targetId || room.initiator} in room ${data.code}`);
+          }
+        } else {
+          console.warn(`Room not found for ${data.type}: ${data.code}`);
         }
         return;
       }

@@ -9,7 +9,7 @@ const https = require('https');
 const url = require('url'); // Added for parsing URL to ignore query params
 const crypto = require('crypto');
 
- // Check for certificate files for local HTTPS
+// Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
@@ -24,11 +24,11 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
  console.log('Using HTTPS server for local development');
 }
 
- // Add HTTP request handler to serve static files with nonce injection
+// Add HTTP request handler to serve static files with nonce injection
 server.on('request', (req, res) => {
-  // Add HSTS header to all responses
+ // Add HSTS header to all responses
  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
- the fullUrl = new URL(req.url, `http://${req.headers.host}`);
+ const fullUrl = new URL(req.url, `http://${req.headers.host}`);
  let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
  fs.readFile(filePath, (err, data) => {
  if (err) {
@@ -740,12 +740,7 @@ wss.on('connection', (ws, req) => {
  console.log('Received pong from client');
  return;
  }
- } catch (error) {
- console.error('Error processing message:', error);
- ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
- incrementFailure(clientIp);
  }
- });
  ws.on('close', () => {
  if (ws.clientId) {
  const tokens = clientTokens.get(ws.clientId);

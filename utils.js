@@ -55,31 +55,42 @@
   let ratchets = new Map(); // Moved to utils.js
 
   const HKDF = async (ikm, salt, info) => {
-    const baseKey = await window.crypto.subtle.importKey(
-      'raw', 
-      ikm, 
-      'HKDF', 
-      false, 
-      ['deriveBits']
-    );
-    return await window.crypto.subtle.deriveBits(
-      {
-        name: 'HKDF',
-        salt,
-        info: new TextEncoder().encode(info),
-        hash: 'SHA-256'
-      },
-      baseKey,
-      256
-    );
+    try {
+      const baseKey = await window.crypto.subtle.importKey(
+        'raw', 
+        ikm instanceof ArrayBuffer ? new Uint8Array(ikm) : ikm, 
+        'HKDF', 
+        false, 
+        ['deriveBits']
+      );
+      const bits = await window.crypto.subtle.deriveBits(
+        {
+          name: 'HKDF',
+          salt,
+          info: new TextEncoder().encode(info),
+          hash: 'SHA-256'
+        },
+        baseKey,
+        256
+      );
+      return new Uint8Array(bits);
+    } catch (error) {
+      console.error('HKDF failed:', error);
+      throw error;
+    }
   };
 
   async function initRatchet(targetId, sharedKey) {
-    const root = await HKDF(sharedKey, new Uint8Array(), 'root');
-    const send = await HKDF(root, new Uint8Array(), 'send');
-    const recv = await HKDF(root, new Uint8Array(), 'recv');
-    ratchets.set(targetId, { sendKey: send, recvKey: recv, sendCount: 0, recvCount: 0 });
-    console.log('Ratchet initialized for', targetId);
+    try {
+      const root = await HKDF(sharedKey, new Uint8Array(), 'root');
+      const send = await HKDF(root, new Uint8Array(), 'send');
+      const recv = await HKDF(root, new Uint8Array(), 'recv');
+      ratchets.set(targetId, { sendKey: send, recvKey: recv, sendCount: 0, recvCount: 0 });
+      console.log('Ratchet initialized for', targetId);
+    } catch (error) {
+      console.error('initRatchet failed for ' + targetId + ':', error);
+      throw error;
+    }
   }
 
   async function ratchetEncrypt(targetId, plaintext) {
@@ -96,7 +107,7 @@
       ratchet.sendCount++;
       return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
     } catch (error) {
-      console.error('Error in ratchetEncrypt:', error);
+      console.error('Error in ratchetEncrypt for ' + targetId + ':', error);
       throw error;
     }
   }
@@ -114,7 +125,7 @@
       ratchet.recvCount++;
       return decrypted;
     } catch (error) {
-      console.error('Error in ratchetDecrypt:', error);
+      console.error('Error in ratchetDecrypt for ' + targetId + ':', error);
       throw error;
     }
   }
@@ -368,21 +379,33 @@
   }
 
   async function importPublicKey(base64) {
-  return window.crypto.subtle.importKey(
-    'raw',
-    base64ToArrayBuffer(base64),
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    []
-  );
+  const buffer = base64ToArrayBuffer(base64);
+  try {
+    return await window.crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(buffer),
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      []
+    );
+  } catch (error) {
+    console.error('importPublicKey failed:', error, 'Base64 length:', base64.length, 'Buffer length:', buffer.byteLength);
+    throw error;
+  }
   }
 
   async function deriveSharedKey(privateKey, publicKey) {
-  return await window.crypto.subtle.deriveBits(
-    { name: 'ECDH', public: publicKey },
-    privateKey,
-    256
-  );
+  try {
+    const sharedBits = await window.crypto.subtle.deriveBits(
+      { name: 'ECDH', public: publicKey },
+      privateKey,
+      256
+    );
+    return new Uint8Array(sharedBits);
+  } catch (error) {
+    console.error('deriveSharedKey failed:', error);
+    throw error;
+  }
   }
 
   // Relay mode encryption (kept for fallback)
@@ -513,3 +536,17 @@
   });
   signalingQueue.clear();
   }
+
+  function arrayBufferToBase64(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  }
+
+  function base64ToArrayBuffer(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+  }
+</javascript>

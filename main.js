@@ -99,10 +99,9 @@ async function sendMedia(file, type) {
  const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
  sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
  } else if (dataChannels.size > 0) {
- dataChannels.forEach(async (dc, targetId) => {
- if (dc.readyState === 'open') {
- const { encrypted, iv } = await ratchetEncrypt(targetId, new TextEncoder().encode(jsonString));
- dc.send(JSON.stringify({ encrypted, iv }));
+ dataChannels.forEach(async (dataChannel) => {
+ if (dataChannel.readyState === 'open') {
+ dataChannel.send(jsonString);
  }
  });
  } else {
@@ -181,9 +180,6 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Created data channel for ${targetId}`);
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
-    // Send public key to target
-    const publicKey = await exportPublicKey(keyPair.publicKey);
-    socket.send(JSON.stringify({ type: 'public-key', publicKey, targetId, code, clientId, token }));
   }
   peerConnection.onicecandidate = (event) => {
     if (event.candidate) {

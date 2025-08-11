@@ -4,7 +4,7 @@
  <meta charset="UTF-8">
  <meta name="viewport" content="width=device-width, initial-scale=1.0">
  <title>Anonomoose Chat</title>
- <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;">
+ <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-anonomoose123'; style-src 'self' https://cdn.jsdelivr.net 'nonce-anonomoose123'; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;">
  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
  <link rel="icon" type="image/png" href="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f60e.png"/>
  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
@@ -88,7 +88,7 @@
  padding-bottom: 80px;
  }
  .bg-white {
- padding: 1rem;
+ padding: 0.5rem;
  max-width: none;
  width: 100%;
  margin-top: 50px;
@@ -526,6 +526,16 @@
  .offline {
  background-color: red;
  }
+ /* Accessibility: Focus trap for modals */
+ .modal[tabindex="-1"]:focus {
+ outline: none;
+ }
+ /* Touch events for mobile */
+ @media (hover: none) {
+ .message-bubble {
+ touch-action: manipulation;
+ }
+ }
  </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
@@ -538,6 +548,7 @@
  <div id="initialContainer">
  <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
  <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
+ <button id="anonymousToggleButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-purple-600 transition-colors" aria-label="Join as anonymous user">Join Anonymously</button>
  </div>
  <div id="usernameContainer" class="hidden">
  <label for="usernameInput" class="sr-only">Enter your username</label>
@@ -554,13 +565,13 @@
  <button id="button2" aria-label="Join a random chat">Random Chat</button>
  <button id="copyCodeButton" aria-label="Copy chat code">Copy Code</button>
  </div>
- <div id="messages" class="border border-gray-300 p-4 h-64 overflow-y-auto mb-4 rounded" role="log" aria-live="polite">
+ <div id="messages" class="border border-gray-300 p-4 h-64 overflow-y-auto mb-4 rounded" role="log" aria-live="assertive">
  <div id="userDots" class="user-dots"></div>
  </div>
  <div class="input-container hidden">
  <label for="messageInput" class="sr-only">Type a message</label>
  <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
- <input type="file" id="imageInput" accept="image/jpeg,image/png" aria-label="Upload image" />
+ <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" aria-label="Upload image" />
  <button id="imageButton" title="Send Image" aria-label="Send image">📷</button>
  <button id="voiceButton" title="Record Voice" aria-label="Record voice message">🎤</button>
  <button id="voiceCallButton" title="Start Voice Call" aria-label="Start voice call">📞</button>
@@ -600,14 +611,16 @@
  <div class="help-modal-content">
  <h2 class="text-xl font-bold mb-4">Button Help</h2>
  <p><strong>Start Chat:</strong> Starts New Chat</p>
- <p><strong>Connect to Chat:</strong> This connects you to a chat that you have code for</p>
- <p><strong>Send Code:</strong> This sends your code to Random chat board</p>
- <p><strong>Random Chat:</strong> This takes you to random chat board for a random chat</p>
- <p><strong>Copy Code:</strong> Copies the code so you can send to people in text or social chats</p>
- <p><strong>Record Voice:</strong> Press to start/stop recording a voice message (max 30 seconds)</p>
- <p><strong>Start Voice Call:</strong> Press to start/stop a voice call</p>
- <p><strong>Toggle Speaker/Earpiece:</strong> Switch between speaker and earpiece for voice calls</p>
- <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
+ <p><strong>Connect to Chat:</strong> Connects to a chat with a known code</p>
+ <p><strong>Join Anonymously:</strong> Joins with a random username, no data stored</p>
+ <p><strong>Send Code:</strong> Sends your code to Random chat board</p>
+ <p><strong>Random Chat:</strong> Takes you to random chat board</p>
+ <p><strong>Copy Code:</strong> Copies the code for sharing</p>
+ <p><strong>Record Voice:</strong> Start/stop recording a voice message (max 30 seconds)</p>
+ <p><strong>Start Voice Call:</strong> Start/stop a voice call</p>
+ <p><strong>Toggle Speaker/Earpiece:</strong> Switch between speaker and earpiece</p>
+ <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot. Requires xAI API key. Visit https://x.ai/api for details.</p>
+ <p><strong>Privacy:</strong> Messages are end-to-end encrypted. No personal data is stored beyond sessions unless you choose a username. See our <a href="/privacy.html" class="text-blue-500 hover:underline">Privacy Policy</a>.</p>
  </div>
  </div>
  <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
@@ -616,11 +629,11 @@
  <div id="addUserRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
  </div>
  </div>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
- <script src="utils.js"></script>
- <script src="init.js"></script>
- <script src="main.js"></script>
- <script src="events.js"></script>
+ <script nonce="anonomoose123" src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
+ <script nonce="anonomoose123" src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+ <script nonce="anonomoose123" src="utils.js"></script>
+ <script nonce="anonomoose123" src="init.js"></script>
+ <script nonce="anonomoose123" src="main.js"></script>
+ <script nonce="anonomoose123" src="events.js"></script>
 </body>
 </html>

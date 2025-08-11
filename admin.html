@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -63,15 +64,6 @@
     .feature-toggle button.off {
       background-color: #ef4444;
     }
-    .mode-button {
-      background-color: #3b82f6;
-    }
-    .mode-button.p2p {
-      background-color: #10b981;
-    }
-    .mode-button.relay {
-      background-color: #f59e0b;
-    }
   </style>
 </head>
 <body>
@@ -108,10 +100,6 @@
         <span>Grok Bot</span>
         <button id="toggleGrokBot" aria-label="Toggle Grok bot">Loading...</button>
       </div>
-      <div class="feature-toggle">  <!-- New: Connection Mode Toggle -->
-        <span>Connection Mode</span>
-        <button id="toggleConnectionMode" class="mode-button" aria-label="Cycle connection mode">Loading...</button>
-      </div>
     </div>
     <div class="text-center mt-4">
       <a href="index.html" class="text-blue-500 hover:underline">Back to Chat</a>
@@ -129,7 +117,6 @@
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
     let lastToggleTime = 0;
-    let currentMode = 'both';  // Default
 
     if (localStorage.getItem('clientId')) {
       clientId = localStorage.getItem('clientId');
@@ -177,21 +164,6 @@
         socket.send(JSON.stringify({ type: 'toggle-feature', feature, secret, clientId, token }));
       } else {
         showStatusMessage('Connection closed. Reconnecting to toggle...');
-      }
-    }
-
-    function setConnectionMode(mode) {
-      const now = Date.now();
-      if (now - lastToggleTime < 1000) {
-        showStatusMessage('Please wait before changing mode.', 2000);
-        return;
-      }
-      lastToggleTime = now;
-      const secret = adminPasswordInput.value.trim();
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'set-connection-mode', mode, secret, clientId, token }));
-      } else {
-        showStatusMessage('Connection closed. Reconnecting to change mode...');
       }
     }
 
@@ -250,12 +222,6 @@
           document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
           document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
           document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
-          currentMode = data.connectionMode || 'both';  // New: Set current mode
-          const modeButton = document.getElementById('toggleConnectionMode');
-          modeButton.textContent = `Mode: ${currentMode.charAt(0).toUpperCase() + currentMode.slice(1)}`;
-          modeButton.classList.remove('p2p', 'relay');
-          if (currentMode === 'p2p') modeButton.classList.add('p2p');
-          if (currentMode === 'relay') modeButton.classList.add('relay');
           if (!data.enableService) {
             statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
           }
@@ -282,12 +248,6 @@
           document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
           document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
           document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
-          currentMode = data.connectionMode || 'both';  // New: Update mode
-          const modeButton = document.getElementById('toggleConnectionMode');
-          modeButton.textContent = `Mode: ${currentMode.charAt(0).toUpperCase() + currentMode.slice(1)}`;
-          modeButton.classList.remove('p2p', 'relay');
-          if (currentMode === 'p2p') modeButton.classList.add('p2p');
-          if (currentMode === 'relay') modeButton.classList.add('relay');
           showStatusMessage(`Features updated: ${data.enableService ? 'Service enabled' : 'Service disabled'}`);
           if (!data.enableService) {
             statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
@@ -374,12 +334,6 @@
     document.getElementById('toggleVoiceCalls').onclick = () => toggleFeature('voiceCalls');
     document.getElementById('toggleAudioToggle').onclick = () => toggleFeature('audioToggle');
     document.getElementById('toggleGrokBot').onclick = () => toggleFeature('grokBot');
-    document.getElementById('toggleConnectionMode').onclick = () => {  // New: Cycle mode
-      const modes = ['both', 'p2p', 'relay'];
-      const nextIndex = (modes.indexOf(currentMode) + 1) % modes.length;
-      const nextMode = modes[nextIndex];
-      setConnectionMode(nextMode);
-    };
   </script>
 </body>
 </html>

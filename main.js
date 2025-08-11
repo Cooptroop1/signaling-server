@@ -1,5 +1,5 @@
 // Core logic: peer connections, message sending, handling offers, etc.
-// Global vars for dynamic TURN creds from server
+//Global vars for dynamic TURN creds from server
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -78,13 +78,13 @@ async function sendMedia(file, type) {
     canvas.width = width;
     canvas.height = height;
     ctx.drawImage(img, 0, 0, width, height);
-    base64 = canvas.toDataURL('image/jpeg', quality);
+    base64 = canvas.toDataURL('image/jpeg', quality).split(',')[1]; // Remove data URL prefix to get pure base64
     URL.revokeObjectURL(img.src);
   } else {
     const mp3Blob = await encodeAudioToMp3(file);
     base64 = await new Promise(resolve => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
+      reader.onload = () => resolve(reader.result.split(',')[1]); // Remove data URL prefix
       reader.readAsDataURL(mp3Blob);
     });
   }
@@ -97,9 +97,16 @@ async function sendMedia(file, type) {
       showStatusMessage('Error: Encryption key not available for relay mode.');
       return;
     }
-    const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-    const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
-    sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
+    try {
+      const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
+      console.log('Encrypted media payload:', encrypted, 'Valid base64:', /^[A-Za-z0-9+/=]+$/.test(encrypted));
+      const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
+      sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
+    } catch (error) {
+      console.error('Error encrypting media:', error);
+      showStatusMessage('Error encrypting media. Check console for details.');
+      return;
+    }
   } else if (dataChannels.size > 0) {
     dataChannels.forEach((dataChannel) => {
       if (dataChannel.readyState === 'open') {
@@ -119,21 +126,22 @@ async function sendMedia(file, type) {
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   messageDiv.appendChild(document.createTextNode(`${username}: `));
+  const fullBase64 = `data:${type === 'image' ? 'image/jpeg' : 'audio/mp3'};base64,${base64}`; // Re-add prefix for display
   if (type === 'image') {
     const imgElement = document.createElement('img');
-    imgElement.src = base64;
+    imgElement.src = fullBase64;
     imgElement.style.maxWidth = '100%';
     imgElement.style.borderRadius = '0.5rem';
     imgElement.style.cursor = 'pointer';
     imgElement.setAttribute('alt', 'Sent image');
-    imgElement.addEventListener('click', () => createImageModal(base64, `${type}Button`));
+    imgElement.addEventListener('click', () => createImageModal(fullBase64, `${type}Button`));
     messageDiv.appendChild(imgElement);
   } else {
     const audioElement = document.createElement('audio');
-    audioElement.src = base64;
+    audioElement.src = fullBase64;
     audioElement.controls = true;
     audioElement.setAttribute('alt', 'Sent voice message');
-    audioElement.addEventListener('click', () => createAudioModal(base64, `${type}Button`));
+    audioElement.addEventListener('click', () => createAudioModal(fullBase64, `${type}Button`));
     messageDiv.appendChild(audioElement);
   }
   messages.prepend(messageDiv);
@@ -148,7 +156,7 @@ function startPeerConnection(targetId, isOfferer) {
   if (features.connectionMode === 'relay') {
     console.log(`Skipping P2P for ${targetId}: relay mode only`);
     useRelay = true;
-    isConnected = true;  // Enable input in relay mode
+    isConnected = true; // Enable input in relay mode
     updateMaxClientsUI();
     const privacyStatus = document.getElementById('privacyStatus');
     if (privacyStatus) {
@@ -309,7 +317,7 @@ function startPeerConnection(targetId, isOfferer) {
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
-    console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
+    console.log('Data channel opened with ' + targetId + ' for code: ' + code + ', state: ' + dataChannel.readyState);
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
@@ -380,19 +388,19 @@ function setupDataChannel(dataChannel, targetId) {
     messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
     if (data.type === 'image') {
       const img = document.createElement('img');
-      img.src = data.data;
+      img.src = `data:image/jpeg;base64,${data.data}`;
       img.style.maxWidth = '100%';
       img.style.borderRadius = '0.5rem';
       img.style.cursor = 'pointer';
       img.setAttribute('alt', 'Received image');
-      img.addEventListener('click', () => createImageModal(data.data, 'messageInput'));
+      img.addEventListener('click', () => createImageModal(img.src, 'messageInput'));
       messageDiv.appendChild(img);
     } else if (data.type === 'voice') {
       const audio = document.createElement('audio');
-      audio.src = data.data;
+      audio.src = `data:audio/mp3;base64,${data.data}`;
       audio.controls = true;
       audio.setAttribute('alt', 'Received voice message');
-      audio.addEventListener('click', () => createAudioModal(data.data, 'messageInput'));
+      audio.addEventListener('click', () => createAudioModal(audio.src, 'messageInput'));
       messageDiv.appendChild(audio);
     } else {
       messageDiv.appendChild(document.createTextNode(sanitizeMessage(data.content)));
@@ -537,9 +545,17 @@ async function sendMessage(content) {
         showStatusMessage('Error: Encryption key not available for relay mode.');
         return;
       }
-      const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-      const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
-      sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
+      try {
+        const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
+        console.log('Encrypted message payload:', encrypted, 'Valid base64:', /^[A-Za-z0-9+/=]+$/.test(encrypted));
+        const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
+        console.log('Signature:', signature, 'Valid base64:', /^[A-Za-z0-9+/=]+$/.test(signature));
+        sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
+      } catch (error) {
+        console.error('Error encrypting message:', error);
+        showStatusMessage('Error encrypting message. Check console for details.');
+        return;
+      }
     } else {
       dataChannels.forEach((dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {

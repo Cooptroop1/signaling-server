@@ -656,7 +656,7 @@ wss.on('connection', (ws, req) => {
       }
       // New: Enforce connection mode for relay messages
       if (features.connectionMode === 'p2p' && (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice')) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Relay disabled in P2P mode.' }));
+        ws.send(JSON.stringify({ type: 'error', message: 'Relay disabled in P2P mode. Use data channels.' }));
         return;
       }
       if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice') {

@@ -52,6 +52,40 @@
  }
  }
 
+ let ratchets = new Map(); // Moved to utils.js
+
+ const HKDF = async (key, salt, info) => {
+  const hkdfKey = await window.crypto.subtle.importKey('raw', key, { name: 'HKDF' }, false, ['deriveKey']);
+  return await window.crypto.subtle.deriveKey({ name: 'HKDF', salt, info: new TextEncoder().encode(info), hash: 'SHA-256' }, hkdfKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+ };
+
+ async function initRatchet(targetId, sharedKey) {
+  const root = await HKDF(sharedKey, new Uint8Array(), 'root');
+  const send = await HKDF(root, new Uint8Array(), 'send');
+  const recv = await HKDF(root, new Uint8Array(), 'recv');
+  ratchets.set(targetId, { sendKey: send, recvKey: recv, sendCount: 0, recvCount: 0 });
+  console.log('Ratchet initialized for', targetId);
+ }
+
+ async function ratchetEncrypt(targetId, plaintext) {
+  const ratchet = ratchets.get(targetId);
+  const msgKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'msg' + ratchet.sendCount);
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, msgKey, plaintext);
+  ratchet.sendKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'chain');
+  ratchet.sendCount++;
+  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
+ }
+
+ async function ratchetDecrypt(targetId, encrypted, iv) {
+  const ratchet = ratchets.get(targetId);
+  const msgKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'msg' + ratchet.recvCount);
+  const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, msgKey, base64ToArrayBuffer(encrypted));
+  ratchet.recvKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'chain');
+  ratchet.recvCount++;
+  return decrypted;
+ }
+
  function cleanupPeerConnection(targetId) {
  const peerConnection = peerConnections.get(targetId);
  const dataChannel = dataChannels.get(targetId);
@@ -74,7 +108,7 @@
  messageRateLimits.delete(targetId);
  imageRateLimits.delete(targetId);
  voiceRateLimits.delete(targetId);
- ratchets.delete(targetId);
+ if (ratchets.has(targetId)) ratchets.delete(targetId);
  if (remoteAudios.has(targetId)) {
  const audio = remoteAudios.get(targetId);
  audio.remove();

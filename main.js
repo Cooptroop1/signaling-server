@@ -1,5 +1,5 @@
 // Core logic: peer connections, message sending, handling offers, etc.
-//Global vars for dynamic TURN creds from server
+// Global vars for dynamic TURN creds from server
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -22,7 +22,7 @@ async function sendMedia(file, type) {
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  if (!file || !validTypes[type].includes(file.type) || !username || dataChannels.size === 0) {
+  if (!file || !validTypes[type].includes(file.type) || !username) {
     showStatusMessage(`Error: Select a ${type === 'image' ? 'JPEG/PNG image' : 'valid audio format'} and ensure you are connected.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
@@ -78,7 +78,7 @@ async function sendMedia(file, type) {
     canvas.width = width;
     canvas.height = height;
     ctx.drawImage(img, 0, 0, width, height);
-    base64 = canvas.toDataURL('image/jpeg', quality).split(',')[1]; // Remove data URL prefix to get pure base64
+    base64 = canvas.toDataURL('image/jpeg', quality).split(',')[1]; // Remove data URL prefix
     URL.revokeObjectURL(img.src);
   } else {
     const mp3Blob = await encodeAudioToMp3(file);
@@ -100,7 +100,8 @@ async function sendMedia(file, type) {
     try {
       const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
       console.log('Encrypted media payload:', encrypted, 'Valid base64:', /^[A-Za-z0-9+/=]+$/.test(encrypted));
-      const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
+      const signature = await signMessage(signingKey, encrypted);
+      console.log('Signature:', signature, 'Valid base64:', /^[A-Za-z0-9+/=]+$/.test(signature));
       sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
     } catch (error) {
       console.error('Error encrypting media:', error);
@@ -114,7 +115,7 @@ async function sendMedia(file, type) {
       }
     });
   } else {
-    showStatusMessage('Error: No connections.');
+    showStatusMessage('Error: No active peer connections.');
     return;
   }
   // Display locally
@@ -152,7 +153,7 @@ async function sendMedia(file, type) {
 
 function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
-  // New: Respect connection mode
+  // Respect connection mode
   if (features.connectionMode === 'relay') {
     console.log(`Skipping P2P for ${targetId}: relay mode only`);
     useRelay = true;
@@ -278,7 +279,7 @@ function startPeerConnection(targetId, isOfferer) {
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
   };
-  // New: Listen for signaling state changes for debugging
+  // Listen for signaling state changes for debugging
   peerConnection.onsignalingstatechange = () => {
     console.log(`Signaling state for ${targetId}: ${peerConnection.signalingState}`);
   };
@@ -317,7 +318,7 @@ function startPeerConnection(targetId, isOfferer) {
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
-    console.log('Data channel opened with ' + targetId + ' for code: ' + code + ', state: ' + dataChannel.readyState);
+    console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
@@ -434,7 +435,7 @@ function setupDataChannel(dataChannel, targetId) {
         document.getElementById('remoteAudioContainer').classList.add('hidden');
       }
     }
-    if (dataChannels.size === 0) {
+    if (dataChannels.size === 0 && !useRelay) { // Only hide if not in relay mode
       inputContainer.classList.add('hidden');
       messages.classList.add('waiting');
       document.getElementById('audioOutputButton').classList.add('hidden');
@@ -523,7 +524,7 @@ function handleCandidate(candidate, targetId) {
 }
 
 async function sendMessage(content) {
-  if (content && dataChannels.size > 0 && username) {
+  if (content && username) {
     if (grokBotActive && content.startsWith('/grok ')) {
       const query = content.slice(6).trim();
       if (query) {
@@ -548,7 +549,7 @@ async function sendMessage(content) {
       try {
         const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
         console.log('Encrypted message payload:', encrypted, 'Valid base64:', /^[A-Za-z0-9+/=]+$/.test(encrypted));
-        const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
+        const signature = await signMessage(signingKey, encrypted);
         console.log('Signature:', signature, 'Valid base64:', /^[A-Za-z0-9+/=]+$/.test(signature));
         sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
       } catch (error) {
@@ -556,12 +557,15 @@ async function sendMessage(content) {
         showStatusMessage('Error encrypting message. Check console for details.');
         return;
       }
-    } else {
+    } else if (dataChannels.size > 0) {
       dataChannels.forEach((dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {
           dataChannel.send(jsonString);
         }
       });
+    } else {
+      showStatusMessage('Error: No active peer connections.');
+      return;
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -796,7 +800,7 @@ async function autoConnect(codeParam) {
   }
 }
 
-// New: Function to update UI based on features
+// Function to update UI based on features
 function updateFeaturesUI() {
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
@@ -832,6 +836,11 @@ function updateFeaturesUI() {
   if (grokButton) {
     grokButton.classList.toggle('hidden', !features.enableGrokBot);
     grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
+  }
+  // Ensure input and messages remain visible in relay mode
+  if (useRelay) {
+    inputContainer.classList.remove('hidden');
+    messages.classList.remove('waiting');
   }
   if (!features.enableService) {
     showStatusMessage('Service disabled by admin. Disconnecting...');
@@ -908,7 +917,6 @@ function saveGrokKey() {
   }
 }
 
-// New: Function to set audio output
 async function setAudioOutput(audioElement, targetId) {
   try {
     if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
@@ -939,7 +947,6 @@ async function setAudioOutput(audioElement, targetId) {
   }
 }
 
-// New: Function to toggle audio output mode
 function toggleAudioOutput() {
   audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
   console.log(`Toggling audio output to ${audioOutputMode}`);

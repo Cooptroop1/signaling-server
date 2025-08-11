@@ -55,79 +55,68 @@
   let ratchets = new Map(); // Moved to utils.js
 
   const HKDF = async (ikm, salt, info) => {
-    try {
-      const baseKey = await window.crypto.subtle.importKey(
-        'raw', 
-        ikm instanceof ArrayBuffer ? new Uint8Array(ikm) : ikm, 
-        'HKDF', 
-        false, 
-        ['deriveBits']
-      );
-      const bits = await window.crypto.subtle.deriveBits(
-        {
-          name: 'HKDF',
-          salt,
-          info: new TextEncoder().encode(info),
-          hash: 'SHA-256'
-        },
-        baseKey,
-        256
-      );
-      return new Uint8Array(bits);
-    } catch (error) {
-      console.error('HKDF failed:', error);
-      throw error;
-    }
+  const baseKey = await window.crypto.subtle.importKey(
+    'raw', 
+    ikm, 
+    'HKDF', 
+    false, 
+    ['deriveBits']
+  );
+  return await window.crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      salt,
+      info: new TextEncoder().encode(info),
+      hash: 'SHA-256'
+    },
+    baseKey,
+    256
+  );
   };
 
   async function initRatchet(targetId, sharedKey) {
-    try {
-      const root = await HKDF(sharedKey, new Uint8Array(), 'root');
-      const send = await HKDF(root, new Uint8Array(), 'send');
-      const recv = await HKDF(root, new Uint8Array(), 'recv');
-      ratchets.set(targetId, { sendKey: send, recvKey: recv, sendCount: 0, recvCount: 0 });
-      console.log('Ratchet initialized for', targetId);
-    } catch (error) {
-      console.error('initRatchet failed for ' + targetId + ':', error);
-      throw error;
-    }
+  const root = await HKDF(sharedKey, new Uint8Array(), 'root');
+  const send = await HKDF(root, new Uint8Array(), 'send');
+  const recv = await HKDF(root, new Uint8Array(), 'recv');
+  ratchets.set(targetId, { sendKey: send, recvKey: recv, sendCount: 0, recvCount: 0 });
+  console.log('Ratchet initialized for', targetId);
   }
 
   async function ratchetEncrypt(targetId, plaintext) {
-    const ratchet = ratchets.get(targetId);
-    if (!ratchet) {
-      throw new Error('Ratchet not initialized for ' + targetId);
-    }
-    try {
-      const msgKeyBits = await HKDF(ratchet.sendKey, new Uint8Array(), 'msg' + ratchet.sendCount);
-      const msgKey = await window.crypto.subtle.importKey('raw', msgKeyBits, 'AES-GCM', false, ['encrypt']);
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, msgKey, plaintext);
-      ratchet.sendKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'chain');
-      ratchet.sendCount++;
-      return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
-    } catch (error) {
-      console.error('Error in ratchetEncrypt for ' + targetId + ':', error);
-      throw error;
-    }
+  const ratchet = ratchets.get(targetId);
+  if (!ratchet) {
+    throw new Error('Ratchet not initialized for ' + targetId);
+  }
+  try {
+    const msgKeyBits = await HKDF(ratchet.sendKey, new Uint8Array(), 'msg' + ratchet.sendCount);
+    const msgKey = await window.crypto.subtle.importKey('raw', msgKeyBits, 'AES-GCM', false, ['encrypt']);
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, msgKey, plaintext);
+    ratchet.sendKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'chain');
+    ratchet.sendCount++;
+    return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
+  } catch (error) {
+    console.error('Error in ratchetEncrypt:', error);
+    throw error;
+  }
   }
 
   async function ratchetDecrypt(targetId, encrypted, iv) {
-    const ratchet = ratchets.get(targetId);
-    if (!ratchet) {
-      throw new Error('Ratchet not initialized for ' + targetId);
-    }
-    try {
-      const msgKeyBits = await HKDF(ratchet.recvKey, new Uint8Array(), 'msg' + ratchet.recvCount);
-      const msgKey = await window.crypto.subtle.importKey('raw', msgKeyBits, 'AES-GCM', false, ['decrypt']);
-      const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, msgKey, base64ToArrayBuffer(encrypted));
-      ratchet.recvKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'chain');
-      ratchet.recvCount++;
-      return decrypted;
-    } catch (error) {
-      console.error('Error in ratchetDecrypt for ' + targetId + ':', error);
-      throw error;
-    }
+  const ratchet = ratchets.get(targetId);
+  if (!ratchet) {
+    throw new Error('Ratchet not initialized for ' + targetId);
+  }
+  try {
+    const msgKeyBits = await HKDF(ratchet.recvKey, new Uint8Array(), 'msg' + ratchet.recvCount);
+    const msgKey = await window.crypto.subtle.importKey('raw', msgKeyBits, 'AES-GCM', false, ['decrypt']);
+    const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, msgKey, base64ToArrayBuffer(encrypted));
+    ratchet.recvKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'chain');
+    ratchet.recvCount++;
+    return decrypted;
+  } catch (error) {
+    console.error('Error in ratchetDecrypt:', error);
+    throw error;
+  }
   }
 
   function cleanupPeerConnection(targetId) {
@@ -374,38 +363,26 @@
   }
 
   async function exportPublicKey(key) {
-  const exported = await window.crypto.subtle.exportKey('raw', key);
+  const exported = await window.crypto.subtle.exportKey('spki', key);
   return arrayBufferToBase64(exported);
   }
 
   async function importPublicKey(base64) {
-  const buffer = base64ToArrayBuffer(base64);
-  try {
-    return await window.crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(buffer),
-      { name: 'ECDH', namedCurve: 'P-256' },
-      true,
-      []
-    );
-  } catch (error) {
-    console.error('importPublicKey failed:', error, 'Base64 length:', base64.length, 'Buffer length:', buffer.byteLength);
-    throw error;
-  }
+  return window.crypto.subtle.importKey(
+    'spki',
+    base64ToArrayBuffer(base64),
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    []
+  );
   }
 
   async function deriveSharedKey(privateKey, publicKey) {
-  try {
-    const sharedBits = await window.crypto.subtle.deriveBits(
-      { name: 'ECDH', public: publicKey },
-      privateKey,
-      256
-    );
-    return new Uint8Array(sharedBits);
-  } catch (error) {
-    console.error('deriveSharedKey failed:', error);
-    throw error;
-  }
+  return await window.crypto.subtle.deriveBits(
+    { name: 'ECDH', public: publicKey },
+    privateKey,
+    256
+  );
   }
 
   // Relay mode encryption (kept for fallback)

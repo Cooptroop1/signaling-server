@@ -1,5 +1,5 @@
 // Utility to show temporary status messages
-function showStatusMessage(message, duration = 3000) {
+ function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
     statusElement.setAttribute('aria-live', 'assertive');
@@ -8,33 +8,33 @@ function showStatusMessage(message, duration = 3000) {
       statusElement.setAttribute('aria-live', 'polite');
     }, duration);
   }
-}
+ }
 
-// Sanitize message content to prevent XSS
-function sanitizeMessage(content) {
+ // Sanitize message content to prevent XSS
+ function sanitizeMessage(content) {
   const div = document.createElement('div');
   div.textContent = content;
   return div.innerHTML.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+ }
 
-function generateMessageId() {
+ function generateMessageId() {
   return Math.random().toString(36).substr(2, 9);
-}
+ }
 
-function validateUsername(username) {
+ function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
-}
+ }
 
-function validateCode(code) {
+ function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
-}
+ }
 
-// Keepalive timer ID
-let keepAliveTimer = null; // Moved from events.js to utils.js
-// Keepalive function to prevent WebSocket timeout
-function startKeepAlive() {
+ // Keepalive timer ID
+ let keepAliveTimer = null; // Moved from events.js to utils.js
+ // Keepalive function to prevent WebSocket timeout
+ function startKeepAlive() {
   if (keepAliveTimer) clearInterval(keepAliveTimer);
   keepAliveTimer = setInterval(() => {
     if (typeof socket !== 'undefined' && socket.readyState === WebSocket.OPEN) {
@@ -42,17 +42,17 @@ function startKeepAlive() {
       log('info', 'Sent keepalive ping');
     }
   }, 20000);
-}
+ }
 
-function stopKeepAlive() {
+ function stopKeepAlive() {
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
     keepAliveTimer = null;
     log('info', 'Stopped keepalive');
   }
-}
+ }
 
-function cleanupPeerConnection(targetId) {
+ function cleanupPeerConnection(targetId) {
   const peerConnection = peerConnections.get(targetId);
   const dataChannel = dataChannels.get(targetId);
   if (dataChannel && dataChannel.readyState === 'open') {
@@ -90,9 +90,9 @@ function cleanupPeerConnection(targetId) {
     if (inputContainer) inputContainer.classList.add('hidden');
     if (messages) messages.classList.add('waiting');
   }
-}
+ }
 
-function initializeMaxClientsUI() {
+ function initializeMaxClientsUI() {
   if (typeof isInitiator === 'undefined') {
     log('error', 'isInitiator is not defined, skipping UI initialization');
     showStatusMessage('Error: UI initialization failed.');
@@ -132,9 +132,9 @@ function initializeMaxClientsUI() {
     log('error', 'Add user modal elements not found');
     showStatusMessage('Error: UI initialization failed.');
   }
-}
+ }
 
-function updateMaxClientsUI() {
+ function updateMaxClientsUI() {
   if (typeof isInitiator === 'undefined') {
     log('error', 'isInitiator is not defined, skipping UI update');
     return;
@@ -161,9 +161,26 @@ function updateMaxClientsUI() {
       messages.classList.remove('waiting');
     }
   }
-}
+  // Update user dots
+  const userDots = document.getElementById('userDots');
+  if (userDots) {
+    userDots.innerHTML = '';
+    // Add green dots for online users
+    for (let i = 0; i < totalClients; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'user-dot online';
+      userDots.appendChild(dot);
+    }
+    // Add red dots for offline slots
+    for (let i = 0; i < (maxClients - totalClients); i++) {
+      const dot = document.createElement('div');
+      dot.className = 'user-dot offline';
+      userDots.appendChild(dot);
+    }
+  }
+ }
 
-function setMaxClients(n) {
+ function setMaxClients(n) {
   if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
     maxClients = Math.min(n, 10);
     log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);
@@ -172,9 +189,9 @@ function setMaxClients(n) {
   } else {
     log('warn', 'setMaxClients failed: not initiator, no token, or socket not open');
   }
-}
+ }
 
-function log(level, ...msg) {
+ function log(level, ...msg) {
   const timestamp = new Date().toISOString();
   const fullMsg = `[${timestamp}] ${msg.join(' ')}`;
   if (level === 'error') {
@@ -184,9 +201,9 @@ function log(level, ...msg) {
   } else {
     console.log(fullMsg);
   }
-}
+ }
 
-function createImageModal(base64, focusId) {
+ function createImageModal(base64, focusId) {
   let modal = document.getElementById('imageModal');
   if (!modal) {
     modal = document.createElement('div');
@@ -214,9 +231,9 @@ function createImageModal(base64, focusId) {
       document.getElementById(focusId)?.focus();
     }
   });
-}
+ }
 
-function createAudioModal(base64, focusId) {
+ function createAudioModal(base64, focusId) {
   let modal = document.getElementById('audioModal');
   if (!modal) {
     modal = document.createElement('div');
@@ -245,22 +262,22 @@ function createAudioModal(base64, focusId) {
       document.getElementById(focusId)?.focus();
     }
   });
-}
+ }
 
-function arrayBufferToBase64(buffer) {
+ function arrayBufferToBase64(buffer) {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)));
-}
+ }
 
-function base64ToArrayBuffer(base64) {
+ function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
-}
+ }
 
-async function encodeAudioToMp3(audioBlob) {
+ async function encodeAudioToMp3(audioBlob) {
   const arrayBuffer = await audioBlob.arrayBuffer();
   const audioContext = new (window.AudioContext || window.webkitAudioContext)();
   const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -286,14 +303,14 @@ async function encodeAudioToMp3(audioBlob) {
   }
   const mp3Blob = new Blob(mp3Data, { type: 'audio/mp3' });
   return mp3Blob;
-}
+ }
 
-async function exportPublicKey(key) {
+ async function exportPublicKey(key) {
   const exported = await window.crypto.subtle.exportKey('raw', key);
   return arrayBufferToBase64(exported);
-}
+ }
 
-async function importPublicKey(base64) {
+ async function importPublicKey(base64) {
   return window.crypto.subtle.importKey(
     'raw',
     base64ToArrayBuffer(base64),
@@ -301,9 +318,9 @@ async function importPublicKey(base64) {
     true,
     []
   );
-}
+ }
 
-async function encrypt(text, master) {
+ async function encrypt(text, master) {
   const salt = window.crypto.getRandomValues(new Uint8Array(16));
   const hkdfKey = await window.crypto.subtle.importKey(
     'raw',
@@ -327,9 +344,9 @@ async function encrypt(text, master) {
     encoded
   );
   return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv), salt: arrayBufferToBase64(salt) };
-}
+ }
 
-async function decrypt(encrypted, iv, salt, master) {
+ async function decrypt(encrypted, iv, salt, master) {
   const hkdfKey = await window.crypto.subtle.importKey(
     'raw',
     master,
@@ -350,9 +367,9 @@ async function decrypt(encrypted, iv, salt, master) {
     base64ToArrayBuffer(encrypted)
   );
   return new TextDecoder().decode(decoded);
-}
+ }
 
-async function encryptBytes(key, data) {
+ async function encryptBytes(key, data) {
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
@@ -360,17 +377,17 @@ async function encryptBytes(key, data) {
     data
   );
   return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
-}
+ }
 
-async function decryptBytes(key, encrypted, iv) {
+ async function decryptBytes(key, encrypted, iv) {
   return window.crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
     key,
     base64ToArrayBuffer(encrypted)
   );
-}
+ }
 
-async function deriveSharedKey(privateKey, publicKey) {
+ async function deriveSharedKey(privateKey, publicKey) {
   const sharedBits = await window.crypto.subtle.deriveBits(
     { name: 'ECDH', public: publicKey },
     privateKey,
@@ -383,9 +400,9 @@ async function deriveSharedKey(privateKey, publicKey) {
     false,
     ["encrypt", "decrypt"]
   );
-}
+ }
 
-async function encryptRaw(key, data) {
+ async function encryptRaw(key, data) {
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(data); // Encode string to bytes
   const encrypted = await window.crypto.subtle.encrypt(
@@ -394,18 +411,18 @@ async function encryptRaw(key, data) {
     encoded
   );
   return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
-}
+ }
 
-async function signMessage(signingKey, data) {
+ async function signMessage(signingKey, data) {
   const encoded = new TextEncoder().encode(data);
   return arrayBufferToBase64(await window.crypto.subtle.sign(
     { name: 'HMAC' },
     signingKey,
     encoded
   ));
-}
+ }
 
-async function verifyMessage(signingKey, signature, data) {
+ async function verifyMessage(signingKey, signature, data) {
   const encoded = new TextEncoder().encode(data);
   return await window.crypto.subtle.verify(
     { name: 'HMAC' },
@@ -413,9 +430,9 @@ async function verifyMessage(signingKey, signature, data) {
     base64ToArrayBuffer(signature),
     encoded
   );
-}
+ }
 
-async function deriveSigningKey(master) {
+ async function deriveSigningKey(master) {
   const hkdfKey = await window.crypto.subtle.importKey(
     'raw',
     master,
@@ -430,4 +447,4 @@ async function deriveSigningKey(master) {
     false,
     ['sign', 'verify']
   );
-}
+ }

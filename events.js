@@ -429,19 +429,19 @@ socket.onmessage = async (event) => {
       messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
       if (payload.type === 'image') {
         const img = document.createElement('img');
-        img.src = payload.data;
+        img.src = `data:image/jpeg;base64,${payload.data}`;
         img.style.maxWidth = '100%';
         img.style.borderRadius = '0.5rem';
         img.style.cursor = 'pointer';
         img.setAttribute('alt', 'Received image');
-        img.addEventListener('click', () => createImageModal(payload.data, 'messageInput'));
+        img.addEventListener('click', () => createImageModal(img.src, 'messageInput'));
         messageDiv.appendChild(img);
       } else if (payload.type === 'voice') {
         const audio = document.createElement('audio');
-        audio.src = payload.data;
+        audio.src = `data:audio/mp3;base64,${payload.data}`;
         audio.controls = true;
         audio.setAttribute('alt', 'Received voice message');
-        audio.addEventListener('click', () => createAudioModal(payload.data, 'messageInput'));
+        audio.addEventListener('click', () => createAudioModal(audio.src, 'messageInput'));
         messageDiv.appendChild(audio);
       } else {
         messageDiv.appendChild(document.createTextNode(sanitizeMessage(payload.content)));
@@ -452,11 +452,37 @@ socket.onmessage = async (event) => {
     if (message.type === 'features-update') {
       features = message;
       console.log('Received features update:', features);
-      // New: Set useRelay based on mode (for new connections)
+      // New: Handle mode change
       if (features.connectionMode === 'relay') {
         useRelay = true;
-      } else {
+        peerConnections.forEach((pc, id) => {
+          pc.close();
+          cleanupPeerConnection(id);
+        });
+        peerConnections.clear();
+        dataChannels.clear();
+        isConnected = true; // Keep connected
+        const privacyStatus = document.getElementById('privacyStatus');
+        if (privacyStatus) {
+          privacyStatus.textContent = 'E2E Encrypted (Relay)';
+          privacyStatus.classList.remove('hidden');
+        }
+        showStatusMessage('Switched to relay mode. P2P connections closed.');
+      } else if (features.connectionMode === 'p2p') {
         useRelay = false;
+        if (dataChannels.size === 0) {
+          showStatusMessage('Switched to P2P mode. Reconnecting peers...');
+          if (isInitiator) {
+            connectedClients.forEach(id => {
+              if (id !== clientId) startPeerConnection(id, true);
+            });
+          } else {
+            // Non-initiator: wait for initiator to start
+            showStatusMessage('Waiting for initiator to reconnect in P2P mode.');
+          }
+        }
+      } else {
+        useRelay = false; // 'both', allow fallback
       }
       setTimeout(updateFeaturesUI, 0);
       if (!features.enableService) {

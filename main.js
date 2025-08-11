@@ -7,7 +7,6 @@ let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let audioOutputMode = 'earpiece'; // Default to earpiece
 let renegotiating = new Map(); // Per targetId
-let ratchets = new Map(); // Per targetId { sendKey, recvKey, sendCount, recvCount }
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -99,9 +98,10 @@ async function sendMedia(file, type) {
  const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
  sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
  } else if (dataChannels.size > 0) {
- dataChannels.forEach(async (dataChannel) => {
+ dataChannels.forEach(async (dataChannel, targetId) => {
  if (dataChannel.readyState === 'open') {
- dataChannel.send(jsonString);
+ const { encrypted, iv } = await ratchetEncrypt(targetId, new TextEncoder().encode(jsonString));
+ dataChannel.send(JSON.stringify({ encrypted, iv }));
  }
  });
  } else {
@@ -336,10 +336,6 @@ function setupDataChannel(dataChannel, targetId) {
         stopVoiceCall();
       }
       return;
-    }
-    if (data.encrypted && data.iv) {
-      const plaintext = await ratchetDecrypt(targetId, data.encrypted, data.iv);
-      data = JSON.parse(new TextDecoder().decode(plaintext));
     }
     if (!data.messageId || !data.username || (!data.content && !data.data)) {
       console.log(`Invalid message format from ${targetId}:`, data);
@@ -701,7 +697,9 @@ async function autoConnect(codeParam) {
       codeDisplayElement.textContent = `Using code: ${code}`;
       codeDisplayElement.classList.remove('hidden');
       copyCodeButton.classList.remove('hidden');
-      messages.classList.add('waiting');
+      if (messages) {
+        messages.classList.add('waiting');
+      }
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN) {
         console.log('WebSocket open, sending join');
@@ -737,7 +735,9 @@ async function autoConnect(codeParam) {
         codeDisplayElement.textContent = `Using code: ${code}`;
         codeDisplayElement.classList.remove('hidden');
         copyCodeButton.classList.remove('hidden');
-        messages.classList.add('waiting');
+        if (messages) {
+          messages.classList.add('waiting');
+        }
         statusElement.textContent = 'Waiting for connection...';
         if (socket.readyState === WebSocket.OPEN) {
           console.log('WebSocket open, sending join after username input');

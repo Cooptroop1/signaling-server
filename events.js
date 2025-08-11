@@ -20,6 +20,7 @@ function generateCode() {
 let code = generateCode();
 let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9); // Prefer cookie
 let username = '';
+let isInitiator = false;
 let isConnected = false;
 let maxClients = 2;
 let totalClients = 0;
@@ -45,7 +46,9 @@ let refreshingToken = false;
 let signalingQueue = new Map();
 let connectedClients = new Set(); // New: Track connected client IDs for ratchet
 let clientPublicKeys = new Map(); // New: Initiator stores public keys of clients
-let initiatorPublic = undefined; // New: Non-initiators store initiator's public key
+let initiatorPublic; // New: Non-initiators store initiator's public key
+let peerKeyPairs = new Map(); // Per targetId { publicKey, privateKey }
+let ratchets = new Map(); // Per targetId { sendKey, recvKey, sendCount, recvCount }
 // Declare UI variables globally
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 if (typeof window !== 'undefined') {
@@ -276,6 +279,17 @@ socket.onmessage = async (event) => {
       updateMaxClientsUI();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
+      if (message.existingClients) {
+        message.existingClients.forEach(async id => {
+          const isOfferer = clientId > id; // Deterministic offerer to avoid deadlocks
+          peerKeyPairs.set(id, await window.crypto.subtle.generateKey(
+            { name: 'ECDH', namedCurve: 'P-256' },
+            true,
+            ['deriveKey', 'deriveBits']
+          ));
+          startPeerConnection(id, isOfferer);
+        });
+      }
       return;
     }
     if (message.type === 'initiator-changed') {
@@ -293,9 +307,14 @@ socket.onmessage = async (event) => {
       }
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
-      if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
-        console.log(`Initiator initiating peer connection with client ${message.clientId}`);
-        startPeerConnection(message.clientId, true);
+      if (message.clientId !== clientId && !peerConnections.has(message.clientId)) {
+        peerKeyPairs.set(message.clientId, await window.crypto.subtle.generateKey(
+          { name: 'ECDH', namedCurve: 'P-256' },
+          true,
+          ['deriveKey', 'deriveBits']
+        ));
+        const isOfferer = clientId > message.clientId; // Deterministic
+        startPeerConnection(message.clientId, isOfferer);
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
@@ -366,58 +385,70 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'message' || message.type === 'image' || message.type === 'voice') {
-      if (useRelay) {
-        if (processedMessageIds.has(message.messageId)) return;
-        processedMessageIds.add(message.messageId);
-        const encrypted = message.type === 'message' ? message.encryptedContent : message.encryptedData;
-        const valid = await verifyMessage(signingKey, message.signature, encrypted); // Verify signature before decrypt
-        if (!valid) {
-          console.error('Tampered message detected');
-          showStatusMessage('Tampered message detected. Ignoring.');
-          return;
-        }
-        let payload;
-        try {
-          const jsonString = await decrypt(encrypted, message.iv, message.salt, roomMaster);
-          payload = JSON.parse(jsonString);
-        } catch (error) {
-          console.error('Decryption failed:', error);
-          showStatusMessage('Failed to decrypt message.');
-          return;
-        }
-        const senderUsername = payload.username;
-        const messages = document.getElementById('messages');
-        const isSelf = senderUsername === username;
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'timestamp';
-        timeSpan.textContent = new Date(payload.timestamp).toLocaleTimeString();
-        messageDiv.appendChild(timeSpan);
-        messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-        if (payload.type === 'image') {
-          const img = document.createElement('img');
-          img.src = payload.data;
-          img.style.maxWidth = '100%';
-          img.style.borderRadius = '0.5rem';
-          img.style.cursor = 'pointer';
-          img.setAttribute('alt', 'Received image');
-          img.addEventListener('click', () => createImageModal(payload.data, 'messageInput'));
-          messageDiv.appendChild(img);
-        } else if (payload.type === 'voice') {
-          const audio = document.createElement('audio');
-          audio.src = payload.data;
-          audio.controls = true;
-          audio.setAttribute('alt', 'Received voice message');
-          audio.addEventListener('click', () => createAudioModal(payload.data, 'messageInput'));
-          messageDiv.appendChild(audio);
-        } else {
-          messageDiv.appendChild(document.createTextNode(sanitizeMessage(payload.content)));
-        }
-        messages.prepend(messageDiv);
-        messages.scrollTop = 0;
+    if (message.type === 'new-room-key' && message.targetId === clientId) {
+      try {
+        const importedInitiatorPublic = await importPublicKey(initiatorPublic);
+        const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
+        const newRoomMasterBuffer = await decryptBytes(shared, message.encrypted, message.iv);
+        roomMaster = new Uint8Array(newRoomMasterBuffer);
+        signingKey = await deriveSigningKey(roomMaster);
+        console.log('New room master received and set for PFS.');
+      } catch (error) {
+        console.error('Error handling new-room-key:', error);
+        showStatusMessage('Failed to update encryption key for PFS.');
       }
+      return;
+    }
+    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice') && useRelay) {
+      if (processedMessageIds.has(message.messageId)) return;
+      processedMessageIds.add(message.messageId);
+      const encrypted = message.type === 'message' ? message.encryptedContent : message.encryptedData;
+      const valid = await verifyMessage(signingKey, message.signature, encrypted); // Verify signature before decrypt
+      if (!valid) {
+        console.error('Tampered message detected');
+        showStatusMessage('Tampered message detected. Ignoring.');
+        return;
+      }
+      let payload;
+      try {
+        const jsonString = await decrypt(encrypted, message.iv, message.salt, roomMaster);
+        payload = JSON.parse(jsonString);
+      } catch (error) {
+        console.error('Decryption failed:', error);
+        showStatusMessage('Failed to decrypt message.');
+        return;
+      }
+      const senderUsername = payload.username;
+      const messages = document.getElementById('messages');
+      const isSelf = senderUsername === username;
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'timestamp';
+      timeSpan.textContent = new Date(payload.timestamp).toLocaleTimeString();
+      messageDiv.appendChild(timeSpan);
+      messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+      if (payload.type === 'image') {
+        const img = document.createElement('img');
+        img.src = payload.data;
+        img.style.maxWidth = '100%';
+        img.style.borderRadius = '0.5rem';
+        img.style.cursor = 'pointer';
+        img.setAttribute('alt', 'Received image');
+        img.addEventListener('click', () => createImageModal(payload.data, 'messageInput'));
+        messageDiv.appendChild(img);
+      } else if (payload.type === 'voice') {
+        const audio = document.createElement('audio');
+        audio.src = payload.data;
+        audio.controls = true;
+        audio.setAttribute('alt', 'Received voice message');
+        audio.addEventListener('click', () => createAudioModal(payload.data, 'messageInput'));
+        messageDiv.appendChild(audio);
+      } else {
+        messageDiv.appendChild(document.createTextNode(sanitizeMessage(payload.content)));
+      }
+      messages.prepend(messageDiv);
+      messages.scrollTop = 0;
       return;
     }
     if (message.type === 'features-update') {
@@ -802,4 +833,3 @@ function setCookie(name, value, days) {
   }
   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
 }
-Test with 2+ users: Check console for "Ratchet initialized".

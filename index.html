@@ -222,7 +222,7 @@
     .modal.active {
       display: flex;
     }
-    .help-modal {
+    .help-modal, .add-user-modal {
       display: none;
       position: fixed;
       top: 0;
@@ -234,7 +234,7 @@
       align-items: center;
       justify-content: center;
     }
-    .help-modal-content {
+    .help-modal-content, .add-user-modal-content {
       background-color: white;
       padding: 1.5rem;
       border-radius: 0.5rem;
@@ -243,7 +243,7 @@
       overflow-y: auto;
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     }
-    .help-modal.active {
+    .help-modal.active, .add-user-modal.active {
       display: flex;
     }
     #chatContainer.hidden {
@@ -387,12 +387,12 @@
     #copyCodeButton:hover {
       background-color: #059669;
     }
-    #helpText {
+    #helpText, #addUserText {
       color: #3b82f6;
       cursor: pointer;
       transition: color 0.2s ease;
     }
-    #helpText:hover {
+    #helpText:hover, #addUserText:hover {
       color: #1d4ed8;
     }
     @media (min-width: 1025px) {
@@ -474,6 +474,39 @@
     #imageInput {
       display: none;
     }
+    #maxClientsContainer {
+      display: none;
+    }
+    #maxClientsRadios {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(50px, 1fr));
+      gap: 0.5rem;
+    }
+    #maxClientsRadios button {
+      background-color: #3b82f6;
+      color: white;
+      border-radius: 0.5rem;
+      padding: 0.5rem;
+      font-size: 1rem;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      transition: all 0.2s ease;
+    }
+    #maxClientsRadios button.active {
+      background-color: #10b981;
+    }
+    #maxClientsRadios button:hover:not(:disabled) {
+      background-color: #1d4ed8;
+    }
+    .footer-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+    }
+    .add-user-modal-content h2 {
+      text-align: center;
+      margin-bottom: 1rem;
+    }
   </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
@@ -532,7 +565,8 @@
         <button id="connectButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to chat">Connect</button>
         <button id="backButtonConnect" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
       </div>
-      <div class="text-center mt-4">
+      <div class="text-center mt-4 footer-buttons">
+        <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
     </div>
@@ -553,6 +587,12 @@
       <p><strong>Start Voice Call:</strong> Press to start/stop a voice call</p>
       <p><strong>Toggle Speaker/Earpiece:</strong> Switch between speaker and earpiece for voice calls</p>
       <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
+    </div>
+  </div>
+  <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
+    <div class="add-user-modal-content">
+      <h2 class="text-xl font-bold mb-4">Select Max Users</h2>
+      <div id="addUserRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
     </div>
   </div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>

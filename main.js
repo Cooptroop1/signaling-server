@@ -7,6 +7,34 @@ let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let audioOutputMode = 'earpiece'; // Default to earpiece
 let renegotiating = new Map(); // Per targetId
+let ratchets = new Map(); // Per targetId { sendKey, recvKey, sendCount, recvCount }
+
+async function initRatchet(targetId, sharedKey) {
+  const root = await HKDF(sharedKey, new Uint8Array(), 'root');
+  const send = await HKDF(root, new Uint8Array(), 'send');
+  const recv = await HKDF(root, new Uint8Array(), 'recv');
+  ratchets.set(targetId, { sendKey: send, recvKey: recv, sendCount: 0, recvCount: 0 });
+  console.log('Ratchet initialized for', targetId);
+}
+
+async function ratchetEncrypt(targetId, plaintext) {
+  const ratchet = ratchets.get(targetId);
+  const msgKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'msg' + ratchet.sendCount);
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, msgKey, plaintext);
+  ratchet.sendKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'chain');
+  ratchet.sendCount++;
+  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
+}
+
+async function ratchetDecrypt(targetId, encrypted, iv) {
+  const ratchet = ratchets.get(targetId);
+  const msgKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'msg' + ratchet.recvCount);
+  const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, msgKey, base64ToArrayBuffer(encrypted));
+  ratchet.recvKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'chain');
+  ratchet.recvCount++;
+  return decrypted;
+}
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -336,6 +364,10 @@ function setupDataChannel(dataChannel, targetId) {
         stopVoiceCall();
       }
       return;
+    }
+    if (data.encrypted && data.iv) {
+      const plaintext = await ratchetDecrypt(targetId, data.encrypted, data.iv);
+      data = JSON.parse(new TextDecoder().decode(plaintext));
     }
     if (!data.messageId || !data.username || (!data.content && !data.data)) {
       console.log(`Invalid message format from ${targetId}:`, data);
@@ -697,9 +729,7 @@ async function autoConnect(codeParam) {
       codeDisplayElement.textContent = `Using code: ${code}`;
       codeDisplayElement.classList.remove('hidden');
       copyCodeButton.classList.remove('hidden');
-      if (messages) {
-        messages.classList.add('waiting');
-      }
+      messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN) {
         console.log('WebSocket open, sending join');
@@ -735,9 +765,7 @@ async function autoConnect(codeParam) {
         codeDisplayElement.textContent = `Using code: ${code}`;
         codeDisplayElement.classList.remove('hidden');
         copyCodeButton.classList.remove('hidden');
-        if (messages) {
-          messages.classList.add('waiting');
-        }
+        messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
         if (socket.readyState === WebSocket.OPEN) {
           console.log('WebSocket open, sending join after username input');

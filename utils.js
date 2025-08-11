@@ -338,6 +338,7 @@
  );
  }
 
+ // Relay mode encryption (kept for fallback)
  async function encrypt(text, master) {
  const salt = window.crypto.getRandomValues(new Uint8Array(16));
  const hkdfKey = await window.crypto.subtle.importKey(

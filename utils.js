@@ -93,7 +93,7 @@
  }
  }
 
- let isInitiator = false; // Added global here to fix not defined error
+ let isInitiator = false; // Global to fix not defined
 
  function initializeMaxClientsUI() {
  if (typeof isInitiator === 'undefined') {
@@ -338,151 +338,130 @@
  );
  }
 
- // Relay mode encryption (kept for fallback)
- const HKDF = async (key, salt, info) => {
-  const hkdfKey = await window.crypto.subtle.importKey('raw', key, { name: 'HKDF' }, false, ['deriveKey']);
-  return await window.crypto.subtle.deriveKey({ name: 'HKDF', salt, info: new TextEncoder().encode(info), hash: 'SHA-256' }, hkdfKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
- };
-
- let ratchets = new Map(); // per targetId { sendKey, recvKey, sendCount, recvCount }
-
- async function initRatchet(targetId, sharedKey) {
-  const root = await HKDF(sharedKey, new Uint8Array(), 'root');
-  const send = await HKDF(root, new Uint8Array(), 'send');
-  const recv = await HKDF(root, new Uint8Array(), 'recv');
-  ratchets.set(targetId, { sendKey: send, recvKey: recv, sendCount: 0, recvCount: 0 });
-  console.log('Ratchet initialized for', targetId);
- }
-
- async function ratchetEncrypt(targetId, plaintext) {
-  const ratchet = ratchets.get(targetId);
-  const msgKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'msg' + ratchet.sendCount);
-  const iv = window.crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, msgKey, plaintext);
-  ratchet.sendKey = await HKDF(ratchet.sendKey, new Uint8Array(), 'chain');
-  ratchet.sendCount++;
-  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
- }
-
- async function ratchetDecrypt(targetId, encrypted, iv) {
-  const ratchet = ratchets.get(targetId);
-  const msgKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'msg' + ratchet.recvCount);
-  const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, msgKey, base64ToArrayBuffer(encrypted));
-  ratchet.recvKey = await HKDF(ratchet.recvKey, new Uint8Array(), 'chain');
-  ratchet.recvCount++;
-  return decrypted;
- }
-
  async function encrypt(text, master) {
-  const salt = window.crypto.getRandomValues(new Uint8Array(16));
-  const hkdfKey = await window.crypto.subtle.importKey(
-  'raw',
-  master,
-  { name: 'HKDF' },
-  false,
-  ['deriveKey']
-  );
-  const derivedKey = await window.crypto.subtle.deriveKey(
-  { name: 'HKDF', salt, info: new Uint8Array(0), hash: 'SHA-256' },
-  hkdfKey,
-  { name: 'AES-GCM', length: 256 },
-  false,
-  ['encrypt', 'decrypt']
-  );
-  const iv = window.crypto.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(text);
-  const encrypted = await window.crypto.subtle.encrypt(
-  { name: 'AES-GCM', iv },
-  derivedKey,
-  encoded
-  );
-  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv), salt: arrayBufferToBase64(salt) };
+ const salt = window.crypto.getRandomValues(new Uint8Array(16));
+ const hkdfKey = await window.crypto.subtle.importKey(
+ 'raw',
+ master,
+ { name: 'HKDF' },
+ false,
+ ['deriveKey']
+ );
+ const derivedKey = await window.crypto.subtle.deriveKey(
+ { name: 'HKDF', salt, info: new Uint8Array(0), hash: 'SHA-256' },
+ hkdfKey,
+ { name: 'AES-GCM', length: 256 },
+ false,
+ ['encrypt', 'decrypt']
+ );
+ const iv = window.crypto.getRandomValues(new Uint8Array(12));
+ const encoded = new TextEncoder().encode(text);
+ const encrypted = await window.crypto.subtle.encrypt(
+ { name: 'AES-GCM', iv },
+ derivedKey,
+ encoded
+ );
+ return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv), salt: arrayBufferToBase64(salt) };
  }
 
  async function decrypt(encrypted, iv, salt, master) {
-  const hkdfKey = await window.crypto.subtle.importKey(
-  'raw',
-  master,
-  { name: 'HKDF' },
-  false,
-  ['deriveKey']
-  );
-  const derivedKey = await window.crypto.subtle.deriveKey(
-  { name: 'HKDF', salt: base64ToArrayBuffer(salt), info: new Uint8Array(0), hash: 'SHA-256' },
-  hkdfKey,
-  { name: 'AES-GCM', length: 256 },
-  false,
-  ['encrypt', 'decrypt']
-  );
-  const decoded = await window.crypto.subtle.decrypt(
-  { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
-  derivedKey,
-  base64ToArrayBuffer(encrypted)
-  );
-  return new TextDecoder().decode(decoded);
+ const hkdfKey = await window.crypto.subtle.importKey(
+ 'raw',
+ master,
+ { name: 'HKDF' },
+ false,
+ ['deriveKey']
+ );
+ const derivedKey = await window.crypto.subtle.deriveKey(
+ { name: 'HKDF', salt: base64ToArrayBuffer(salt), info: new Uint8Array(0), hash: 'SHA-256' },
+ hkdfKey,
+ { name: 'AES-GCM', length: 256 },
+ false,
+ ['encrypt', 'decrypt']
+ );
+ const decoded = await window.crypto.subtle.decrypt(
+ { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+ derivedKey,
+ base64ToArrayBuffer(encrypted)
+ );
+ return new TextDecoder().decode(decoded);
  }
 
  async function encryptBytes(key, data) {
-  const iv = window.crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await window.crypto.subtle.encrypt(
-  { name: 'AES-GCM', iv },
-  key,
-  data
-  );
-  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
+ const iv = window.crypto.getRandomValues(new Uint8Array(12));
+ const encrypted = await window.crypto.subtle.encrypt(
+ { name: 'AES-GCM', iv },
+ key,
+ data
+ );
+ return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
  }
 
  async function decryptBytes(key, encrypted, iv) {
-  return window.crypto.subtle.decrypt(
-  { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
-  key,
-  base64ToArrayBuffer(encrypted)
-  );
+ return window.crypto.subtle.decrypt(
+ { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+ key,
+ base64ToArrayBuffer(encrypted)
+ );
  }
 
  async function encryptRaw(key, data) {
-  const iv = window.crypto.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(data); // Encode string to bytes
-  const encrypted = await window.crypto.subtle.encrypt(
-  { name: 'AES-GCM', iv },
-  key,
-  encoded
-  );
-  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
+ const iv = window.crypto.getRandomValues(new Uint8Array(12));
+ const encoded = new TextEncoder().encode(data); // Encode string to bytes
+ const encrypted = await window.crypto.subtle.encrypt(
+ { name: 'AES-GCM', iv },
+ key,
+ encoded
+ );
+ return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
  }
 
  async function signMessage(signingKey, data) {
-  const encoded = new TextEncoder().encode(data);
-  return arrayBufferToBase64(await window.crypto.subtle.sign(
-  { name: 'HMAC' },
-  signingKey,
-  encoded
-  ));
+ const encoded = new TextEncoder().encode(data);
+ return arrayBufferToBase64(await window.crypto.subtle.sign(
+ { name: 'HMAC' },
+ signingKey,
+ encoded
+ ));
  }
 
  async function verifyMessage(signingKey, signature, data) {
-  const encoded = new TextEncoder().encode(data);
-  return await window.crypto.subtle.verify(
-  { name: 'HMAC' },
-  signingKey,
-  base64ToArrayBuffer(signature),
-  encoded
-  );
+ const encoded = new TextEncoder().encode(data);
+ return await window.crypto.subtle.verify(
+ { name: 'HMAC' },
+ signingKey,
+ base64ToArrayBuffer(signature),
+ encoded
+ );
  }
 
  async function deriveSigningKey(master) {
-  const hkdfKey = await window.crypto.subtle.importKey(
-  'raw',
-  master,
-  { name: 'HKDF' },
-  false,
-  ['deriveKey']
-  );
-  return await window.crypto.subtle.deriveKey(
-  { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
-  hkdfKey,
-  { name: 'HMAC', hash: 'SHA-256' },
-  false,
-  ['sign', 'verify']
-  );
+ const hkdfKey = await window.crypto.subtle.importKey(
+ 'raw',
+ master,
+ { name: 'HKDF' },
+ false,
+ ['deriveKey']
+ );
+ return await window.crypto.subtle.deriveKey(
+ { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
+ hkdfKey,
+ { name: 'HMAC', hash: 'SHA-256' },
+ false,
+ ['sign', 'verify']
+ );
+ }
+
+ function processSignalingQueue() {
+  signalingQueue.forEach((queue, key) => {
+    while (queue.length > 0) {
+      const { type, additionalData } = queue.shift();
+      if (type.startsWith('relay-')) {
+        sendRelayMessage(type, additionalData);
+      } else {
+        sendSignalingMessage(type, additionalData);
+      }
+    }
+  });
+  signalingQueue.clear();
  }

@@ -37,7 +37,7 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true, enableAudioToggle: true }; // Updated features state
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true }; // Global features state
 let keyPair;
 let roomMaster;
 let signingKey; // New: Cached signing key for HMAC

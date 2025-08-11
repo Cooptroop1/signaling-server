@@ -1,3 +1,4 @@
+
 // Reconnection attempt counter for exponential backoff
 let reconnectAttempts = 0;
 // Image rate limiting
@@ -743,8 +744,8 @@ function stopVoiceRecording() {
 }
 const messageInput = document.getElementById('messageInput');
 messageInput.addEventListener('input', () => {
-  messageInput.style.height = 'auto';
-  messageInput.style.height = `${messageInput.scrollHeight}px`;
+  // Use class toggle instead of inline style
+  messageInput.classList.add('expanded');
 });
 messageInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -783,6 +784,7 @@ document.getElementById('newSessionButton').onclick = () => {
   copyCodeButton.classList.add('hidden');
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   document.getElementById('messages').innerHTML = '';
+  document.getElementById('messageInput').classList.remove('expanded');
   document.getElementById('usernameInput').value = '';
   document.getElementById('usernameConnectInput').value = '';
   document.getElementById('codeInput').value = '';

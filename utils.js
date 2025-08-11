@@ -1,5 +1,5 @@
 // Utility to show temporary status messages
- function showStatusMessage(message, duration = 3000) {
+function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
     statusElement.setAttribute('aria-live', 'assertive');
@@ -8,33 +8,33 @@
       statusElement.setAttribute('aria-live', 'polite');
     }, duration);
   }
- }
+}
 
- // Sanitize message content to prevent XSS
- function sanitizeMessage(content) {
+// Sanitize message content to prevent XSS
+function sanitizeMessage(content) {
   const div = document.createElement('div');
   div.textContent = content;
   return div.innerHTML.replace(/</g, '&lt;').replace(/>/g, '&gt;');
- }
+}
 
- function generateMessageId() {
+function generateMessageId() {
   return Math.random().toString(36).substr(2, 9);
- }
+}
 
- function validateUsername(username) {
+function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
- }
+}
 
- function validateCode(code) {
+function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
- }
+}
 
- // Keepalive timer ID
- let keepAliveTimer = null; // Moved from events.js to utils.js
- // Keepalive function to prevent WebSocket timeout
- function startKeepAlive() {
+// Keepalive timer ID
+let keepAliveTimer = null; // Moved from events.js to utils.js
+// Keepalive function to prevent WebSocket timeout
+function startKeepAlive() {
   if (keepAliveTimer) clearInterval(keepAliveTimer);
   keepAliveTimer = setInterval(() => {
     if (typeof socket !== 'undefined' && socket.readyState === WebSocket.OPEN) {
@@ -42,17 +42,17 @@
       log('info', 'Sent keepalive ping');
     }
   }, 20000);
- }
+}
 
- function stopKeepAlive() {
+function stopKeepAlive() {
   if (keepAliveTimer) {
     clearInterval(keepAliveTimer);
     keepAliveTimer = null;
     log('info', 'Stopped keepalive');
   }
- }
+}
 
- function cleanupPeerConnection(targetId) {
+function cleanupPeerConnection(targetId) {
   const peerConnection = peerConnections.get(targetId);
   const dataChannel = dataChannels.get(targetId);
   if (dataChannel && dataChannel.readyState === 'open') {
@@ -90,48 +90,51 @@
     if (inputContainer) inputContainer.classList.add('hidden');
     if (messages) messages.classList.add('waiting');
   }
- }
+}
 
- function initializeMaxClientsUI() {
+function initializeMaxClientsUI() {
   if (typeof isInitiator === 'undefined') {
     log('error', 'isInitiator is not defined, skipping UI initialization');
     showStatusMessage('Error: UI initialization failed.');
     return;
   }
   log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
-  if (!maxClientsContainer) {
-    log('error', 'maxClientsContainer element not found');
-    showStatusMessage('Error: UI initialization failed.');
-    return;
-  }
-  maxClientsRadios.innerHTML = '';
-  if (isInitiator) {
-    log('info', `Creating buttons for maxClients, current maxClients: ${maxClients}`);
-    maxClientsContainer.classList.remove('hidden');
-    for (let n = 2; n <= 10; n++) {
-      const button = document.createElement('button');
-      button.textContent = n;
-      button.setAttribute('aria-label', `Set maximum users to ${n}`);
-      button.className = n === maxClients ? 'active' : '';
-      button.disabled = !isInitiator;
-      button.addEventListener('click', () => {
-        if (isInitiator) {
-          log('info', `Button clicked for maxClients: ${n}`);
-          setMaxClients(n);
-          document.querySelectorAll('#maxClientsRadios button').forEach(btn => btn.classList.remove('active'));
-          button.classList.add('active');
-        }
-      });
-      maxClientsRadios.appendChild(button);
+  const addUserText = document.getElementById('addUserText');
+  const addUserModal = document.getElementById('addUserModal');
+  const addUserRadios = document.getElementById('addUserRadios');
+  if (addUserText && addUserModal && addUserRadios) {
+    addUserText.classList.toggle('hidden', !isInitiator);
+    if (isInitiator) {
+      log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
+      addUserRadios.innerHTML = '';
+      for (let n = 2; n <= 10; n++) {
+        const button = document.createElement('button');
+        button.textContent = n;
+        button.setAttribute('aria-label', `Set maximum users to ${n}`);
+        button.className = n === maxClients ? 'active' : '';
+        button.disabled = !isInitiator;
+        button.addEventListener('click', () => {
+          if (isInitiator) {
+            log('info', `Button clicked for maxClients: ${n}`);
+            setMaxClients(n);
+            document.querySelectorAll('#addUserRadios button').forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            addUserModal.classList.remove('active');
+          }
+        });
+        addUserRadios.appendChild(button);
+      }
+      log('info', 'Buttons appended to addUserRadios');
+    } else {
+      log('info', 'Hiding addUserText for non-initiator');
     }
-    log('info', 'Buttons appended to maxClientsRadios');
   } else {
-    log('info', 'Hiding maxClientsContainer for non-initiator');
-    maxClientsContainer.classList.add('hidden');
+    log('error', 'Add user modal elements not found');
+    showStatusMessage('Error: UI initialization failed.');
   }
- }
+}
 
- function updateMaxClientsUI() {
+function updateMaxClientsUI() {
   if (typeof isInitiator === 'undefined') {
     log('error', 'isInitiator is not defined, skipping UI update');
     return;
@@ -140,16 +143,17 @@
   if (statusElement) {
     statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
   }
-  const buttons = document.querySelectorAll('#maxClientsRadios button');
-  log('info', `Found buttons: ${buttons.length}`);
+  const addUserText = document.getElementById('addUserText');
+  if (addUserText) {
+    addUserText.classList.toggle('hidden', !isInitiator);
+  }
+  const buttons = document.querySelectorAll('#addUserRadios button');
+  log('info', `Found buttons in modal: ${buttons.length}`);
   buttons.forEach(button => {
     const value = parseInt(button.textContent);
     button.classList.toggle('active', value === maxClients);
     button.disabled = !isInitiator;
   });
-  if (maxClientsContainer) {
-    maxClientsContainer.classList.toggle('hidden', !isInitiator);
-  }
   if (messages) {
     if (!isConnected) {
       messages.classList.add('waiting');
@@ -157,9 +161,9 @@
       messages.classList.remove('waiting');
     }
   }
- }
+}
 
- function setMaxClients(n) {
+function setMaxClients(n) {
   if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
     maxClients = Math.min(n, 10);
     log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);
@@ -168,9 +172,9 @@
   } else {
     log('warn', 'setMaxClients failed: not initiator, no token, or socket not open');
   }
- }
+}
 
- function log(level, ...msg) {
+function log(level, ...msg) {
   const timestamp = new Date().toISOString();
   const fullMsg = `[${timestamp}] ${msg.join(' ')}`;
   if (level === 'error') {
@@ -180,9 +184,9 @@
   } else {
     console.log(fullMsg);
   }
- }
+}
 
- function createImageModal(base64, focusId) {
+function createImageModal(base64, focusId) {
   let modal = document.getElementById('imageModal');
   if (!modal) {
     modal = document.createElement('div');
@@ -210,9 +214,9 @@
       document.getElementById(focusId)?.focus();
     }
   });
- }
+}
 
- function createAudioModal(base64, focusId) {
+function createAudioModal(base64, focusId) {
   let modal = document.getElementById('audioModal');
   if (!modal) {
     modal = document.createElement('div');
@@ -241,22 +245,22 @@
       document.getElementById(focusId)?.focus();
     }
   });
- }
+}
 
- function arrayBufferToBase64(buffer) {
+function arrayBufferToBase64(buffer) {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)));
- }
+}
 
- function base64ToArrayBuffer(base64) {
+function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
- }
+}
 
- async function encodeAudioToMp3(audioBlob) {
+async function encodeAudioToMp3(audioBlob) {
   const arrayBuffer = await audioBlob.arrayBuffer();
   const audioContext = new (window.AudioContext || window.webkitAudioContext)();
   const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
@@ -282,14 +286,14 @@
   }
   const mp3Blob = new Blob(mp3Data, { type: 'audio/mp3' });
   return mp3Blob;
- }
+}
 
- async function exportPublicKey(key) {
+async function exportPublicKey(key) {
   const exported = await window.crypto.subtle.exportKey('raw', key);
   return arrayBufferToBase64(exported);
- }
+}
 
- async function importPublicKey(base64) {
+async function importPublicKey(base64) {
   return window.crypto.subtle.importKey(
     'raw',
     base64ToArrayBuffer(base64),
@@ -297,9 +301,9 @@
     true,
     []
   );
- }
+}
 
- async function encrypt(text, master) {
+async function encrypt(text, master) {
   const salt = window.crypto.getRandomValues(new Uint8Array(16));
   const hkdfKey = await window.crypto.subtle.importKey(
     'raw',
@@ -323,9 +327,9 @@
     encoded
   );
   return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv), salt: arrayBufferToBase64(salt) };
- }
+}
 
- async function decrypt(encrypted, iv, salt, master) {
+async function decrypt(encrypted, iv, salt, master) {
   const hkdfKey = await window.crypto.subtle.importKey(
     'raw',
     master,
@@ -346,9 +350,9 @@
     base64ToArrayBuffer(encrypted)
   );
   return new TextDecoder().decode(decoded);
- }
+}
 
- async function encryptBytes(key, data) {
+async function encryptBytes(key, data) {
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
@@ -356,17 +360,17 @@
     data
   );
   return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
- }
+}
 
- async function decryptBytes(key, encrypted, iv) {
+async function decryptBytes(key, encrypted, iv) {
   return window.crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
     key,
     base64ToArrayBuffer(encrypted)
   );
- }
+}
 
- async function deriveSharedKey(privateKey, publicKey) {
+async function deriveSharedKey(privateKey, publicKey) {
   const sharedBits = await window.crypto.subtle.deriveBits(
     { name: 'ECDH', public: publicKey },
     privateKey,
@@ -379,9 +383,9 @@
     false,
     ["encrypt", "decrypt"]
   );
- }
+}
 
- async function encryptRaw(key, data) {
+async function encryptRaw(key, data) {
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(data); // Encode string to bytes
   const encrypted = await window.crypto.subtle.encrypt(
@@ -390,18 +394,18 @@
     encoded
   );
   return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
- }
+}
 
- async function signMessage(signingKey, data) {
+async function signMessage(signingKey, data) {
   const encoded = new TextEncoder().encode(data);
   return arrayBufferToBase64(await window.crypto.subtle.sign(
     { name: 'HMAC' },
     signingKey,
     encoded
   ));
- }
+}
 
- async function verifyMessage(signingKey, signature, data) {
+async function verifyMessage(signingKey, signature, data) {
   const encoded = new TextEncoder().encode(data);
   return await window.crypto.subtle.verify(
     { name: 'HMAC' },
@@ -409,9 +413,9 @@
     base64ToArrayBuffer(signature),
     encoded
   );
- }
+}
 
- async function deriveSigningKey(master) {
+async function deriveSigningKey(master) {
   const hkdfKey = await window.crypto.subtle.importKey(
     'raw',
     master,
@@ -426,4 +430,4 @@
     false,
     ['sign', 'verify']
   );
- }
+}

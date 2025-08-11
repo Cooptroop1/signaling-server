@@ -608,6 +608,11 @@ wss.on('connection', (ws, req) => {
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
         }
       }
+      // New: Enforce connection mode for P2P signaling
+      if (features.connectionMode === 'relay' && (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate' || data.type === 'public-key' || data.type === 'encrypted-room-key' || data.type === 'new-room-key')) {
+        ws.send(JSON.stringify({ type: 'error', message: 'P2P signaling disabled in relay mode.' }));
+        return;
+      }
       if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
         if (rooms.has(data.code)) {
           const room = rooms.get(data.code);
@@ -648,6 +653,11 @@ wss.on('connection', (ws, req) => {
           broadcastRandomCodes();
           console.log(`Removed code ${data.code} from randomCodes`);
         }
+      }
+      // New: Enforce connection mode for relay messages
+      if (features.connectionMode === 'p2p' && (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice')) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Relay disabled in P2P mode.' }));
+        return;
       }
       if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice') {
         if (data.type === 'relay-image' && !features.enableImages) {

@@ -527,27 +527,21 @@
  background-color: red;
  }
  body.loading .bg-white {
- display: none;
+  display: none;
  }
  body.loading::after {
- content: 'Connecting...';
- position: fixed;
- top: 50%;
- left: 50%;
- transform: translate(-50%, -50%);
- color: white;
- font-size: 1.5rem;
- z-index: 9999;
+  content: 'Connecting...';
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 1.5rem;
+  z-index: 9999;
  }
  </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
-<script>
-const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.has('code')) {
-  document.body.classList.add('loading');
-}
-</script>
  <div class="corner-logo" id="cornerLogo" role="img" aria-label="Anonomoose Chat logo"></div>
  <div class="flex w-full max-w-xl mx-auto">
  <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">

@@ -8,6 +8,7 @@ const http = require('http');
 const https = require('https');
 const url = require('url'); // Added for parsing URL to ignore query params
 const crypto = require('crypto');
+const otplib = require('otplib');
 
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
@@ -92,6 +93,7 @@ const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
+const totpSecrets = new Map(); // New: Store TOTP secrets per room code
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -225,6 +227,9 @@ function validateMessage(data) {
       if (!data.username) {
         return { valid: false, error: 'join: username required' };
       }
+      if (data.totpCode && typeof data.totpCode !== 'string') {
+        return { valid: false, error: 'join: totpCode must be a string if provided' };
+      }
       break;
     case 'set-max-clients':
       if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
@@ -301,6 +306,14 @@ function validateMessage(data) {
     case 'ping':
     case 'pong':
       // No additional fields needed
+      break;
+    case 'set-totp':
+      if (!data.code) {
+        return { valid: false, error: 'set-totp: code required' };
+      }
+      if (!data.totpSecret || typeof data.totpSecret !== 'string' || !otplib.authenticator.check(data.totpSecret, data.totpSecret)) { // Basic format check
+        return { valid: false, error: 'set-totp: valid base32 totpSecret required' };
+      }
       break;
     default:
       return { valid: false, error: 'Unknown message type' };
@@ -533,6 +546,19 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
+        const roomTotpSecret = totpSecrets.get(code);
+        if (roomTotpSecret && !data.totpCode) {
+          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+          return;
+        }
+        if (roomTotpSecret && data.totpCode) {
+          const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
+          if (!isValid) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
+        }
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
@@ -600,6 +626,14 @@ wss.on('connection', (ws, req) => {
           room.maxClients = Math.min(data.maxClients, 10);
           broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
+        }
+      }
+      if (data.type === 'set-totp') {
+        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
+          totpSecrets.set(data.code, data.totpSecret);
+          broadcast(data.code, { type: 'totp-enabled', code: data.code });
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
         }
       }
       if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
@@ -799,6 +833,7 @@ wss.on('connection', (ws, req) => {
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
         randomCodes.delete(ws.code);
+        totpSecrets.delete(ws.code); // Delete TOTP secret on room close
         broadcast(ws.code, {
           type: 'client-disconnected',
           clientId: ws.clientId,

@@ -146,6 +146,11 @@ function saveAggregatedStats() {
  console.log('Saved aggregated stats to disk');
 }
 
+// Validate base32 secret
+function isValidBase32(str) {
+  return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16 && str.length % 8 === 0;
+}
+
 // Validate base64 string
 function isValidBase64(str) {
  if (typeof str !== 'string') return false;
@@ -312,13 +317,8 @@ function validateMessage(data) {
  if (!data.code) {
  return { valid: false, error: 'set-totp: code required' };
  }
- if (!data.totpSecret || typeof data.totpSecret !== 'string') {
- return { valid: false, error: 'set-totp: totpSecret required as string' };
- }
- try {
-   otplib.authenticator.generate(data.totpSecret);
- } catch {
-   return { valid: false, error: 'set-totp: valid base32 totpSecret required' };
+ if (!data.totpSecret || typeof data.totpSecret !== 'string' || !isValidBase32(data.totpSecret)) {
+ return { valid: false, error: 'set-totp: valid base32 totpSecret required' };
  }
  break;
  default:

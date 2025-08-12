@@ -587,13 +587,13 @@
  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
  }
  .totp-modal.active {
-    display: flex !important;
-    z-index: 9999 !important;
-  }
-  .totp-modal-content {
-    background-color: white !important;
-    min-width: 300px;
-  }
+ display: flex !important;
+ z-index: 9999 !important;
+ }
+ .totp-modal-content {
+ background-color: white !important;
+ min-width: 300px;
+ }
  </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
@@ -716,8 +716,9 @@
  <div id="totpSecretModal" class="totp-modal" role="dialog" aria-label="Share 2FA Secret" tabindex="-1">
  <div class="totp-modal-content">
  <h2 class="text-xl font-bold mb-4">Share 2FA Secret</h2>
- <p>Share this secret with friends in real life. Copy the text below.</p>
+ <p>Share this secret with friends in real life. Copy the text below or scan the QR code.</p>
  <div id="totpSecretDisplay" class="mt-2 font-mono"></div>
+ <canvas id="qrCodeCanvas"></canvas>
  <button id="closeTotpSecretButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-blue-600">Close</button>
  </div>
  </div>

@@ -1,4 +1,3 @@
-
 // Reconnection attempt counter for exponential backoff
 let reconnectAttempts = 0;
 // Image rate limiting
@@ -48,6 +47,7 @@ let signalingQueue = new Map();
 let connectedClients = new Set(); // New: Track connected client IDs for ratchet
 let clientPublicKeys = new Map(); // New: Initiator stores public keys of clients
 let initiatorPublic; // New: Non-initiators store initiator's public key
+let totpEnabled = false; // New: Per-room TOTP flag
 // Declare UI variables globally
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 if (typeof window !== 'undefined') {
@@ -264,6 +264,13 @@ socket.onmessage = async (event) => {
         showStatusMessage(message.message);
       }
       return;
+    }
+    if (message.type === 'totp-required') {
+      showTotpInputModal(message.code);
+      return;
+    }
+    if (message.type === 'totp-enabled') {
+      totpEnabled = true;
     }
     if (message.type === 'init') {
       clientId = message.clientId;
@@ -533,6 +540,74 @@ document.getElementById('connectToggleButton').onclick = () => {
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
 };
+document.getElementById('start2FAChatButton').onclick = () => {
+  document.getElementById('totpOptionsModal').classList.add('active');
+  document.getElementById('totpUsernameInput').value = username || '';
+  document.getElementById('totpUsernameInput')?.focus();
+  document.getElementById('customTotpSecretContainer').classList.add('hidden');
+  document.querySelector('input[name="totpType"][value="server"]').checked = true;
+};
+document.getElementById('connect2FAChatButton').onclick = () => {
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.remove('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  statusElement.textContent = 'Enter a username and code to join a 2FA chat';
+  document.getElementById('usernameConnectInput').value = username || '';
+  document.getElementById('usernameConnectInput')?.focus();
+  // Override connectButton for 2FA prompt
+  const connectButton = document.getElementById('connectButton');
+  connectButton.onclick = () => {
+    const usernameInput = document.getElementById('usernameConnectInput').value.trim();
+    const inputCode = document.getElementById('codeInput').value.trim();
+    if (!validateUsername(usernameInput)) {
+      showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+      document.getElementById('usernameConnectInput')?.focus();
+      return;
+    }
+    if (!validateCode(inputCode)) {
+      showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx.');
+      document.getElementById('codeInput')?.focus();
+      return;
+    }
+    username = usernameInput;
+    localStorage.setItem('username', username);
+    code = inputCode;
+    showTotpInputModal(code);
+  };
+};
+document.querySelectorAll('input[name="totpType"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');
+  });
+});
+document.getElementById('createTotpRoomButton').onclick = () => {
+  const serverGenerated = document.querySelector('input[name="totpType"]:checked').value === 'server';
+  startTotpRoom(serverGenerated);
+};
+document.getElementById('cancelTotpButton').onclick = () => {
+  document.getElementById('totpOptionsModal').classList.remove('active');
+  initialContainer.classList.remove('hidden');
+};
+document.getElementById('closeTotpSecretButton').onclick = () => {
+  document.getElementById('totpSecretModal').classList.remove('active');
+};
+document.getElementById('submitTotpCodeButton').onclick = () => {
+  const totpCode = document.getElementById('totpCodeInput').value.trim();
+  const codeParam = document.getElementById('totpInputModal').dataset.code;
+  if (totpCode.length !== 6 || isNaN(totpCode)) {
+    showStatusMessage('Invalid 2FA code: 6 digits required.');
+    return;
+  }
+  joinWithTotp(codeParam, totpCode);
+  document.getElementById('totpInputModal').classList.remove('active');
+};
+document.getElementById('cancelTotpInputButton').onclick = () => {
+  document.getElementById('totpInputModal').classList.remove('active');
+  initialContainer.classList.remove('hidden');
+};
 document.getElementById('joinWithUsernameButton').onclick = () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -729,6 +804,8 @@ document.getElementById('newSessionButton').onclick = () => {
   refreshingToken = false;
   // Clear user dots
   document.getElementById('userDots').innerHTML = '';
+  // New: Reset TOTP
+  totpEnabled = false;
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
@@ -817,4 +894,74 @@ function setCookie(name, value, days) {
     expires = '; expires=' + date.toUTCString();
   }
   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const codeParam = urlParams.get('code');
+  if (codeParam && validateCode(codeParam)) {
+    setupWaitingForJoin(codeParam);
+  }
+});
+function setupWaitingForJoin(codeParam) {
+  code = codeParam;
+  initialContainer.style.display = 'none';
+  connectContainer.style.display = 'none';
+  usernameContainer.style.display = 'none';
+  chatContainer.style.display = 'flex';
+  codeDisplayElement.style.display = 'none';
+  copyCodeButton.style.display = 'none';
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for connection...';
+  if (!username || !validateUsername(username)) {
+    usernameContainer.style.display = 'block';
+    chatContainer.style.display = 'none';
+    statusElement.textContent = 'Please enter a username to join the chat';
+    document.getElementById('usernameInput').value = username || '';
+    document.getElementById('usernameInput')?.focus();
+    const joinButton = document.getElementById('joinWithUsernameButton');
+    const originalOnclick = joinButton.onclick;
+    joinButton.onclick = () => {
+      const usernameInput = document.getElementById('usernameInput').value.trim();
+      if (!validateUsername(usernameInput)) {
+        showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+        document.getElementById('usernameInput')?.focus();
+        return;
+      }
+      username = usernameInput;
+      localStorage.setItem('username', username);
+      usernameContainer.style.display = 'none';
+      chatContainer.style.display = 'flex';
+      codeDisplayElement.textContent = `Using code: ${code}`;
+      codeDisplayElement.style.display = 'block';
+      copyCodeButton.style.display = 'block';
+      messages.classList.add('waiting');
+      statusElement.textContent = 'Waiting for connection...';
+      if (socket.readyState === WebSocket.OPEN && token) {
+        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      } else {
+        pendingJoin = { code, clientId, username };
+      }
+      document.getElementById('messageInput')?.focus();
+      // Restore original onclick if needed
+      joinButton.onclick = originalOnclick;
+    };
+  } else {
+    codeDisplayElement.textContent = `Using code: ${code}`;
+    codeDisplayElement.style.display = 'block';
+    copyCodeButton.style.display = 'block';
+    if (socket.readyState === WebSocket.OPEN && token) {
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+    } else {
+      pendingJoin = { code, clientId, username };
+    }
+    document.getElementById('messageInput')?.focus();
+  }
+}
+
+// New: Function to show TOTP input modal
+function showTotpInputModal(codeParam) {
+  document.getElementById('totpInputModal').classList.add('active');
+  document.getElementById('totpInputModal').dataset.code = codeParam;
+  document.getElementById('totpCodeInput').value = '';
+  document.getElementById('totpCodeInput')?.focus();
 }

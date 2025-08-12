@@ -959,6 +959,9 @@ async function startTotpRoom(serverGenerated) {
 function showTotpSecretModal(secret) {
  console.log('Showing TOTP modal with secret:', secret);
  document.getElementById('totpSecretDisplay').textContent = secret;
+ const qrCanvas = document.getElementById('qrCodeCanvas');
+ qrCanvas.innerHTML = ''; // Clear previous QR if any
+ new QRCode(qrCanvas, generateTotpUri(code, secret));
  document.getElementById('totpSecretModal').classList.add('active');
 }
 

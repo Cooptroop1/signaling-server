@@ -83,9 +83,7 @@ function cleanupPeerConnection(targetId) {
     }
   }
   isConnected = dataChannels.size > 0;
-  if (typeof isInitiator !== 'undefined') {
-    updateMaxClientsUI();
-  }
+  updateMaxClientsUI();
   if (!isConnected) {
     if (inputContainer) inputContainer.classList.add('hidden');
     if (messages) messages.classList.add('waiting');
@@ -93,11 +91,6 @@ function cleanupPeerConnection(targetId) {
 }
 
 function initializeMaxClientsUI() {
-  if (typeof isInitiator === 'undefined') {
-    log('error', 'isInitiator is not defined, skipping UI initialization');
-    showStatusMessage('Error: UI initialization failed. Please refresh.');
-    return;
-  }
   log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
   const addUserText = document.getElementById('addUserText');
   const addUserModal = document.getElementById('addUserModal');
@@ -135,10 +128,6 @@ function initializeMaxClientsUI() {
 }
 
 function updateMaxClientsUI() {
-  if (typeof isInitiator === 'undefined') {
-    log('error', 'isInitiator is not defined, skipping UI update');
-    return;
-  }
   log('info', `updateMaxClientsUI called, maxClients: ${maxClients}, isInitiator: ${isInitiator}`);
   if (statusElement) {
     statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';

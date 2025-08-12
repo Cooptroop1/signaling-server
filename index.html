@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,6 +9,8 @@
  <link rel="icon" type="image/png" href="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f60e.png"/>
  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/otplib@12.0.1/browser/otplib-browser.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/lib/qrcode.min.js"></script>
  <style>
  * {
  cursor: default;
@@ -223,7 +224,7 @@
  .modal.active {
  display: flex;
  }
- .help-modal, .add-user-modal {
+ .help-modal, .add-user-modal, .totp-modal {
  display: none;
  position: fixed;
  top: 0;
@@ -235,7 +236,7 @@
  align-items: center;
  justify-content: center;
  }
- .help-modal-content, .add-user-modal-content {
+ .help-modal-content, .add-user-modal-content, .totp-modal-content {
  background-color: white;
  padding: 1.5rem;
  border-radius: 0.5rem;
@@ -244,7 +245,7 @@
  overflow-y: auto;
  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
  }
- .help-modal.active, .add-user-modal.active {
+ .help-modal.active, .add-user-modal.active, .totp-modal.active {
  display: flex;
  }
  #chatContainer.hidden {
@@ -527,18 +528,62 @@
  .offline {
  background-color: red;
  }
- body.loading .bg-white {
-  display: none;
+ [data-has-code] #initialContainer,
+ [data-has-code] #connectContainer,
+ [data-has-code] #usernameContainer,
+ [data-has-code] #codeDisplay,
+ [data-has-code] #copyCodeButton {
+   display: none;
  }
- body.loading::after {
-  content: 'Connecting...';
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 1.5rem;
-  z-index: 9999;
+ [data-has-code] #chatContainer {
+   display: flex;
+ }
+ [data-has-code] #messages {
+   background-color: transparent;
+   background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
+   background-size: contain;
+   background-position: center;
+   background-repeat: no-repeat;
+ }
+ [data-has-code] .button-group,
+ [data-has-code] .input-container,
+ [data-has-code] #newSessionButton,
+ [data-has-code] #remoteAudioContainer,
+ [data-has-code] #grokKeyContainer,
+ [data-has-code] .footer-buttons {
+   display: none;
+ }
+ #totpSecretDisplay {
+   text-align: center;
+   margin-top: 1rem;
+ }
+ #qrCodeCanvas {
+   margin: 0 auto;
+   display: block;
+ }
+ #totpInputModal {
+   display: none;
+   position: fixed;
+   top: 0;
+   left: 0;
+   width: 100%;
+   height: 100%;
+   background-color: rgba(0, 0, 0, 0.7);
+   z-index: 2000;
+   align-items: center;
+   justify-content: center;
+ }
+ #totpInputModal.active {
+   display: flex;
+ }
+ #totpInputModalContent {
+   background-color: white;
+   padding: 1.5rem;
+   border-radius: 0.5rem;
+   max-width: 90%;
+   max-height: 90%;
+   overflow-y: auto;
+   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
  }
  </style>
 </head>
@@ -551,7 +596,9 @@
  <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">E2E Encrypted (P2P)</div>
  <div id="initialContainer">
  <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
+ <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
  <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
+ <button id="connect2FAChatButton" class="bg-teal-500 text-white px-4 py-2 rounded w-full hover:bg-teal-600 transition-colors" aria-label="Connect to 2FA Room">Connect to 2FA Room</button>
  </div>
  <div id="usernameContainer" class="hidden">
  <label for="usernameInput" class="sr-only">Enter your username</label>
@@ -628,6 +675,42 @@
  <div class="add-user-modal-content">
  <h2 class="text-xl font-bold mb-4">Select Max Users</h2>
  <div id="addUserRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
+ </div>
+ </div>
+ <div id="totpOptionsModal" class="totp-modal" role="dialog" aria-label="2FA Options" tabindex="-1">
+ <div class="totp-modal-content">
+ <h2 class="text-xl font-bold mb-4">2FA Room Options</h2>
+ <label for="totpUsernameInput" class="sr-only">Enter your username</label>
+ <input id="totpUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="totpUsernameHelp" maxlength="16">
+ <div id="totpUsernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
+ <label><input type="checkbox" id="enableTotp" checked> Enable 2FA for this room</label>
+ <div id="totpTypeOptions" class="mt-2">
+ <label><input type="radio" name="totpType" value="server" checked> Server-Generated Secret</label>
+ <label><input type="radio" name="totpType" value="custom"> Enter Custom Secret</label>
+ </div>
+ <div id="customTotpSecretContainer" class="hidden mt-2">
+ <label for="customTotpSecret" class="sr-only">Enter custom 2FA secret</label>
+ <input id="customTotpSecret" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter base32 secret (e.g., JBSWY3DPEHPK3PXP)" maxlength="32">
+ </div>
+ <button id="createTotpRoomButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-purple-600">Create 2FA Room</button>
+ <button id="cancelTotpButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+ </div>
+ </div>
+ <div id="totpInputModal" class="totp-modal" role="dialog" aria-label="Enter 2FA Code" tabindex="-1">
+ <div id="totpInputModalContent" class="totp-modal-content">
+ <h2 class="text-xl font-bold mb-4">Enter 2FA Code</h2>
+ <input id="totpCodeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter 6-digit code" maxlength="6">
+ <button id="submitTotpCodeButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Submit</button>
+ <button id="cancelTotpInputButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+ </div>
+ </div>
+ <div id="totpSecretModal" class="totp-modal" role="dialog" aria-label="Share 2FA Secret" tabindex="-1">
+ <div class="totp-modal-content">
+ <h2 class="text-xl font-bold mb-4">Share 2FA Secret</h2>
+ <p>Share this secret with friends in real life. Scan the QR or copy the text.</p>
+ <div id="qrCodeCanvas" class="mt-2"></div>
+ <div id="totpSecretDisplay" class="mt-2 font-mono"></div>
+ <button id="closeTotpSecretButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-blue-600">Close</button>
  </div>
  </div>
  <script src="utils.js"></script>

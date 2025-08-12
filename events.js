@@ -147,12 +147,14 @@ socket.onopen = () => {
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
     copyCodeButton.classList.add('hidden');
+    document.body.classList.remove('loading');
   }
 };
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
+  document.body.classList.remove('loading');
 };
 socket.onclose = () => {
   console.error('WebSocket closed, attempting reconnect');
@@ -170,6 +172,7 @@ socket.onclose = () => {
     socket.onclose = socket.onclose;
     socket.onmessage = socket.onmessage;
   }, delay);
+  document.body.classList.remove('loading');
 };
 socket.onmessage = async (event) => {
   console.log('Received WebSocket message:', event.data);
@@ -259,6 +262,7 @@ socket.onmessage = async (event) => {
         button2.disabled = false;
         token = ''; // Clear token
         refreshToken = ''; // Clear refresh token
+        document.body.classList.remove('loading');
       } else {
         showStatusMessage(message.message);
       }
@@ -568,6 +572,7 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
     }
   }
   document.getElementById('messageInput')?.focus();
+  document.body.classList.remove('loading');
 };
 document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
@@ -611,6 +616,7 @@ document.getElementById('connectButton').onclick = () => {
     }
   }
   document.getElementById('messageInput')?.focus();
+  document.body.classList.remove('loading');
 };
 document.getElementById('backButton').onclick = () => {
   console.log('Back button clicked from usernameContainer');
@@ -623,6 +629,7 @@ document.getElementById('backButton').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
+  document.body.classList.remove('loading');
 };
 document.getElementById('backButtonConnect').onclick = () => {
   console.log('Back button clicked from connectContainer');
@@ -635,6 +642,7 @@ document.getElementById('backButtonConnect').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
+  document.body.classList.remove('loading');
 };
 document.getElementById('sendButton').onclick = () => {
   const messageInput = document.getElementById('messageInput');
@@ -672,93 +680,6 @@ document.getElementById('grokButton').onclick = () => {
 document.getElementById('saveGrokKey').onclick = () => {
   saveGrokKey();
 };
-function startVoiceRecording() {
-  if (window.location.protocol !== 'https:') {
-    console.error('Insecure context: HTTPS required for microphone access');
-    showStatusMessage('Error: Microphone access requires HTTPS. Please load the site over a secure connection.');
-    document.getElementById('voiceButton')?.focus();
-    return;
-  }
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        mediaRecorder = new MediaRecorder(stream);
-        const chunks = [];
-        let startTime = Date.now();
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            chunks.push(event.data);
-          }
-        };
-        mediaRecorder.onstop = async () => {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          stream.getTracks().forEach(track => track.stop());
-          clearInterval(voiceTimerInterval);
-          document.getElementById('voiceTimer').classList.add('hidden');
-          document.getElementById('voiceButton').classList.remove('recording');
-          document.getElementById('voiceButton').textContent = '🎤';
-          if (blob.size > 0) {
-            await sendMedia(blob, 'voice');
-          } else {
-            showStatusMessage('Error: No audio recorded.');
-          }
-        };
-        mediaRecorder.start();
-        document.getElementById('voiceButton').classList.add('recording');
-        document.getElementById('voiceButton').textContent = '⏹';
-        document.getElementById('voiceTimer').classList.remove('hidden');
-        document.getElementById('voiceTimer').textContent = '0:00';
-        voiceTimerInterval = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          if (elapsed >= 30) {
-            mediaRecorder.stop();
-            return;
-          }
-          const minutes = Math.floor(elapsed / 60);
-          const seconds = elapsed % 60;
-          document.getElementById('voiceTimer').textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-        }, 1000);
-      })
-      .catch(error => {
-        console.error('Error accessing microphone:', error.name, error.message);
-        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-          showStatusMessage('Error: Microphone permission denied. Please enable in browser or device settings.');
-        } else if (error.name === 'NotFoundError') {
-          showStatusMessage('Error: No microphone found on device.');
-        } else if (error.name === 'NotReadableError') {
-          showStatusMessage('Error: Microphone hardware error or in use by another app.');
-        } else if (error.name === 'SecurityError') {
-          showStatusMessage('Error: Insecure context. Ensure site is loaded over HTTPS.');
-        } else {
-          showStatusMessage('Error: Could not access microphone. Check permissions and device support.');
-        }
-        document.getElementById('voiceButton')?.focus();
-      });
-  } else {
-    console.error('Microphone not supported');
-    showStatusMessage('Error: Microphone not supported by your browser or device.');
-    document.getElementById('voiceButton')?.focus();
-  }
-}
-function stopVoiceRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-  }
-}
-const messageInput = document.getElementById('messageInput');
-messageInput.addEventListener('input', () => {
-  // Use class toggle instead of inline style
-  messageInput.classList.add('expanded');
-});
-messageInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    const message = event.target.value.trim();
-    if (message) {
-      sendMessage(message);
-    }
-  }
-});
 document.getElementById('newSessionButton').onclick = () => {
   console.log('New session button clicked');
   socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
@@ -815,6 +736,7 @@ document.getElementById('newSessionButton').onclick = () => {
   refreshingToken = false;
   // Clear user dots
   document.getElementById('userDots').innerHTML = '';
+  document.body.classList.remove('loading');
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

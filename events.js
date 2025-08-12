@@ -265,6 +265,7 @@ socket.onmessage = async (event) => {
         document.body.classList.remove('loading');
       } else {
         showStatusMessage(message.message);
+        document.body.classList.remove('loading');
       }
       return;
     }
@@ -291,6 +292,7 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
+      document.body.classList.remove('loading');
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
@@ -523,6 +525,7 @@ document.getElementById('startChatToggleButton').onclick = () => {
   statusElement.textContent = 'Enter a username to start a chat';
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
+  document.body.classList.remove('loading');
 };
 document.getElementById('connectToggleButton').onclick = () => {
   console.log('Connect toggle clicked');
@@ -535,6 +538,7 @@ document.getElementById('connectToggleButton').onclick = () => {
   statusElement.textContent = 'Enter a username and code to join a chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
+  document.body.classList.remove('loading');
 };
 document.getElementById('joinWithUsernameButton').onclick = () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();

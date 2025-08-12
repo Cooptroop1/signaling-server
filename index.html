@@ -526,9 +526,28 @@
  .offline {
  background-color: red;
  }
+ body.loading .bg-white {
+ display: none;
+ }
+ body.loading::after {
+ content: 'Connecting...';
+ position: fixed;
+ top: 50%;
+ left: 50%;
+ transform: translate(-50%, -50%);
+ color: white;
+ font-size: 1.5rem;
+ z-index: 9999;
+ }
  </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.has('code')) {
+  document.body.classList.add('loading');
+}
+</script>
  <div class="corner-logo" id="cornerLogo" role="img" aria-label="Anonomoose Chat logo"></div>
  <div class="flex w-full max-w-xl mx-auto">
  <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
@@ -616,8 +635,6 @@
  <div id="addUserRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
  </div>
  </div>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
  <script src="utils.js"></script>
  <script src="init.js"></script>
  <script src="main.js"></script>

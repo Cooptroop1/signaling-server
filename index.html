@@ -526,22 +526,40 @@
  .offline {
  background-color: red;
  }
- body.loading .bg-white {
-  display: none;
+ [data-has-code] #initialContainer,
+ [data-has-code] #connectContainer,
+ [data-has-code] #usernameContainer,
+ [data-has-code] #codeDisplay,
+ [data-has-code] #copyCodeButton {
+   display: none;
  }
- body.loading::after {
-  content: 'Connecting...';
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 1.5rem;
-  z-index: 9999;
+ [data-has-code] #chatContainer {
+   display: flex;
+ }
+ [data-has-code] #messages {
+   background-color: transparent;
+   background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
+   background-size: contain;
+   background-position: center;
+   background-repeat: no-repeat;
+ }
+ [data-has-code] .button-group,
+ [data-has-code] .input-container,
+ [data-has-code] #newSessionButton,
+ [data-has-code] #remoteAudioContainer,
+ [data-has-code] #grokKeyContainer,
+ [data-has-code] .footer-buttons {
+   display: none;
  }
  </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.has('code')) {
+  document.documentElement.setAttribute('data-has-code', 'true');
+}
+</script>
  <div class="corner-logo" id="cornerLogo" role="img" aria-label="Anonomoose Chat logo"></div>
  <div class="flex w-full max-w-xl mx-auto">
  <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">

@@ -784,6 +784,7 @@ wss.on('connection', (ws, req) => {
             if (data.feature === 'service' && !features.enableService) {
               rooms.clear();
               randomCodes.clear();
+              totpSecrets.clear(); // Clear TOTP secrets on service disable
             }
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));

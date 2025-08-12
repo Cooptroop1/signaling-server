@@ -1,4 +1,3 @@
-
 // Utility to show temporary status messages
 function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
@@ -431,4 +430,13 @@ async function deriveSigningKey(master) {
     false,
     ['sign', 'verify']
   );
+}
+
+// New: TOTP Utilities (using otplib)
+function generateTotpSecret() {
+  return otplib.authenticator.generateSecret();
+}
+
+function generateTotpUri(roomCode, secret) {
+  return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
 }

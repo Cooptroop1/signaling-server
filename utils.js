@@ -95,7 +95,7 @@ function cleanupPeerConnection(targetId) {
 function initializeMaxClientsUI() {
   if (typeof isInitiator === 'undefined') {
     log('error', 'isInitiator is not defined, skipping UI initialization');
-    showStatusMessage('Error: UI initialization failed.');
+    showStatusMessage('Error: UI initialization failed. Please refresh.');
     return;
   }
   log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
@@ -130,7 +130,7 @@ function initializeMaxClientsUI() {
     }
   } else {
     log('error', 'Add user modal elements not found');
-    showStatusMessage('Error: UI initialization failed.');
+    showStatusMessage('Error: UI initialization failed. Please refresh.');
   }
 }
 

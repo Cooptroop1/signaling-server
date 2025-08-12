@@ -1,4 +1,3 @@
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -262,6 +261,9 @@ function validateMessage(data) {
       if (!data.code) {
         return { valid: false, error: 'submit-random: code required' };
       }
+      break;
+    case 'get-random-codes':
+      // No additional fields needed
       break;
     case 'relay-message':
     case 'relay-image':

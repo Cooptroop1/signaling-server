@@ -287,6 +287,10 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
+      codeDisplayElement.classList.remove('hidden');
+      copyCodeButton.classList.remove('hidden');
+      messages.classList.add('waiting');
+      inputContainer.classList.add('hidden');
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
@@ -309,6 +313,10 @@ socket.onmessage = async (event) => {
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
+      }
+      if (dataChannels.size > 0) {
+        messages.classList.remove('waiting');
+        inputContainer.classList.remove('hidden');
       }
     }
     if (message.type === 'client-disconnected') {
@@ -816,4 +824,66 @@ function setCookie(name, value, days) {
     expires = '; expires=' + date.toUTCString();
   }
   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const codeParam = urlParams.get('code');
+  if (codeParam && validateCode(codeParam)) {
+    setupWaitingForJoin(codeParam);
+  }
+});
+function setupWaitingForJoin(codeParam) {
+  code = codeParam;
+  initialContainer.style.display = 'none';
+  connectContainer.style.display = 'none';
+  usernameContainer.style.display = 'none';
+  chatContainer.style.display = 'flex';
+  codeDisplayElement.style.display = 'none';
+  copyCodeButton.style.display = 'none';
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for connection...';
+  if (!username || !validateUsername(username)) {
+    usernameContainer.style.display = 'block';
+    chatContainer.style.display = 'none';
+    statusElement.textContent = 'Please enter a username to join the chat';
+    document.getElementById('usernameInput').value = username || '';
+    document.getElementById('usernameInput')?.focus();
+    const joinButton = document.getElementById('joinWithUsernameButton');
+    const originalOnclick = joinButton.onclick;
+    joinButton.onclick = () => {
+      const usernameInput = document.getElementById('usernameInput').value.trim();
+      if (!validateUsername(usernameInput)) {
+        showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+        document.getElementById('usernameInput')?.focus();
+        return;
+      }
+      username = usernameInput;
+      localStorage.setItem('username', username);
+      usernameContainer.style.display = 'none';
+      chatContainer.style.display = 'flex';
+      codeDisplayElement.textContent = `Using code: ${code}`;
+      codeDisplayElement.style.display = 'block';
+      copyCodeButton.style.display = 'block';
+      messages.classList.add('waiting');
+      statusElement.textContent = 'Waiting for connection...';
+      if (socket.readyState === WebSocket.OPEN && token) {
+        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      } else {
+        pendingJoin = { code, clientId, username };
+      }
+      document.getElementById('messageInput')?.focus();
+      // Restore original onclick if needed
+      joinButton.onclick = originalOnclick;
+    };
+  } else {
+    codeDisplayElement.textContent = `Using code: ${code}`;
+    codeDisplayElement.style.display = 'block';
+    copyCodeButton.style.display = 'block';
+    if (socket.readyState === WebSocket.OPEN && token) {
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+    } else {
+      pendingJoin = { code, clientId, username };
+    }
+    document.getElementById('messageInput')?.focus();
+  }
 }

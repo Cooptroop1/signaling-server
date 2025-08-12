@@ -147,14 +147,12 @@ socket.onopen = () => {
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
     copyCodeButton.classList.add('hidden');
-    document.body.classList.remove('loading');
   }
 };
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
-  document.body.classList.remove('loading');
 };
 socket.onclose = () => {
   console.error('WebSocket closed, attempting reconnect');
@@ -172,7 +170,6 @@ socket.onclose = () => {
     socket.onclose = socket.onclose;
     socket.onmessage = socket.onmessage;
   }, delay);
-  document.body.classList.remove('loading');
 };
 socket.onmessage = async (event) => {
   console.log('Received WebSocket message:', event.data);
@@ -262,10 +259,8 @@ socket.onmessage = async (event) => {
         button2.disabled = false;
         token = ''; // Clear token
         refreshToken = ''; // Clear refresh token
-        document.body.classList.remove('loading');
       } else {
         showStatusMessage(message.message);
-        document.body.classList.remove('loading');
       }
       return;
     }
@@ -292,7 +287,6 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
-      document.body.classList.remove('loading');
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
@@ -525,7 +519,6 @@ document.getElementById('startChatToggleButton').onclick = () => {
   statusElement.textContent = 'Enter a username to start a chat';
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
-  document.body.classList.remove('loading');
 };
 document.getElementById('connectToggleButton').onclick = () => {
   console.log('Connect toggle clicked');
@@ -538,7 +531,6 @@ document.getElementById('connectToggleButton').onclick = () => {
   statusElement.textContent = 'Enter a username and code to join a chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
-  document.body.classList.remove('loading');
 };
 document.getElementById('joinWithUsernameButton').onclick = () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();
@@ -576,7 +568,6 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
     }
   }
   document.getElementById('messageInput')?.focus();
-  document.body.classList.remove('loading');
 };
 document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
@@ -620,7 +611,6 @@ document.getElementById('connectButton').onclick = () => {
     }
   }
   document.getElementById('messageInput')?.focus();
-  document.body.classList.remove('loading');
 };
 document.getElementById('backButton').onclick = () => {
   console.log('Back button clicked from usernameContainer');
@@ -633,7 +623,6 @@ document.getElementById('backButton').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
-  document.body.classList.remove('loading');
 };
 document.getElementById('backButtonConnect').onclick = () => {
   console.log('Back button clicked from connectContainer');
@@ -646,7 +635,6 @@ document.getElementById('backButtonConnect').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
-  document.body.classList.remove('loading');
 };
 document.getElementById('sendButton').onclick = () => {
   const messageInput = document.getElementById('messageInput');
@@ -740,7 +728,6 @@ document.getElementById('newSessionButton').onclick = () => {
   refreshingToken = false;
   // Clear user dots
   document.getElementById('userDots').innerHTML = '';
-  document.body.classList.remove('loading');
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {

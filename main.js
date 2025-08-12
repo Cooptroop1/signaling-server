@@ -958,11 +958,6 @@ async function startTotpRoom(serverGenerated) {
 
 function showTotpSecretModal(secret) {
  console.log('Showing TOTP modal with secret:', secret);
- const uri = generateTotpUri(code, secret);
- const canvas = document.getElementById('qrCodeCanvas');
- QRCode.toCanvas(canvas, uri, (error) => {
- if (error) console.error('QR code generation error:', error);
- });
  document.getElementById('totpSecretDisplay').textContent = secret;
  document.getElementById('totpSecretModal').classList.add('active');
 }

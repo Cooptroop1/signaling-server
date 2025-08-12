@@ -47,7 +47,6 @@ let signalingQueue = new Map();
 let connectedClients = new Set(); // New: Track connected client IDs for ratchet
 let clientPublicKeys = new Map(); // New: Initiator stores public keys of clients
 let initiatorPublic; // New: Non-initiators store initiator's public key
-let totpEnabled = false; // New: Per-room TOTP flag
 // Declare UI variables globally
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 if (typeof window !== 'undefined') {

@@ -1,4 +1,3 @@
-
 // Reconnection attempt counter for exponential backoff
 let reconnectAttempts = 0;
 // Image rate limiting
@@ -285,6 +284,7 @@ socket.onmessage = async (event) => {
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
       updateMaxClientsUI();
+      updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
     }
@@ -302,6 +302,7 @@ socket.onmessage = async (event) => {
       }
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
+      updateDots();
       if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
@@ -326,6 +327,7 @@ socket.onmessage = async (event) => {
         }
       }
       updateMaxClientsUI();
+      updateDots();
       if (totalClients <= 1) {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
@@ -335,6 +337,7 @@ socket.onmessage = async (event) => {
       maxClients = Math.min(message.maxClients, 10);
       console.log(`Max clients updated to ${maxClients} for code: ${code}`);
       updateMaxClientsUI();
+      updateDots();
     }
     if (message.type === 'offer' && message.clientId !== clientId) {
       console.log(`Received offer from ${message.clientId} for code: ${code}`);
@@ -676,66 +679,66 @@ function startVoiceRecording() {
     document.getElementById('voiceButton')?.focus();
     return;
   }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        mediaRecorder = new MediaRecorder(stream);
+        const chunks = [];
+        let startTime = Date.now();
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          stream.getTracks().forEach(track => track.stop());
+          clearInterval(voiceTimerInterval);
+          document.getElementById('voiceTimer').classList.add('hidden');
+          document.getElementById('voiceButton').classList.remove('recording');
+          document.getElementById('voiceButton').textContent = '🎤';
+          if (blob.size > 0) {
+            await sendMedia(blob, 'voice');
+          } else {
+            showStatusMessage('Error: No audio recorded.');
+          }
+        };
+        mediaRecorder.start();
+        document.getElementById('voiceButton').classList.add('recording');
+        document.getElementById('voiceButton').textContent = '⏹';
+        document.getElementById('voiceTimer').classList.remove('hidden');
+        document.getElementById('voiceTimer').textContent = '0:00';
+        voiceTimerInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          if (elapsed >= 30) {
+            mediaRecorder.stop();
+            return;
+          }
+          const minutes = Math.floor(elapsed / 60);
+          const seconds = elapsed % 60;
+          document.getElementById('voiceTimer').textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+        }, 1000);
+      })
+      .catch(error => {
+        console.error('Error accessing microphone:', error.name, error.message);
+        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+          showStatusMessage('Error: Microphone permission denied. Please enable in browser or device settings.');
+        } else if (error.name === 'NotFoundError') {
+          showStatusMessage('Error: No microphone found on device.');
+        } else if (error.name === 'NotReadableError') {
+          showStatusMessage('Error: Microphone hardware error or in use by another app.');
+        } else if (error.name === 'SecurityError') {
+          showStatusMessage('Error: Insecure context. Ensure site is loaded over HTTPS.');
+        } else {
+          showStatusMessage('Error: Could not access microphone. Check permissions and device support.');
+        }
+        document.getElementById('voiceButton')?.focus();
+      });
+  } else {
     console.error('Microphone not supported');
     showStatusMessage('Error: Microphone not supported by your browser or device.');
     document.getElementById('voiceButton')?.focus();
-    return;
   }
-  navigator.mediaDevices.getUserMedia({ audio: true })
-  .then(stream => {
-    mediaRecorder = new MediaRecorder(stream);
-    const chunks = [];
-    let startTime = Date.now();
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        chunks.push(event.data);
-      }
-    };
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(chunks, { type: 'audio/webm' });
-      stream.getTracks().forEach(track => track.stop());
-      clearInterval(voiceTimerInterval);
-      document.getElementById('voiceTimer').classList.add('hidden');
-      document.getElementById('voiceButton').classList.remove('recording');
-      document.getElementById('voiceButton').textContent = '🎤';
-      if (blob.size > 0) {
-        await sendMedia(blob, 'voice');
-      } else {
-        showStatusMessage('Error: No audio recorded.');
-      }
-    };
-    mediaRecorder.start();
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceButton').textContent = '⏹';
-    document.getElementById('voiceTimer').classList.remove('hidden');
-    document.getElementById('voiceTimer').textContent = '0:00';
-    voiceTimerInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      if (elapsed >= 30) {
-        mediaRecorder.stop();
-        return;
-      }
-      const minutes = Math.floor(elapsed / 60);
-      const seconds = elapsed % 60;
-      document.getElementById('voiceTimer').textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-    }, 1000);
-  })
-  .catch(error => {
-    console.error('Error accessing microphone:', error.name, error.message);
-    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      showStatusMessage('Error: Microphone permission denied. Please enable in browser or device settings.');
-    } else if (error.name === 'NotFoundError') {
-      showStatusMessage('Error: No microphone found on device.');
-    } else if (error.name === 'NotReadableError') {
-      showStatusMessage('Error: Microphone hardware error or in use by another app.');
-    } else if (error.name === 'SecurityError') {
-      showStatusMessage('Error: Insecure context. Ensure site is loaded over HTTPS.');
-    } else {
-      showStatusMessage('Error: Could not access microphone. Check permissions and device support.');
-    }
-    document.getElementById('voiceButton')?.focus();
-  });
 }
 function stopVoiceRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -810,6 +813,8 @@ document.getElementById('newSessionButton').onclick = () => {
   remoteAudios.clear();
   signalingQueue.clear();
   refreshingToken = false;
+  // Clear user dots
+  document.getElementById('userDots').innerHTML = '';
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
@@ -864,7 +869,26 @@ cornerLogo.addEventListener('click', () => {
   processedMessageIds.clear();
   showStatusMessage('Chat history cleared locally.');
 });
-// Helper functions for cookies
+// Function to update user dots
+function updateDots() {
+  const userDots = document.getElementById('userDots');
+  if (!userDots) return;
+  userDots.innerHTML = '';
+  const greenCount = Math.min(totalClients, maxClients);
+  const redCount = maxClients - greenCount;
+  for (let i = 0; i < greenCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot online';
+    userDots.appendChild(dot);
+  }
+  for (let i = 0; i < redCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot offline';
+    userDots.appendChild(dot);
+  }
+}
+
+// Cookie helpers
 function getCookie(name) {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);

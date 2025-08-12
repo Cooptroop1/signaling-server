@@ -939,9 +939,14 @@ async function startTotpRoom(serverGenerated) {
  return;
  }
  }
+ // Add padding for server validation if needed
+ let secretToSend = totpSecret.toUpperCase().replace(/=+$/, ''); // Remove existing padding
+ const len = secretToSend.length;
+ const paddingLen = (8 - len % 8) % 8;
+ secretToSend += '='.repeat(paddingLen);
  totpEnabled = true;
  code = generateCode();
- pendingTotpSecret = totpSecret; // Set pending for after init
+ pendingTotpSecret = { display: totpSecret, send: secretToSend }; // Store both for display and send
  socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
  document.getElementById('totpOptionsModal').classList.remove('active');
  codeDisplayElement.textContent = `Your code: ${code}`;

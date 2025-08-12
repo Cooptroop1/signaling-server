@@ -9,7 +9,8 @@
  <link rel="icon" type="image/png" href="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f60e.png"/>
  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
- <script src="https://cdn.jsdelivr.net/npm/otplib@12.0.1/browser/otplib-browser.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
+ <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/lib/qrcode.min.js"></script>
  <style>
  * {
@@ -533,17 +534,17 @@
  [data-has-code] #usernameContainer,
  [data-has-code] #codeDisplay,
  [data-has-code] #copyCodeButton {
-   display: none;
+ display: none;
  }
  [data-has-code] #chatContainer {
-   display: flex;
+ display: flex;
  }
  [data-has-code] #messages {
-   background-color: transparent;
-   background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
-   background-size: contain;
-   background-position: center;
-   background-repeat: no-repeat;
+ background-color: transparent;
+ background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
+ background-size: contain;
+ background-position: center;
+ background-repeat: no-repeat;
  }
  [data-has-code] .button-group,
  [data-has-code] .input-container,
@@ -551,39 +552,39 @@
  [data-has-code] #remoteAudioContainer,
  [data-has-code] #grokKeyContainer,
  [data-has-code] .footer-buttons {
-   display: none;
+ display: none;
  }
  #totpSecretDisplay {
-   text-align: center;
-   margin-top: 1rem;
+ text-align: center;
+ margin-top: 1rem;
  }
  #qrCodeCanvas {
-   margin: 0 auto;
-   display: block;
+ margin: 0 auto;
+ display: block;
  }
  #totpInputModal {
-   display: none;
-   position: fixed;
-   top: 0;
-   left: 0;
-   width: 100%;
-   height: 100%;
-   background-color: rgba(0, 0, 0, 0.7);
-   z-index: 2000;
-   align-items: center;
-   justify-content: center;
+ display: none;
+ position: fixed;
+ top: 0;
+ left: 0;
+ width: 100%;
+ height: 100%;
+ background-color: rgba(0, 0, 0, 0.7);
+ z-index: 2000;
+ align-items: center;
+ justify-content: center;
  }
  #totpInputModal.active {
-   display: flex;
+ display: flex;
  }
  #totpInputModalContent {
-   background-color: white;
-   padding: 1.5rem;
-   border-radius: 0.5rem;
-   max-width: 90%;
-   max-height: 90%;
-   overflow-y: auto;
-   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+ background-color: white;
+ padding: 1.5rem;
+ border-radius: 0.5rem;
+ max-width: 90%;
+ max-height: 90%;
+ overflow-y: auto;
+ box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
  }
  </style>
 </head>
@@ -615,7 +616,7 @@
  <button id="button2" aria-label="Join a random chat">Random Chat</button>
  <button id="copyCodeButton" aria-label="Copy chat code">Copy Code</button>
  </div>
- <div id="messages" class="border border-gray-300 p-4 h-64 overflow-y-auto mb-4 rounded" role="log" aria-live="polite">
+ <div class="border border-gray-300 p-4 h-64 overflow-y-auto mb-4 rounded" role="log" aria-live="polite">
  <div id="userDots" class="user-dots"></div>
  </div>
  <div class="input-container hidden">

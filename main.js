@@ -24,7 +24,7 @@ async function sendMedia(file, type) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} messages are disabled by admin.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
- }
+  }
   if (!file || !validTypes[type].includes(file.type) || !username || dataChannels.size === 0) {
     showStatusMessage(`Error: Select a ${type === 'image' ? 'JPEG/PNG image' : 'valid audio format'} and ensure you are connected.`);
     document.getElementById(`${type}Button`)?.focus();
@@ -965,6 +965,6 @@ function showTotpSecretModal(secret) {
   document.getElementById('totpSecretModal').classList.add('active');
 }
 
-async function joinWithTotp(codeParam, totpCode) {
-  socket.send(JSON.stringify({ type: 'join', code: codeParam, clientId, username, totpCode, token }));
+async function joinWithTotp(code, totpCode) {
+  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }

@@ -1,4 +1,3 @@
-
 // Core logic: peer connections, message sending, handling offers, etc.
 // Global vars for dynamic TURN creds from server
 let turnUsername = '';
@@ -11,6 +10,9 @@ let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map(); // Per targetId
 // New: Track audio output mode
 let audioOutputMode = 'earpiece'; // Default to earpiece
+// New: TOTP state
+let totpEnabled = false;
+let totpSecret = '';
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -22,7 +24,7 @@ async function sendMedia(file, type) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} messages are disabled by admin.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
-  }
+ }
   if (!file || !validTypes[type].includes(file.type) || !username || dataChannels.size === 0) {
     showStatusMessage(`Error: Select a ${type === 'image' ? 'JPEG/PNG image' : 'valid audio format'} and ensure you are connected.`);
     document.getElementById(`${type}Button`)?.focus();
@@ -694,6 +696,7 @@ async function autoConnect(codeParam) {
   usernameContainer.classList.add('hidden');
   chatContainer.classList.remove('hidden');
   codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
   console.log('Loaded username from localStorage:', username);
   if (validateCode(codeParam)) {
     if (validateUsername(username)) {
@@ -731,7 +734,6 @@ async function autoConnect(codeParam) {
         }
         username = usernameInput;
         localStorage.setItem('username', username);
-        console.log('Username set in localStorage during autoConnect:', username);
         usernameContainer.classList.add('hidden');
         chatContainer.classList.remove('hidden');
         codeDisplayElement.textContent = `Using code: ${code}`;
@@ -740,12 +742,9 @@ async function autoConnect(codeParam) {
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
         if (socket.readyState === WebSocket.OPEN) {
-          console.log('WebSocket open, sending join after username input');
           socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
         } else {
-          console.log('WebSocket not open, waiting for open event after username');
           socket.addEventListener('open', () => {
-            console.log('WebSocket opened in autoConnect join, sending join');
             socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
           }, { once: true });
         }
@@ -917,4 +916,55 @@ function toggleAudioOutput() {
   audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
   audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
   showStatusMessage(`Audio output set to ${audioOutputMode}`);
+}
+
+// New: TOTP Functions
+async function startTotpRoom(serverGenerated) {
+  const usernameInput = document.getElementById('totpUsernameInput').value.trim();
+  if (!validateUsername(usernameInput)) {
+    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+    return;
+  }
+  username = usernameInput;
+  localStorage.setItem('username', username);
+  let totpSecret;
+  if (serverGenerated) {
+    totpSecret = generateTotpSecret();
+  } else {
+    totpSecret = document.getElementById('customTotpSecret').value.trim();
+    if (!otplib.authenticator.check('123456', totpSecret)) { // Test with dummy code to validate format
+      showStatusMessage('Invalid custom TOTP secret format.');
+      return;
+    }
+  }
+  totpEnabled = true;
+  code = generateCode();
+  socket.send(JSON.stringify({ type: 'set-totp', code, totpSecret, clientId, token }));
+  socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+  showTotpSecretModal(totpSecret);
+  document.getElementById('totpOptionsModal').classList.remove('active');
+  codeDisplayElement.textContent = `Your code: ${code}`;
+  codeDisplayElement.classList.remove('hidden');
+  copyCodeButton.classList.remove('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  initialContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for connection...';
+  document.getElementById('messageInput')?.focus();
+}
+
+function showTotpSecretModal(secret) {
+  const uri = generateTotpUri(code, secret);
+  const canvas = document.getElementById('qrCodeCanvas');
+  QRCode.toCanvas(canvas, uri, (error) => {
+    if (error) console.error(error);
+  });
+  document.getElementById('totpSecretDisplay').textContent = secret;
+  document.getElementById('totpSecretModal').classList.add('active');
+}
+
+async function joinWithTotp(codeParam, totpCode) {
+  socket.send(JSON.stringify({ type: 'join', code: codeParam, clientId, username, totpCode, token }));
 }

@@ -287,8 +287,8 @@ socket.onmessage = async (event) => {
  roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
  signingKey = await deriveSigningKey(roomMaster);
  if (pendingTotpSecret) {
-   socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret, code, clientId, token }));
-   showTotpSecretModal(pendingTotpSecret);
+   socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
+   showTotpSecretModal(pendingTotpSecret.display);
    pendingTotpSecret = null;
  }
  } else {

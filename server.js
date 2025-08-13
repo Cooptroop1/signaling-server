@@ -116,8 +116,12 @@ if (!JWT_SECRET) {
  JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
  } else {
  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+ try {
  fs.writeFileSync(secretFile, JWT_SECRET);
  console.log('Generated new JWT secret and saved to disk.');
+ } catch (err) {
+ console.error('Error writing JWT secret file:', err);
+ }
  }
 }
 // Check for rotation on startup
@@ -128,9 +132,13 @@ if (fs.existsSync(secretFile)) {
  if (mtime < thirtyDaysAgo) {
  const previousSecret = JWT_SECRET;
  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+ try {
  fs.writeFileSync(secretFile, JWT_SECRET);
  fs.writeFileSync(previousSecretFile, previousSecret);
  console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
+ } catch (err) {
+ console.error('Error rotating JWT secret files:', err);
+ }
  }
 }
 const TURN_USERNAME = process.env.TURN_USERNAME;
@@ -161,7 +169,11 @@ if (fs.existsSync(FEATURES_FILE)) {
  console.error('Error loading features file:', err);
  }
 } else {
+ try {
  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+ } catch (err) {
+ console.error('Error writing features file:', err);
+ }
 }
 
 // New: Aggregated stats structure { daily: { "YYYY-MM-DD": { "users": number, "connections": number } } }
@@ -169,14 +181,22 @@ let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STA
 
 // Function to save features to file
 function saveFeatures() {
+ try {
  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
  console.log('Saved features:', features);
+ } catch (err) {
+ console.error('Error saving features:', err);
+ }
 }
 
 // New: Function to save aggregated stats
 function saveAggregatedStats() {
+ try {
  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
  console.log('Saved aggregated stats to disk');
+ } catch (err) {
+ console.error('Error saving aggregated stats:', err);
+ }
 }
 
 // Validate base32 secret
@@ -876,7 +896,7 @@ wss.on('connection', (ws, req) => {
  try {
  fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
  } catch (err) {
- console.error('Error appending to log file:', err);
+ console.error('Error appending admin toggle log:', err);
  }
  ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
  // Send features-update to all clients, error only to non-admins
@@ -989,7 +1009,7 @@ function restrictRate(ws) {
  try {
  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages\n`);
  } catch (err) {
- console.error('Error appending to log file:', err);
+ console.error('Error appending rate limit log:', err);
  }
  return false;
  }
@@ -1013,7 +1033,7 @@ function restrictIpRate(ip, action) {
  try {
  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count}\n`);
  } catch (err) {
- console.error('Error appending to log file:', err);
+ console.error('Error appending IP rate limit log:', err);
  }
  return false;
  }
@@ -1033,7 +1053,7 @@ function restrictIpDaily(ip, action) {
  try {
  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count}\n`);
  } catch (err) {
- console.error('Error appending to log file:', err);
+ console.error('Error appending daily IP limit log:', err);
  }
  return false;
  }
@@ -1135,13 +1155,14 @@ function updateLogFile() {
  saveAggregatedStats();
 }
 
-fs.writeFileSync(LOG_FILE, '', (err) => {
- if (err) console.error('Error creating log file:', err);
- else {
+try {
+ fs.writeFileSync(LOG_FILE, '');
+} catch (err) {
+ console.error('Error creating log file:', err);
+} else {
  updateLogFile();
  setInterval(updateLogFile, UPDATE_INTERVAL);
- }
-});
+}
 
 // New: Compute aggregate for last N days
 function computeAggregate(days) {

@@ -1,4 +1,3 @@
-
 // events.js
 // Reconnection attempt counter for exponential backoff
 let reconnectAttempts = 0;
@@ -283,6 +282,10 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'totp-not-required') {
+      if (pendingTotpSecret) {
+        showTotpSecretModal(pendingTotpSecret.display);
+        pendingTotpSecret = null;
+      }
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       return;
     }
@@ -765,7 +768,8 @@ document.getElementById('imageButton').onclick = () => {
 document.getElementById('imageInput').onchange = (event) => {
   const file = event.target.files[0];
   if (file) {
-    sendMedia(file, 'image');
+    const type = file.type.startsWith('image/') ? 'image' : 'file';
+    sendMedia(file, type);
     event.target.value = '';
   }
 };

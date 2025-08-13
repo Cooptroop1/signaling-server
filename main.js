@@ -15,6 +15,9 @@ let audioOutputMode = 'earpiece'; // Default to earpiece
 let totpEnabled = false;
 let totpSecret = '';
 let pendingTotpSecret = null; // New: For delaying set-totp until after init
+let mediaRecorder = null;
+let voiceChunks = [];
+let voiceTimerInterval = null;
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -996,4 +999,56 @@ function showTotpSecretModal(secret) {
 
 async function joinWithTotp(code, totpCode) {
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
+}
+
+// Function to start voice recording
+async function startVoiceRecording() {
+  if (!features.enableVoice) {
+    showStatusMessage('Voice messages are disabled by admin.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showStatusMessage('Microphone not supported.');
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    voiceChunks = [];
+    mediaRecorder.ondataavailable = (event) => {
+      voiceChunks.push(event.data);
+    };
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(voiceChunks, { type: 'audio/webm' });
+      sendMedia(audioBlob, 'voice');
+      stream.getTracks().forEach(track => track.stop());
+      mediaRecorder = null;
+      voiceChunks = [];
+      document.getElementById('voiceButton').classList.remove('recording');
+      document.getElementById('voiceTimer').style.display = 'none';
+      document.getElementById('voiceTimer').textContent = '';
+      clearInterval(voiceTimerInterval);
+    };
+    mediaRecorder.start();
+    document.getElementById('voiceButton').classList.add('recording');
+    document.getElementById('voiceTimer').style.display = 'flex';
+    let time = 0;
+    voiceTimerInterval = setInterval(() => {
+      time++;
+      document.getElementById('voiceTimer').textContent = `00:${time < 10 ? '0' + time : time}`;
+      if (time >= 30) {
+        stopVoiceRecording();
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Error starting voice recording:', error);
+    showStatusMessage('Failed to access microphone for voice message.');
+  }
+}
+
+// Function to stop voice recording
+function stopVoiceRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
 }

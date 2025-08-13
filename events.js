@@ -236,7 +236,7 @@ socket.onmessage = async (event) => {
         message.message.includes('Initiator offline') || 
         message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
-        showStatusMessage(`Failed to join chat: ${message.message}`);
+        showStatusMessage(`Failed to join join chat: ${message.message}`);
         socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
         initialContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
@@ -306,6 +306,8 @@ socket.onmessage = async (event) => {
           showTotpSecretModal(pendingTotpSecret.display);
           pendingTotpSecret = null;
         }
+        // New: Periodic ratchet timer (every 5 minutes)
+        setInterval(triggerRatchet, 5 * 60 * 1000);
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
@@ -788,62 +790,8 @@ document.getElementById('saveGrokKey').onclick = () => {
 };
 document.getElementById('newSessionButton').onclick = () => {
   console.log('New session button clicked');
-  socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
-  peerConnections.forEach((pc) => pc.close());
-  dataChannels.forEach((dc) => dc.close());
-  peerConnections.clear();
-  dataChannels.clear();
-  candidatesQueues.clear();
-  connectionTimeouts.clear();
-  retryCounts.clear();
-  processedMessageIds.clear();
-  usernames.clear();
-  messageRateLimits.clear();
-  imageRateLimits.clear();
-  voiceRateLimits.clear();
-  connectedClients.clear(); // Clear on new session
-  clientPublicKeys.clear();
-  initiatorPublic = undefined;
-  isConnected = false;
-  isInitiator = false;
-  maxClients = 2;
-  totalClients = 0;
-  code = generateCode();
-  codeDisplayElement.textContent = '';
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
-  document.getElementById('messages').innerHTML = '';
-  document.getElementById('messageInput').classList.remove('expanded');
-  document.getElementById('usernameInput').value = '';
-  document.getElementById('usernameConnectInput').value = '';
-  document.getElementById('codeInput').value = '';
-  initialContainer.classList.remove('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  chatContainer.classList.add('hidden');
-  newSessionButton.classList.add('hidden');
-  maxClientsContainer.classList.add('hidden');
-  inputContainer.classList.add('hidden');
-  messages.classList.remove('waiting');
-  codeSentToRandom = false;
-  button2.disabled = false;
-  token = ''; // Clear token
-  refreshToken = ''; // Clear refresh token
-  // Clear localStorage and cookies for data minimization
-  localStorage.removeItem('username');
-  document.cookie = 'clientId=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; Secure; HttpOnly; SameSite=Strict';
-  document.getElementById('startChatToggleButton')?.focus();
-  // Clean up voice call
-  stopVoiceCall();
-  remoteAudios.forEach(audio => audio.remove());
-  remoteAudios.clear();
-  signalingQueue.clear();
-  refreshingToken = false;
-  // Clear user dots
-  document.getElementById('userDots').innerHTML = '';
-  // New: Reset TOTP
-  totpEnabled = false;
+  // Redirect to the domain root to refresh and start fresh
+  window.location.href = 'https://anonomoose.com';
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
@@ -995,12 +943,4 @@ function setupWaitingForJoin(codeParam) {
     }
     document.getElementById('messageInput')?.focus();
   }
-}
-
-// New: Function to show TOTP input modal
-function showTotpInputModal(codeParam) {
-  document.getElementById('totpInputModal').classList.add('active');
-  document.getElementById('totpInputModal').dataset.code = codeParam;
-  document.getElementById('totpCodeInput').value = '';
-  document.getElementById('totpCodeInput')?.focus();
 }

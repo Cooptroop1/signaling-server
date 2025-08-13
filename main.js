@@ -328,6 +328,8 @@ function setupDataChannel(dataChannel, targetId) {
     // Show audio output button only if features allow
     if (features.enableVoiceCalls && features.enableAudioToggle) {
       document.getElementById('audioOutputButton').classList.remove('hidden');
+    } else {
+      document.getElementById('audioOutputButton').classList.add('hidden');
     }
   };
   dataChannel.onmessage = async (event) => {
@@ -736,14 +738,15 @@ async function autoConnect(codeParam) {
       copyCodeButton.classList.remove('hidden');
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
+      // Send check-totp instead of direct join
       if (socket.readyState === WebSocket.OPEN) {
-        console.log('WebSocket open, sending join');
-        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+        console.log('Sending check-totp');
+        socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
       } else {
-        console.log('WebSocket not open, waiting for open event');
+        console.log('WebSocket not open, waiting for open event to send check-totp');
         socket.addEventListener('open', () => {
-          console.log('WebSocket opened in autoConnect, sending join');
-          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+          console.log('WebSocket opened, sending check-totp');
+          socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
         }, { once: true });
       }
       document.getElementById('messageInput')?.focus();
@@ -771,13 +774,8 @@ async function autoConnect(codeParam) {
         copyCodeButton.classList.remove('hidden');
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-        } else {
-          socket.addEventListener('open', () => {
-            socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-          }, { once: true });
-        }
+        // Send check-totp after username set
+        socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
         document.getElementById('messageInput')?.focus();
         updateFeaturesUI(); // Ensure features UI is updated after showing chat
       };

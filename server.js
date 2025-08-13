@@ -148,7 +148,7 @@ function saveAggregatedStats() {
 
 // Validate base32 secret
 function isValidBase32(str) {
-  return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16 && str.length % 8 === 0;
+ return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
 
 // Validate base64 string
@@ -317,8 +317,8 @@ function validateMessage(data) {
  if (!data.code) {
  return { valid: false, error: 'set-totp: code required' };
  }
- if (!data.totpSecret || typeof data.totpSecret !== 'string' || !isValidBase32(data.totpSecret)) {
- return { valid: false, error: 'set-totp: valid base32 totpSecret required' };
+ if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
+ return { valid: false, error: 'set-totp: valid base32 secret required' };
  }
  break;
  default:
@@ -636,7 +636,7 @@ wss.on('connection', (ws, req) => {
  }
  if (data.type === 'set-totp') {
  if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
- totpSecrets.set(data.code, data.totpSecret);
+ totpSecrets.set(data.code, data.secret);
  broadcast(data.code, { type: 'totp-enabled', code: data.code });
  } else {
  ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));

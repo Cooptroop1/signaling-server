@@ -803,33 +803,75 @@ function updateFeaturesUI() {
   const audioOutputButton = document.getElementById('audioOutputButton');
   const grokButton = document.getElementById('grokButton');
   if (imageButton) {
-    imageButton.classList.toggle('hidden', !features.enableImages);
-    imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
+    if (!features.enableImages) {
+      imageButton.classList.add('hidden');
+      imageButton.onclick = null;
+      imageButton.title = 'Images/Files disabled by admin';
+    } else {
+      imageButton.classList.remove('hidden');
+      imageButton.onclick = () => {
+        document.getElementById('imageInput')?.click();
+      };
+      imageButton.title = 'Send Image/File';
+    }
   }
   if (voiceButton) {
-    voiceButton.classList.toggle('hidden', !features.enableVoice);
-    voiceButton.title = features.enableVoice ? 'Record Voice' : 'Voice disabled by admin';
+    if (!features.enableVoice) {
+      voiceButton.classList.add('hidden');
+      voiceButton.onclick = null;
+      voiceButton.title = 'Voice disabled by admin';
+    } else {
+      voiceButton.classList.remove('hidden');
+      voiceButton.onclick = () => {
+        if (!mediaRecorder || mediaRecorder.state !== 'recording') {
+          startVoiceRecording();
+        } else {
+          stopVoiceRecording();
+        }
+      };
+      voiceButton.title = 'Record Voice';
+    }
   }
   if (voiceCallButton) {
-    voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
-    voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
-    if (!features.enableVoiceCalls && voiceCallActive) {
-      stopVoiceCall(); // Force stop call if feature disabled
+    if (!features.enableVoiceCalls) {
+      voiceCallButton.classList.add('hidden');
+      voiceCallButton.onclick = null;
+      voiceCallButton.title = 'Voice calls disabled by admin';
+      if (voiceCallActive) {
+        stopVoiceCall(); // Force stop call if feature disabled
+      }
+    } else {
+      voiceCallButton.classList.remove('hidden');
+      voiceCallButton.onclick = toggleVoiceCall;
+      voiceCallButton.title = 'Start Voice Call';
     }
   }
   if (audioOutputButton) {
     const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
-    audioOutputButton.classList.toggle('hidden', shouldHide);
-    if (shouldHide && voiceCallActive) {
-      stopVoiceCall(); // Force stop if toggle disabled during call
+    if (shouldHide) {
+      audioOutputButton.classList.add('hidden');
+      audioOutputButton.onclick = null;
+      if (voiceCallActive) {
+        stopVoiceCall(); // Force stop if toggle disabled during call
+      }
+    } else {
+      audioOutputButton.classList.remove('hidden');
+      audioOutputButton.onclick = toggleAudioOutput;
     }
     audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
     audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
     audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
   }
   if (grokButton) {
-    grokButton.classList.toggle('hidden', !features.enableGrokBot);
-    grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
+    if (!features.enableGrokBot) {
+      grokButton.classList.add('hidden');
+      grokButton.onclick = null;
+      grokButton.title = 'Grok bot disabled by admin';
+    } else {
+      grokButton.classList.remove('hidden');
+      grokButton.onclick = toggleGrokBot;
+      grokButton.title = 'Toggle Grok Bot';
+    }
   }
   if (!features.enableService) {
     showStatusMessage('Service disabled by admin. Disconnecting...');

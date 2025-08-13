@@ -123,6 +123,8 @@ addUserModal.addEventListener('keydown', (event) => {
 let pendingCode = null;
 let pendingJoin = null;
 const maxReconnectAttempts = 5; // Limit reconnect attempts
+let refreshFailures = 0;
+let refreshBackoff = 1000; // Initial backoff 1s
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -197,6 +199,8 @@ socket.onmessage = async (event) => {
       refreshToken = message.refreshToken; // Update with new rotated refresh token
       console.log('Received new tokens:', { accessToken: token, refreshToken });
       showStatusMessage('Authentication tokens refreshed.');
+      refreshFailures = 0;
+      refreshBackoff = 1000;
       // Restart token refresh timer
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingJoin) {
@@ -220,10 +224,28 @@ socket.onmessage = async (event) => {
           socket.close();
         }
       } else if (message.message.includes('Token revoked') || message.message.includes('Invalid or expired refresh token')) {
+        refreshFailures++;
+        console.log(`Refresh failure count: ${refreshFailures}`);
+        if (refreshFailures > 3) {
+          console.log('Exceeded refresh failures, forcing full reconnect with new clientId');
+          clientId = Math.random().toString(36).substr(2, 9);
+          setCookie('clientId', clientId, 365);
+          token = '';
+          refreshToken = '';
+          refreshFailures = 0;
+          refreshBackoff = 1000;
+          socket.close(); // Trigger reconnect
+        } else {
+          // Exponential backoff for retry
+          setTimeout(() => {
+            if (refreshToken && !refreshingToken) {
+              refreshingToken = true;
+              socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
+            }
+          }, refreshBackoff);
+          refreshBackoff = Math.min(refreshBackoff * 2, 8000); // Cap at 8s
+        }
         showStatusMessage('Session expired. Reconnecting...');
-        token = '';
-        refreshToken = '';
-        socket.close();
       } else if (message.message.includes('Rate limit exceeded')) {
         showStatusMessage('Rate limit exceeded. Waiting before retrying...');
         setTimeout(() => {
@@ -927,6 +949,15 @@ function setupWaitingForJoin(codeParam) {
         socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       } else {
         pendingJoin = { code, clientId, username };
+        if (socket.readyState !== WebSocket.OPEN) {
+          socket.addEventListener('open', () => {
+            console.log('WebSocket opened, sending join for existing chat');
+            if (token) {
+              socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+              pendingJoin = null;
+            }
+          }, { once: true });
+        }
       }
       document.getElementById('messageInput')?.focus();
       // Restore original onclick if needed
@@ -940,6 +971,15 @@ function setupWaitingForJoin(codeParam) {
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
     } else {
       pendingJoin = { code, clientId, username };
+      if (socket.readyState !== WebSocket.OPEN) {
+        socket.addEventListener('open', () => {
+          console.log('WebSocket opened, sending join for existing chat');
+          if (token) {
+            socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+            pendingJoin = null;
+          }
+        }, { once: true });
+      }
     }
     document.getElementById('messageInput')?.focus();
   }

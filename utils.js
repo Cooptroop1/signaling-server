@@ -1,5 +1,3 @@
-// utils.js
-// Utility to show temporary status messages
 function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
@@ -77,6 +75,7 @@ function cleanupPeerConnection(targetId) {
   voiceRateLimits.delete(targetId);
   if (remoteAudios.has(targetId)) {
     const audio = remoteAudios.get(targetId);
+    audio.remove();
     audio.remove();
     remoteAudios.delete(targetId);
     if (remoteAudios.size === 0) {
@@ -248,34 +247,6 @@ function base64ToArrayBuffer(base64) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
-}
-
-async function encodeAudioToMp3(audioBlob) {
-  const arrayBuffer = await audioBlob.arrayBuffer();
-  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-  const channelData = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-  const mp3encoder = new lamejs.Mp3Encoder(1, sampleRate, 96); // 96kbps
-  const mp3Data = [];
-  const sampleBlockSize = 1152;
-  for (let i = 0; i < channelData.length; i += sampleBlockSize) {
-    const samples = channelData.subarray(i, i + sampleBlockSize);
-    const sampleInt16 = new Int16Array(samples.length);
-    for (let j = 0; j < samples.length; j++) {
-      sampleInt16[j] = samples[j] * 32767;
-    }
-    const mp3buf = mp3encoder.encodeBuffer(sampleInt16);
-    if (mp3buf.length > 0) {
-      mp3Data.push(mp3buf);
-    }
-  }
-  const endBuf = mp3encoder.flush();
-  if (endBuf.length > 0) {
-    mp3Data.push(endBuf);
-  }
-  const mp3Blob = new Blob(mp3Data, { type: 'audio/mp3' });
-  return mp3Blob;
 }
 
 async function exportPublicKey(key) {

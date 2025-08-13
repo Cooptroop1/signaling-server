@@ -446,6 +446,11 @@ async function handleOffer(offer, targetId) {
   }
   const peerConnection = peerConnections.get(targetId);
   try {
+    // Handle negotiation glare: rollback if have local offer pending
+    if (peerConnection.signalingState === 'have-local-offer') {
+      console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
+      await peerConnection.setLocalDescription({type: 'rollback'});
+    }
     await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
@@ -501,6 +506,11 @@ async function handleAnswer(answer, targetId) {
 
 function handleCandidate(candidate, targetId) {
   console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
+  // Ignore invalid candidates where both sdpMid and sdpMLineIndex are null
+  if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
+    console.warn(`Ignoring invalid ICE candidate from ${targetId}: both sdpMid and sdpMLineIndex null`);
+    return;
+  }
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection && peerConnection.remoteDescription) {
     peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(error => {

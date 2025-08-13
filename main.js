@@ -1019,24 +1019,32 @@ async function startVoiceRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeTypes = [
+      'audio/mp4',
       'audio/webm;codecs=opus',
       'audio/ogg;codecs=opus',
       'audio/webm',
-      'audio/ogg',
-      'audio/mp4'
+      'audio/ogg'
     ];
     const mimeType = mimeTypes.find(MediaRecorder.isTypeSupported) || 'audio/webm';
     if (!mimeType) {
       showStatusMessage('Voice recording not supported in this browser.');
       return;
     }
+    console.log('Using mimeType for recording:', mimeType);
     mediaRecorder = new MediaRecorder(stream, { mimeType });
     voiceChunks = [];
     mediaRecorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) voiceChunks.push(event.data);
+      if (event.data.size > 0) {
+        voiceChunks.push(event.data);
+        console.log('Data available, chunk size:', event.data.size);
+      } else {
+        console.warn('Empty data chunk received');
+      }
     });
     mediaRecorder.addEventListener('stop', async () => {
+      console.log('Recorder stopped, chunks length:', voiceChunks.length);
       const audioBlob = new Blob(voiceChunks, { type: mimeType });
+      console.log('Audio blob created, size:', audioBlob.size, 'type:', mimeType);
       if (audioBlob.size === 0) {
         showStatusMessage('No audio recorded. Speak louder or check microphone.');
         return;

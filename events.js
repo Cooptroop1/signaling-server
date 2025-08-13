@@ -734,20 +734,10 @@ document.getElementById('sendButton').onclick = () => {
 document.getElementById('imageButton').onclick = () => {
   document.getElementById('imageInput')?.click();
 };
-document.getElementById('fileButton').onclick = () => {
-  document.getElementById('fileInput')?.click();
-};
 document.getElementById('imageInput').onchange = (event) => {
   const file = event.target.files[0];
   if (file) {
     sendMedia(file, 'image');
-    event.target.value = '';
-  }
-};
-document.getElementById('fileInput').onchange = (event) => {
-  const file = event.target.files[0];
-  if (file) {
-    sendMedia(file, 'file');
     event.target.value = '';
   }
 };

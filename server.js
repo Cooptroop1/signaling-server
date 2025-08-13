@@ -83,6 +83,7 @@ const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const FEATURES_FILE = path.join('/data', 'features.json'); // Persistent disk
 const STATS_FILE = path.join('/data', 'stats.json'); // New: For aggregated stats
+const ROOMS_FILE = path.join('/data', 'rooms.json'); // Persistent disk for rooms
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -154,6 +155,28 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 
+// New: Load persistent rooms
+if (fs.existsSync(ROOMS_FILE)) {
+  try {
+    const persistedRooms = JSON.parse(fs.readFileSync(ROOMS_FILE, 'utf8'));
+    for (const [code, roomData] of Object.entries(persistedRooms)) {
+      rooms.set(code, {
+        initiator: roomData.initiator,
+        clients: new Map(),
+        maxClients: roomData.maxClients,
+        validated_clients: new Set(roomData.validated_clients || []),
+        totpSecret: roomData.totpSecret || null,
+        last_activity: roomData.last_activity || Date.now()
+      });
+    }
+    console.log('Loaded persistent rooms:', rooms.size);
+  } catch (err) {
+    console.error('Error loading rooms file:', err);
+  }
+} else {
+  fs.writeFileSync(ROOMS_FILE, JSON.stringify({}));
+}
+
 // New: Aggregated stats structure { daily: { "YYYY-MM-DD": { "users": number, "connections": number } } }
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
 
@@ -167,6 +190,22 @@ function saveFeatures() {
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
+}
+
+// New: Function to save rooms
+function saveRooms() {
+  const persistedRooms = {};
+  for (const [code, room] of rooms.entries()) {
+    persistedRooms[code] = {
+      initiator: room.initiator,
+      maxClients: room.maxClients,
+      validated_clients: Array.from(room.validated_clients),
+      totpSecret: room.totpSecret,
+      last_activity: room.last_activity
+    };
+  }
+  fs.writeFileSync(ROOMS_FILE, JSON.stringify(persistedRooms));
+  console.log('Saved rooms to disk');
 }
 
 // Validate base32 secret
@@ -379,6 +418,20 @@ setInterval(() => {
   console.log('Auto-cleaned random codes.');
 }, 3600000);
 
+// New: Cleanup old rooms every hour
+setInterval(() => {
+  const now = Date.now();
+  const oneHour = 60 * 60 * 1000;
+  for (const code of [...rooms.keys()]) { // Copy to avoid modification during iteration
+    const room = rooms.get(code);
+    if (now - room.last_activity > oneHour && room.clients.size === 0) {
+      rooms.delete(code);
+      console.log(`Cleaned up inactive room ${code}`);
+    }
+  }
+  saveRooms();
+}, 3600000);
+
 // Server-side ping to detect dead connections
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
@@ -423,8 +476,9 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
       return;
     }
+    let data;
     try {
-      const data = JSON.parse(message);
+      data = JSON.parse(message);
       // New: Validate incoming data structure
       const validation = validateMessage(data);
       if (!validation.valid) {
@@ -504,7 +558,7 @@ wss.on('connection', (ws, req) => {
         }
       }
       // Update last_activity on any message (except ping/pong)
-      if (data.type !== 'ping' && data.type !== 'pong' && data.code && rooms.has(data.code)) {
+      if (!['ping', 'pong'].includes(data.type) && data.code && rooms.has(data.code)) {
         rooms.get(data.code).last_activity = Date.now();
       }
       if (data.type === 'connect') {
@@ -706,6 +760,7 @@ wss.on('connection', (ws, req) => {
         ws.code = code;
         ws.username = username;
         broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
+        saveRooms();
       }
       if (data.type === 'set-max-clients') {
         if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
@@ -873,7 +928,7 @@ wss.on('connection', (ws, req) => {
             if (data.feature === 'service' && !features.enableService) {
               rooms.clear();
               randomCodes.clear();
-              totpSecrets.clear(); // Clear TOTP secrets on service disable
+              saveRooms(); // Clear persistent rooms
             }
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
@@ -892,7 +947,7 @@ wss.on('connection', (ws, req) => {
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data ? data.code : undefined }));
       incrementFailure(clientIp);
     }
   });
@@ -929,7 +984,6 @@ wss.on('connection', (ws, req) => {
           totalClients: 0,
           isInitiator
         });
-        saveRooms();
       } else {
         if (isInitiator) {
           const newInitiator = room.clients.keys().next().value;
@@ -948,8 +1002,8 @@ wss.on('connection', (ws, req) => {
           totalClients: room.clients.size,
           isInitiator
         });
-        saveRooms();
       }
+      saveRooms();
     }
   });
 });

@@ -281,6 +281,10 @@ socket.onmessage = async (event) => {
       showTotpInputModal(message.code);
       return;
     }
+    if (message.type === 'totp-not-required') {
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      return;
+    }
     if (message.type === 'totp-enabled') {
       totpEnabled = true;
     }

@@ -1,3 +1,5 @@
+// main.js
+// Core logic: peer connections, message sending, handling offers, etc.
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -1033,17 +1035,7 @@ async function startVoiceRecording() {
       document.getElementById('voiceTimer').textContent = '';
       clearInterval(voiceTimerInterval);
     };
-    mediaRecorder.start();
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceTimer').style.display = 'flex';
-    let time = 0;
-    voiceTimerInterval = setInterval(() => {
-      time++;
-      document.getElementById('voiceTimer').textContent = `00:${time < 10 ? '0' + time : time}`;
-      if (time >= 30) {
-        stopVoiceRecording();
-      }
-    }, 1000);
+    mediaRecorder.start(1000); // Collect data every 1 second
   } catch (error) {
     console.error('Error starting voice recording:', error);
     showStatusMessage('Failed to access microphone for voice message.');

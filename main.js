@@ -21,7 +21,7 @@ let voiceTimerInterval = null;
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
-    voice: ['audio/webm', 'audio/ogg']
+    voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
   };
   // Check if feature is enabled before proceeding
   if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
@@ -29,7 +29,7 @@ async function sendMedia(file, type) {
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  if (!file || (type !== 'file' && !validTypes[type].includes(file.type)) || !username || dataChannels.size === 0) {
+  if (!file || (type !== 'file' && !validTypes[type]?.includes(file.type)) || !username || dataChannels.size === 0) {
     showStatusMessage(`Error: Select a ${type === 'image' ? 'JPEG/PNG image' : type === 'voice' ? 'valid audio format' : 'valid file'} and ensure you are connected.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
@@ -1050,7 +1050,7 @@ async function startVoiceRecording() {
       document.getElementById('voiceTimer').textContent = '';
       clearInterval(voiceTimerInterval);
     });
-    mediaRecorder.start();
+    mediaRecorder.start(1000); // Collect data every 1 second
     document.getElementById('voiceButton').classList.add('recording');
     document.getElementById('voiceTimer').style.display = 'flex';
     let time = 0;

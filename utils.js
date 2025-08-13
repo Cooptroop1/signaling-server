@@ -423,7 +423,7 @@ async function deriveSigningKey(master) {
 
 // New: TOTP Utilities (using otplib)
 function generateTotpSecret() {
- return otplib.authenticator.generateSecret(32); // Explicitly set to 32 characters (20 bytes) for standard compliance
+ return otplib.authenticator.generateSecret(32); // Changed to 32 characters
 }
 
 function generateTotpUri(roomCode, secret) {

@@ -1018,14 +1018,29 @@ async function startVoiceRecording() {
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    const mimeTypes = [
+      'audio/webm;codecs=opus',
+      'audio/ogg;codecs=opus',
+      'audio/webm',
+      'audio/ogg',
+      'audio/mp4'
+    ];
+    const mimeType = mimeTypes.find(MediaRecorder.isTypeSupported) || 'audio/webm';
+    if (!mimeType) {
+      showStatusMessage('Voice recording not supported in this browser.');
+      return;
+    }
     mediaRecorder = new MediaRecorder(stream, { mimeType });
     voiceChunks = [];
-    mediaRecorder.ondataavailable = (event) => {
-      voiceChunks.push(event.data);
-    };
-    mediaRecorder.onstop = async () => {
+    mediaRecorder.addEventListener('dataavailable', (event) => {
+      if (event.data.size > 0) voiceChunks.push(event.data);
+    });
+    mediaRecorder.addEventListener('stop', async () => {
       const audioBlob = new Blob(voiceChunks, { type: mimeType });
+      if (audioBlob.size === 0) {
+        showStatusMessage('No audio recorded. Speak louder or check microphone.');
+        return;
+      }
       sendMedia(audioBlob, 'voice');
       stream.getTracks().forEach(track => track.stop());
       mediaRecorder = null;
@@ -1034,8 +1049,8 @@ async function startVoiceRecording() {
       document.getElementById('voiceTimer').style.display = 'none';
       document.getElementById('voiceTimer').textContent = '';
       clearInterval(voiceTimerInterval);
-    };
-    mediaRecorder.start(1000); // Collect data every 1 second
+    });
+    mediaRecorder.start();
     document.getElementById('voiceButton').classList.add('recording');
     document.getElementById('voiceTimer').style.display = 'flex';
     let time = 0;

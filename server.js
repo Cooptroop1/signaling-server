@@ -94,6 +94,7 @@ const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
+const clientCsrf = new Map(); // New: Store CSRF tokens per client
 const totpSecrets = new Map(); // New: Store TOTP secrets per room code
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
@@ -405,6 +406,7 @@ wss.on('connection', (ws, req) => {
   ws.on('pong', () => {
     ws.isAlive = true;
   });
+  ws.csrfToken = crypto.randomBytes(16).toString('hex');
   const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress; // Handle proxies
   const hashedIp = hashIp(clientIp);
   if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) {
@@ -451,6 +453,10 @@ wss.on('connection', (ws, req) => {
           isAdmin = true;
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+          return;
+        }
+        if (data.csrfToken !== ws.csrfToken) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid CSRF token' }));
           return;
         }
       }
@@ -505,7 +511,7 @@ wss.on('connection', (ws, req) => {
         const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '10m' });
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
-        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken, csrfToken: ws.csrfToken }));
         return;
       }
       if (data.type === 'refresh-token') {

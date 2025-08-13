@@ -128,8 +128,6 @@ addUserModal.addEventListener('keydown', (event) => {
 });
 let pendingCode = null;
 let pendingJoin = null;
-let mediaRecorder = null;
-let voiceTimerInterval = null;
 const maxReconnectAttempts = 5; // Limit reconnect attempts
 socket.onopen = () => {
   console.log('WebSocket opened');
@@ -745,6 +743,17 @@ document.getElementById('sendButton').onclick = () => {
     sendMessage(message);
   }
 };
+// Add Enter key listener for sending messages
+document.getElementById('messageInput').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    const messageInput = document.getElementById('messageInput');
+    const message = messageInput.value.trim();
+    if (message) {
+      sendMessage(message);
+    }
+  }
+});
 document.getElementById('imageButton').onclick = () => {
   document.getElementById('imageInput')?.click();
 };

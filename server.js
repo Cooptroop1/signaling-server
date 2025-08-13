@@ -94,7 +94,6 @@ const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
-const clientCsrf = new Map(); // New: Store CSRF tokens per client
 const totpSecrets = new Map(); // New: Store TOTP secrets per room code
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
@@ -216,19 +215,19 @@ function validateMessage(data) {
       }
       break;
     case 'public-key':
-      if (!data.publicKey || !isValidBase64(data.publicKey)) {
-        return { valid: false, error: 'public-key: invalid publicKey format' };
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length > 1024) { // Limit key size
+        return { valid: false, error: 'public-key: invalid or too large publicKey format' };
       }
       if (!data.code) {
         return { valid: false, error: 'public-key: code required' };
       }
       break;
     case 'encrypted-room-key':
-      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
-        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey' };
+      if (!data.encryptedKey || !isValidBase64(data.encryptedKey) || data.encryptedKey.length > 1024) {
+        return { valid: false, error: 'encrypted-room-key: invalid or too large encryptedKey' };
       }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'encrypted-room-key: invalid iv' };
+      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 1024) {
+        return { valid: false, error: 'encrypted-room-key: invalid or too large iv' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'encrypted-room-key: targetId required as string' };
@@ -238,11 +237,11 @@ function validateMessage(data) {
       }
       break;
     case 'new-room-key':
-      if (!data.encrypted || !isValidBase64(data.encrypted)) {
-        return { valid: false, error: 'new-room-key: invalid encrypted' };
+      if (!data.encrypted || !isValidBase64(data.encrypted) || data.encrypted.length > 1024) {
+        return { valid: false, error: 'new-room-key: invalid or too large encrypted' };
       }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'new-room-key: invalid iv' };
+      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 1024) {
+        return { valid: false, error: 'new-room-key: invalid or too large iv' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'new-room-key: targetId required as string' };
@@ -275,6 +274,12 @@ function validateMessage(data) {
       if (!data.offer && !data.answer) {
         return { valid: false, error: `${data.type}: offer or answer required` };
       }
+      if (data.offer && JSON.stringify(data.offer).length > 10240) { // 10KB limit for offer/answer
+        return { valid: false, error: `${data.type}: offer/answer too large` };
+      }
+      if (data.answer && JSON.stringify(data.answer).length > 10240) {
+        return { valid: false, error: `${data.type}: offer/answer too large` };
+      }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: `${data.type}: targetId required as string` };
       }
@@ -285,6 +290,9 @@ function validateMessage(data) {
     case 'candidate':
       if (!data.candidate) {
         return { valid: false, error: 'candidate: candidate required' };
+      }
+      if (JSON.stringify(data.candidate).length > 1024) { // Limit candidate size
+        return { valid: false, error: 'candidate: candidate too large' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'candidate: targetId required as string' };
@@ -305,17 +313,17 @@ function validateMessage(data) {
     case 'relay-image':
     case 'relay-voice':
       const payloadField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
-      if (!data[payloadField] || !isValidBase64(data[payloadField])) {
-        return { valid: false, error: `${data.type}: invalid ${payloadField}` };
+      if (!data[payloadField] || !isValidBase64(data[payloadField]) || data[payloadField].length > 13653) { // 10KB base64 limit
+        return { valid: false, error: `${data.type}: invalid or too large ${payloadField}` };
       }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: `${data.type}: invalid iv` };
+      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 1024) {
+        return { valid: false, error: `${data.type}: invalid or too large iv` };
       }
-      if (!data.salt || !isValidBase64(data.salt)) {
-        return { valid: false, error: `${data.type}: invalid salt` };
+      if (!data.salt || !isValidBase64(data.salt) || data.salt.length > 1024) {
+        return { valid: false, error: `${data.type}: invalid or too large salt` };
       }
-      if (!data.signature || !isValidBase64(data.signature)) {
-        return { valid: false, error: `${data.type}: invalid signature` };
+      if (!data.signature || !isValidBase64(data.signature) || data.signature.length > 1024) {
+        return { valid: false, error: `${data.type}: invalid or too large signature` };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: `${data.type}: messageId required as string` };
@@ -406,7 +414,6 @@ wss.on('connection', (ws, req) => {
   ws.on('pong', () => {
     ws.isAlive = true;
   });
-  ws.csrfToken = crypto.randomBytes(16).toString('hex');
   const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress; // Handle proxies
   const hashedIp = hashIp(clientIp);
   if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) {
@@ -453,10 +460,6 @@ wss.on('connection', (ws, req) => {
           isAdmin = true;
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-          return;
-        }
-        if (data.csrfToken !== ws.csrfToken) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid CSRF token' }));
           return;
         }
       }
@@ -511,7 +514,7 @@ wss.on('connection', (ws, req) => {
         const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '10m' });
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
-        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken, csrfToken: ws.csrfToken }));
+        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
         return;
       }
       if (data.type === 'refresh-token') {

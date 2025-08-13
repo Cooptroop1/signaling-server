@@ -325,8 +325,10 @@ function setupDataChannel(dataChannel, targetId) {
     retryCounts.delete(targetId);
     updateMaxClientsUI();
     document.getElementById('messageInput')?.focus();
-    // Show audio output button when call is possible
-    document.getElementById('audioOutputButton').classList.remove('hidden');
+    // Show audio output button only if features allow
+    if (features.enableVoiceCalls && features.enableAudioToggle) {
+      document.getElementById('audioOutputButton').classList.remove('hidden');
+    }
   };
   dataChannel.onmessage = async (event) => {
     const now = performance.now();

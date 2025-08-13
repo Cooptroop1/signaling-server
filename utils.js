@@ -76,7 +76,6 @@ function cleanupPeerConnection(targetId) {
   if (remoteAudios.has(targetId)) {
     const audio = remoteAudios.get(targetId);
     audio.remove();
-    audio.remove();
     remoteAudios.delete(targetId);
     if (remoteAudios.size === 0) {
       document.getElementById('remoteAudioContainer').classList.add('hidden');

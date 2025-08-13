@@ -1,3 +1,5 @@
+
+// server.js
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -83,7 +85,6 @@ const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const FEATURES_FILE = path.join('/data', 'features.json'); // Persistent disk
 const STATS_FILE = path.join('/data', 'stats.json'); // New: For aggregated stats
-const ROOMS_FILE = path.join('/data', 'rooms.json'); // Persistent disk for rooms
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -155,28 +156,6 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 
-// New: Load persistent rooms
-if (fs.existsSync(ROOMS_FILE)) {
-  try {
-    const persistedRooms = JSON.parse(fs.readFileSync(ROOMS_FILE, 'utf8'));
-    for (const [code, roomData] of Object.entries(persistedRooms)) {
-      rooms.set(code, {
-        initiator: roomData.initiator,
-        clients: new Map(),
-        maxClients: roomData.maxClients,
-        validated_clients: new Set(roomData.validated_clients || []),
-        totpSecret: roomData.totpSecret || null,
-        last_activity: roomData.last_activity || Date.now()
-      });
-    }
-    console.log('Loaded persistent rooms:', rooms.size);
-  } catch (err) {
-    console.error('Error loading rooms file:', err);
-  }
-} else {
-  fs.writeFileSync(ROOMS_FILE, JSON.stringify({}));
-}
-
 // New: Aggregated stats structure { daily: { "YYYY-MM-DD": { "users": number, "connections": number } } }
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
 
@@ -190,22 +169,6 @@ function saveFeatures() {
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
-}
-
-// New: Function to save rooms
-function saveRooms() {
-  const persistedRooms = {};
-  for (const [code, room] of rooms.entries()) {
-    persistedRooms[code] = {
-      initiator: room.initiator,
-      maxClients: room.maxClients,
-      validated_clients: Array.from(room.validated_clients),
-      totpSecret: room.totpSecret,
-      last_activity: room.last_activity
-    };
-  }
-  fs.writeFileSync(ROOMS_FILE, JSON.stringify(persistedRooms));
-  console.log('Saved rooms to disk');
 }
 
 // Validate base32 secret
@@ -418,20 +381,6 @@ setInterval(() => {
   console.log('Auto-cleaned random codes.');
 }, 3600000);
 
-// New: Cleanup old rooms every hour
-setInterval(() => {
-  const now = Date.now();
-  const oneHour = 60 * 60 * 1000;
-  for (const code of [...rooms.keys()]) { // Copy to avoid modification during iteration
-    const room = rooms.get(code);
-    if (now - room.last_activity > oneHour && room.clients.size === 0) {
-      rooms.delete(code);
-      console.log(`Cleaned up inactive room ${code}`);
-    }
-  }
-  saveRooms();
-}, 3600000);
-
 // Server-side ping to detect dead connections
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
@@ -476,9 +425,8 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
       return;
     }
-    let data;
     try {
-      data = JSON.parse(message);
+      const data = JSON.parse(message);
       // New: Validate incoming data structure
       const validation = validateMessage(data);
       if (!validation.valid) {
@@ -556,10 +504,6 @@ wss.on('connection', (ws, req) => {
             return;
           }
         }
-      }
-      // Update last_activity on any message (except ping/pong)
-      if (!['ping', 'pong'].includes(data.type) && data.code && rooms.has(data.code)) {
-        rooms.get(data.code).last_activity = Date.now();
       }
       if (data.type === 'connect') {
         clientId = data.clientId || uuidv4();
@@ -685,23 +629,21 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        const roomTotpSecret = rooms.get(code)?.totpSecret;
-        if (roomTotpSecret && !rooms.get(code).validated_clients.has(clientId)) {
-          if (!data.totpCode) {
-            ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
-            return;
-          }
+        const roomTotpSecret = totpSecrets.get(code);
+        if (roomTotpSecret && !data.totpCode) {
+          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+          return;
+        }
+        if (roomTotpSecret && data.totpCode) {
           const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
           if (!isValid) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
             incrementFailure(clientIp);
             return;
           }
-          rooms.get(code).validated_clients.add(clientId);
-          saveRooms();
         }
         if (!rooms.has(code)) {
-          rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2, validated_clients: new Set(), totpSecret: null, last_activity: Date.now() });
+          rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
           logStats({ clientId, username, code, event: 'init', totalClients: 1 });
         } else {
@@ -760,7 +702,14 @@ wss.on('connection', (ws, req) => {
         ws.code = code;
         ws.username = username;
         broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
-        saveRooms();
+      }
+      if (data.type === 'check-totp') {
+        if (totpSecrets.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+        } else {
+          ws.send(JSON.stringify({ type: 'totp-not-required', code: data.code }));
+        }
+        return;
       }
       if (data.type === 'set-max-clients') {
         if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
@@ -768,14 +717,12 @@ wss.on('connection', (ws, req) => {
           room.maxClients = Math.min(data.maxClients, 10);
           broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
-          saveRooms();
         }
       }
       if (data.type === 'set-totp') {
         if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          rooms.get(data.code).totpSecret = data.secret;
+          totpSecrets.set(data.code, data.secret);
           broadcast(data.code, { type: 'totp-enabled', code: data.code });
-          saveRooms();
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
         }
@@ -928,7 +875,7 @@ wss.on('connection', (ws, req) => {
             if (data.feature === 'service' && !features.enableService) {
               rooms.clear();
               randomCodes.clear();
-              saveRooms(); // Clear persistent rooms
+              totpSecrets.clear(); // Clear TOTP secrets on service disable
             }
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
@@ -947,7 +894,7 @@ wss.on('connection', (ws, req) => {
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data ? data.code : undefined }));
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
       incrementFailure(clientIp);
     }
   });
@@ -978,6 +925,7 @@ wss.on('connection', (ws, req) => {
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
         randomCodes.delete(ws.code);
+        totpSecrets.delete(ws.code); // Delete TOTP secret on room close
         broadcast(ws.code, {
           type: 'client-disconnected',
           clientId: ws.clientId,
@@ -1003,7 +951,6 @@ wss.on('connection', (ws, req) => {
           isInitiator
         });
       }
-      saveRooms();
     }
   });
 });

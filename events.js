@@ -156,7 +156,7 @@ socket.onerror = (error) => {
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
 };
 socket.onclose = () => {
-  console.error('WebSocket closed, attempting reconnect');
+  console.log('WebSocket closed');
   showStatusMessage('Lost connection, reconnecting...');
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
@@ -260,6 +260,20 @@ socket.onmessage = async (event) => {
         button2.disabled = false;
         token = ''; // Clear token
         refreshToken = ''; // Clear refresh token
+      } else if (message.message.includes('Service has been disabled by admin.')) {
+        showStatusMessage(message.message);
+        // Reset UI to initial state
+        initialContainer.classList.remove('hidden');
+        usernameContainer.classList.add('hidden');
+        connectContainer.classList.add('hidden');
+        codeDisplayElement.classList.add('hidden');
+        copyCodeButton.classList.add('hidden');
+        chatContainer.classList.add('hidden');
+        newSessionButton.classList.add('hidden');
+        maxClientsContainer.classList.add('hidden');
+        inputContainer.classList.add('hidden');
+        messages.classList.remove('waiting');
+        socket.close();
       } else {
         showStatusMessage(message.message);
       }
@@ -478,9 +492,7 @@ socket.onmessage = async (event) => {
       console.log('Received features update:', features);
       setTimeout(updateFeaturesUI, 0);
       if (!features.enableService) {
-        showStatusMessage('Service disabled by admin. Disconnecting...');
-        token = '';
-        refreshToken = '';
+        showStatusMessage(`Service disabled by admin. Disconnecting...`);
         socket.close();
       }
     }
@@ -488,6 +500,7 @@ socket.onmessage = async (event) => {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
 };
+
 // New: Function to refresh access token proactively
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
@@ -498,6 +511,7 @@ function refreshAccessToken() {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
   }
 }
+
 // New: Function to trigger PFS key rotation (called by initiator on new join)
 async function triggerRatchet() {
   if (!isInitiator) return;

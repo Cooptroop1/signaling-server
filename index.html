@@ -48,7 +48,6 @@
  margin-bottom: 0.5rem;
  border-radius: 0.5rem;
  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
- position: relative;
  height: 296px;
  background-color: #fce7f3;
  background-image: none;
@@ -527,8 +526,15 @@
  text-align: center;
  margin-bottom: 1rem;
  }
+ .messages-wrapper {
+ position: relative;
+ margin-bottom: 0.5rem;
+ border-radius: 0.5rem;
+ box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+ height: 296px;
+ }
  .user-dots {
- position: sticky;
+ position: absolute;
  top: 5px;
  left: 5px;
  display: flex;
@@ -641,7 +647,8 @@
  <button id="button2" aria-label="Join a random chat">Random Chat</button>
  <button id="copyCodeButton" aria-label="Copy chat code">Copy Code</button>
  </div>
- <div class="border border-gray-300 p-4 h-64 overflow-y-auto mb-4 rounded" id="messages" role="log" aria-live="polite">
+ <div class="messages-wrapper">
+ <div id="messages" role="log" aria-live="polite"></div>
  <div id="userDots" class="user-dots"></div>
  </div>
  <div class="input-container hidden">

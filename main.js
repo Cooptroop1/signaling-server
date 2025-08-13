@@ -1036,6 +1036,16 @@ async function startVoiceRecording() {
       clearInterval(voiceTimerInterval);
     };
     mediaRecorder.start(1000); // Collect data every 1 second
+    document.getElementById('voiceButton').classList.add('recording');
+    document.getElementById('voiceTimer').style.display = 'flex';
+    let time = 0;
+    voiceTimerInterval = setInterval(() => {
+      time++;
+      document.getElementById('voiceTimer').textContent = `00:${time < 10 ? '0' + time : time}`;
+      if (time >= 30) {
+        stopVoiceRecording();
+      }
+    }, 1000);
   } catch (error) {
     console.error('Error starting voice recording:', error);
     showStatusMessage('Failed to access microphone for voice message.');

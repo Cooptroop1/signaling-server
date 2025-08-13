@@ -82,6 +82,16 @@ if (typeof window !== 'undefined') {
       ['deriveKey', 'deriveBits']
     );
   })();
+  let cycleTimeout;
+  function triggerCycle() {
+    if (cycleTimeout) clearTimeout(cycleTimeout);
+    cornerLogo.classList.add('wink');
+    cycleTimeout = setTimeout(() => {
+      cornerLogo.classList.remove('wink');
+    }, 500);
+    setTimeout(triggerCycle, 60000);
+  }
+  setTimeout(triggerCycle, 60000);
 }
 // Event handlers and listeners
 helpText.addEventListener('click', () => {
@@ -405,7 +415,7 @@ socket.onmessage = async (event) => {
         showStatusMessage('Failed to update encryption key for PFS.');
       }
     }
-    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice') && useRelay) {
+    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
       const encrypted = message.type === 'message' ? message.encryptedContent : message.encryptedData;
@@ -450,6 +460,13 @@ socket.onmessage = async (event) => {
         audio.setAttribute('alt', 'Received voice message');
         audio.addEventListener('click', () => createAudioModal(payload.data, 'messageInput'));
         messageDiv.appendChild(audio);
+      } else if (payload.type === 'file') {
+        const link = document.createElement('a');
+        link.href = payload.data;
+        link.download = payload.filename || 'file';
+        link.textContent = `Download ${payload.filename || 'file'}`;
+        link.setAttribute('alt', 'Received file');
+        messageDiv.appendChild(link);
       } else {
         messageDiv.appendChild(document.createTextNode(sanitizeMessage(payload.content)));
       }
@@ -717,10 +734,20 @@ document.getElementById('sendButton').onclick = () => {
 document.getElementById('imageButton').onclick = () => {
   document.getElementById('imageInput')?.click();
 };
+document.getElementById('fileButton').onclick = () => {
+  document.getElementById('fileInput')?.click();
+};
 document.getElementById('imageInput').onchange = (event) => {
   const file = event.target.files[0];
   if (file) {
     sendMedia(file, 'image');
+    event.target.value = '';
+  }
+};
+document.getElementById('fileInput').onchange = (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    sendMedia(file, 'file');
     event.target.value = '';
   }
 };
@@ -855,6 +882,7 @@ cornerLogo.addEventListener('click', () => {
   processedMessageIds.clear();
   showStatusMessage('Chat history cleared locally.');
 });
+
 // Function to update user dots
 function updateDots() {
   const userDots = document.getElementById('userDots');

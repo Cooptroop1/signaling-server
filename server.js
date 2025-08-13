@@ -1,4 +1,3 @@
-// server.js
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -78,12 +77,13 @@ server.on('request', (req, res) => {
 });
 
 const wss = new WebSocket.Server({ server });
-const rooms = new Map();
+const rooms = {};
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const FEATURES_FILE = path.join('/data', 'features.json'); // Persistent disk
 const STATS_FILE = path.join('/data', 'stats.json'); // New: For aggregated stats
+const ROOMS_FILE = path.join('/data', 'rooms.json'); // New: For persistent rooms
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -94,7 +94,7 @@ const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
-const totpSecrets = new Map(); // New: Store TOTP secrets per room code
+
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -155,6 +155,28 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 
+// New: Load persistent rooms
+if (fs.existsSync(ROOMS_FILE)) {
+  try {
+    const persistedRooms = JSON.parse(fs.readFileSync(ROOMS_FILE, 'utf8'));
+    for (const [code, roomData] of Object.entries(persistedRooms)) {
+      rooms[code] = {
+        initiator: roomData.initiator,
+        clients: new Map(),
+        maxClients: roomData.maxClients,
+        validated_clients: new Set(roomData.validated_clients || []),
+        totpSecret: roomData.totpSecret || null,
+        last_activity: roomData.last_activity || Date.now()
+      };
+    }
+    console.log('Loaded persistent rooms:', Object.keys(rooms));
+  } catch (err) {
+    console.error('Error loading rooms file:', err);
+  }
+} else {
+  fs.writeFileSync(ROOMS_FILE, JSON.stringify({}));
+}
+
 // New: Aggregated stats structure { daily: { "YYYY-MM-DD": { "users": number, "connections": number } } }
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
 
@@ -168,6 +190,22 @@ function saveFeatures() {
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
+}
+
+// New: Function to save rooms
+function saveRooms() {
+  const persistedRooms = {};
+  for (const [code, room] of Object.entries(rooms)) {
+    persistedRooms[code] = {
+      initiator: room.initiator,
+      maxClients: room.maxClients,
+      validated_clients: Array.from(room.validated_clients),
+      totpSecret: room.totpSecret,
+      last_activity: room.last_activity
+    };
+  }
+  fs.writeFileSync(ROOMS_FILE, JSON.stringify(persistedRooms));
+  console.log('Saved rooms to disk');
 }
 
 // Validate base32 secret
@@ -372,12 +410,25 @@ if (fs.existsSync(LOG_FILE)) {
 // Auto-cleanup for random codes every hour
 setInterval(() => {
   randomCodes.forEach(code => {
-    if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
+    if (!rooms[code] || Object.keys(rooms[code].clients).length === 0) {
       randomCodes.delete(code);
     }
   });
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
+}, 3600000);
+
+// New: Cleanup old rooms every hour
+setInterval(() => {
+  const now = Date.now();
+  const oneHour = 3600 * 1000;
+  for (const code in rooms) {
+    if (now - rooms[code].last_activity > oneHour && Object.keys(rooms[code].clients).length === 0) {
+      delete rooms[code];
+      console.log(`Cleaned up inactive room ${code}`);
+    }
+  }
+  saveRooms();
 }, 3600000);
 
 // Server-side ping to detect dead connections
@@ -392,11 +443,11 @@ const pingInterval = setInterval(() => {
 // Cleanup expired revoked tokens
 setInterval(() => {
   const now = Date.now();
-  revokedTokens.forEach((expiry, token) => {
+  for (const [token, expiry] of revokedTokens.entries()) {
     if (expiry < now) {
       revokedTokens.delete(token);
     }
-  });
+  }
   console.log(`Cleaned up expired revoked tokens. Remaining: ${revokedTokens.size}`);
 }, 3600000);
 
@@ -504,6 +555,10 @@ wss.on('connection', (ws, req) => {
           }
         }
       }
+      // Update last_activity on any message (except ping/pong)
+      if (data.type not in ['ping', 'pong'] and data.code and rooms[data.code]) {
+        rooms[data.code].last_activity = Date.now();
+      }
       if (data.type === 'connect') {
         clientId = data.clientId || uuidv4();
         ws.clientId = clientId;
@@ -571,9 +626,9 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'public-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const initiatorWs = room.clients.get(room.initiator)?.ws;
+        if (rooms[data.code]) {
+          const room = rooms[data.code];
+          const initiatorWs = room.clients[room.initiator]?.ws;
           if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
             initiatorWs.send(JSON.stringify({ type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
           }
@@ -581,9 +636,9 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'encrypted-room-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const targetWs = room.clients.get(data.targetId)?.ws;
+        if (rooms[data.code]) {
+          const room = rooms[data.code];
+          const targetWs = room.clients[data.targetId]?.ws;
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
             targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, clientId: data.clientId, code: data.code }));
           }
@@ -591,9 +646,9 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'new-room-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const targetWs = room.clients.get(data.targetId)?.ws;
+        if (rooms[data.code]) {
+          const room = rooms[data.code];
+          const targetWs = room.clients[data.targetId]?.ws;
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
             targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code }));
           }
@@ -628,114 +683,105 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        const roomTotpSecret = totpSecrets.get(code);
-        if (roomTotpSecret && !data.totpCode) {
-          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
-          return;
-        }
-        if (roomTotpSecret && data.totpCode) {
-          const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
-          if (!isValid) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
-            incrementFailure(clientIp);
-            return;
-          }
-        }
-        if (!rooms.has(code)) {
-          rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
+        let room = rooms[code];
+        if (!room) {
+          room = {
+            initiator: clientId,
+            clients: {},
+            maxClients: 2,
+            validated_clients: new Set(),
+            totpSecret: null,
+            last_activity: Date.now()
+          };
+          rooms[code] = room;
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
           logStats({ clientId, username, code, event: 'init', totalClients: 1 });
         } else {
-          const room = rooms.get(code);
-          if (room.clients.size >= room.maxClients) {
+          const totpSecret = room.totpSecret;
+          if (totpSecret && !room.validated_clients.has(clientId)) {
+            if (!data.totpCode) {
+              ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+              return;
+            }
+            const isValid = otplib.authenticator.check(data.totpCode, totpSecret);
+            if (!isValid) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
+              incrementFailure(clientIp);
+              return;
+            }
+            room.validated_clients.add(clientId);
+            saveRooms();
+          }
+          if (room.clients.length >= room.maxClients) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
             incrementFailure(clientIp);
             return;
           }
-          if (room.clients.has(clientId)) {
-            if (room.clients.get(clientId).username === username) {
-              const oldWs = room.clients.get(clientId).ws;
-              setTimeout(() => {
-                oldWs.close();
-              }, 1000);
-              room.clients.delete(clientId);
-              broadcast(code, {
-                type: 'client-disconnected',
-                clientId,
-                totalClients: room.clients.size,
-                isInitiator: clientId === room.initiator
-              });
-            } else {
-              ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
-              incrementFailure(clientIp);
-              return;
-            }
-          } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
+          if (room.clients[clientId] && room.clients[clientId].username !== username) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          } else if (Object.values(room.clients).some(c => c.username === username && c.clientId !== clientId)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
             incrementFailure(clientIp);
             return;
           }
-          if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
+          if (!room.clients[room.initiator] && room.initiator !== clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
             incrementFailure(clientIp);
             return;
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
-          logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
-          if (room.clients.size > 0) {
-            room.clients.forEach((_, existingClientId) => {
-              if (existingClientId !== clientId) {
-                logStats({
-                  clientId,
-                  targetId: existingClientId,
-                  code,
-                  event: 'webrtc-connection',
-                  totalClients: room.clients.size + 1
-                });
-              }
-            });
-          }
+          logStats({ clientId, username, code, event: 'join', totalClients: Object.keys(room.clients).length + 1 });
+          Object.keys(room.clients).forEach(existingClientId => {
+            if (existingClientId !== clientId) {
+              logStats({
+                clientId,
+                targetId: existingClientId,
+                code,
+                event: 'webrtc-connection',
+                totalClients: Object.keys(room.clients).length + 1
+              });
+            }
+          });
         }
-        const room = rooms.get(code);
-        room.clients.set(clientId, { ws, username });
+        room.clients[clientId] = { ws, username };
         ws.code = code;
         ws.username = username;
-        broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
-      }
-      if (data.type === 'check-totp') {
-        if (totpSecrets.has(data.code)) {
-          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
-        } else {
-          ws.send(JSON.stringify({ type: 'totp-not-required', code: data.code }));
-        }
-        return;
+        room.last_activity = Date.now();
+        broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: Object.keys(room.clients).length });
       }
       if (data.type === 'set-max-clients') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          const room = rooms.get(data.code);
+        if (rooms[data.code] && data.clientId === rooms[data.code].initiator) {
+          const room = rooms[data.code];
           room.maxClients = Math.min(data.maxClients, 10);
-          broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
-          logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
+          room.last_activity = Date.now();
+          broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: Object.keys(room.clients).length });
+          logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: Object.keys(room.clients).length });
+          saveRooms();
         }
       }
       if (data.type === 'set-totp') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          totpSecrets.set(data.code, data.secret);
+        if (rooms[data.code] && data.clientId === rooms[data.code].initiator) {
+          rooms[data.code].totpSecret = data.secret;
+          rooms[data.code].last_activity = Date.now();
           broadcast(data.code, { type: 'totp-enabled', code: data.code });
+          saveRooms();
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
         }
       }
       if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const target = room.clients.get(data.targetId);
+        if (rooms[data.code]) {
+          const room = rooms[data.code];
+          const target = room.clients[data.targetId];
           if (target && target.ws.readyState === WebSocket.OPEN) {
             console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
-            target.ws.send(JSON.stringify({ ...data, clientId }));
+            target.ws.send(JSON.stringify({ ...data, clientId: data.clientId }));
           } else {
             console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
           }
+          room.last_activity = Date.now();
         }
       }
       if (data.type === 'submit-random') {
@@ -744,12 +790,12 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        if (data.code && !rooms.get(data.code)?.clients.size) {
+        if (data.code && !rooms[data.code] || Object.keys(rooms[data.code].clients).length === 0) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code.', code: data.code }));
           incrementFailure(clientIp);
           return;
         }
-        if (rooms.get(data.code)?.initiator === data.clientId) {
+        if (rooms[data.code].initiator === data.clientId) {
           randomCodes.add(data.code);
           broadcastRandomCodes();
         } else {
@@ -787,19 +833,20 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        if (!rooms.has(data.code)) {
+        if (!rooms[data.code]) {
           ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
           incrementFailure(clientIp);
           return;
         }
-        const room = rooms.get(data.code);
+        const room = rooms[data.code];
         const senderId = data.clientId;
-        if (!room.clients.has(senderId)) {
+        if (!room.clients[senderId]) {
           ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
           incrementFailure(clientIp);
           return;
         }
-        room.clients.forEach((client, clientId) => {
+        room.last_activity = Date.now();
+        for (const [clientId, client] of Object.entries(room.clients)) {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
               type: data.type.replace('relay-', ''),
@@ -812,7 +859,7 @@ wss.on('connection', (ws, req) => {
               signature: data.signature // Forward the signature
             }));
           }
-        });
+        }
         console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
       }
       if (data.type === 'get-stats') {
@@ -820,9 +867,9 @@ wss.on('connection', (ws, req) => {
           const now = new Date();
           const day = now.toISOString().slice(0, 10);
           let totalClients = 0;
-          rooms.forEach(room => {
-            totalClients += room.clients.size;
-          });
+          for (const room of Object.values(rooms)) {
+            totalClients += Object.keys(room.clients).length;
+          }
           // Compute aggregates
           const weekly = computeAggregate(7);
           const monthly = computeAggregate(30);
@@ -838,7 +885,7 @@ wss.on('connection', (ws, req) => {
             yearlyUsers: yearly.users,
             yearlyConnections: yearly.connections,
             allTimeUsers: allTimeUsers.size,
-            activeRooms: rooms.size,
+            activeRooms: Object.keys(rooms).length,
             totalClients: totalClients
           }));
         } else {
@@ -872,9 +919,9 @@ wss.on('connection', (ws, req) => {
               }
             });
             if (data.feature === 'service' && !features.enableService) {
-              rooms.clear();
+              rooms = {};
               randomCodes.clear();
-              totpSecrets.clear(); // Clear TOTP secrets on service disable
+              saveRooms();
             }
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
@@ -915,16 +962,17 @@ wss.on('connection', (ws, req) => {
         }
       }
     }
-    if (ws.code && rooms.has(ws.code)) {
-      const room = rooms.get(ws.code);
+    if (ws.code && rooms[ws.code]) {
+      const room = rooms[ws.code];
       const isInitiator = ws.clientId === room.initiator;
-      room.clients.delete(ws.clientId);
+      delete room.clients[ws.clientId];
       rateLimits.delete(ws.clientId);
-      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
-      if (room.clients.size === 0 || isInitiator) {
-        rooms.delete(ws.code);
+      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: Object.keys(room.clients).length, isInitiator });
+      room.last_activity = Date.now();
+      if (Object.keys(room.clients).length === 0) {
+        delete rooms[ws.code];
         randomCodes.delete(ws.code);
-        totpSecrets.delete(ws.code); // Delete TOTP secret on room close
+        saveRooms();
         broadcast(ws.code, {
           type: 'client-disconnected',
           clientId: ws.clientId,
@@ -933,22 +981,23 @@ wss.on('connection', (ws, req) => {
         });
       } else {
         if (isInitiator) {
-          const newInitiator = room.clients.keys().next().value;
+          const newInitiator = Object.keys(room.clients)[0];
           if (newInitiator) {
             room.initiator = newInitiator;
             broadcast(ws.code, {
               type: 'initiator-changed',
               newInitiator,
-              totalClients: room.clients.size
+              totalClients: Object.keys(room.clients).length
             });
           }
         }
         broadcast(ws.code, {
           type: 'client-disconnected',
           clientId: ws.clientId,
-          totalClients: room.clients.size,
+          totalClients: Object.keys(room.clients).length,
           isInitiator
         });
+        saveRooms();
       }
     }
   });
@@ -1133,13 +1182,12 @@ function computeAggregate(days) {
 }
 
 function broadcast(code, message) {
-  const room = rooms.get(code);
-  if (room) {
-    room.clients.forEach(client => {
+  if (rooms[code]) {
+    for (const client of Object.values(rooms[code].clients)) {
       if (client.ws.readyState === WebSocket.OPEN) {
         client.ws.send(JSON.stringify(message));
       }
-    });
+    }
   }
 }
 

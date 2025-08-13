@@ -1081,3 +1081,33 @@ function stopVoiceRecording() {
     mediaRecorder.stop();
   }
 }
+
+async function triggerRatchet() {
+  if (!isInitiator || connectedClients.size <= 1) return;
+  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  let success = 0;
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) {
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      continue;
+    }
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      success++;
+    } catch (error) {
+      console.error(`Error sending new room key to ${cId}:`, error);
+    }
+  }
+  if (success > 0) {
+    roomMaster = newRoomMaster;
+    signingKey = await deriveSigningKey(roomMaster);
+    console.log('PFS ratchet complete, new roomMaster set.');
+  } else {
+    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+  }
+}

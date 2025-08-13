@@ -1,4 +1,3 @@
-
 // server.js
 const WebSocket = require('ws');
 const fs = require('fs');
@@ -46,14 +45,14 @@ server.on('request', (req, res) => {
       const nonce = crypto.randomBytes(16).toString('base64');
       // Update CSP to use nonce and allow specific inline style hash
       let updatedCSP = "default-src 'self'; " +
-      `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-inline'; ` +
-      `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog=' 'unsafe-inline'; ` +
-      "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-      "media-src 'self' blob: data:; " +
-      "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;";
+        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
+        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "media-src 'self' blob: data:; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;";
       // Replace the meta CSP in the HTML
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
-      `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       // Add nonce to inline <script> and <style> tags
       data = data.replace(/<script>/g, `<script nonce="${nonce}">`);
       data = data.replace(/<style>/g, `<style nonce="${nonce}">`);
@@ -205,155 +204,155 @@ function validateMessage(data) {
 
   // Type-specific validation
   switch (data.type) {
-  case 'connect':
-    if (!data.clientId || typeof data.clientId !== 'string') {
-      return { valid: false, error: 'connect: clientId required as string' };
-    }
-    break;
-  case 'refresh-token':
-    if (!data.refreshToken || typeof data.refreshToken !== 'string') {
-      return { valid: false, error: 'refresh-token: refreshToken required as string' };
-    }
-    break;
-  case 'public-key':
-    if (!data.publicKey || !isValidBase64(data.publicKey)) {
-      return { valid: false, error: 'public-key: invalid publicKey format' };
-    }
-    if (!data.code) {
-      return { valid: false, error: 'public-key: code required' };
-    }
-    break;
-  case 'encrypted-room-key':
-    if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
-      return { valid: false, error: 'encrypted-room-key: invalid encryptedKey' };
-    }
-    if (!data.iv || !isValidBase64(data.iv)) {
-      return { valid: false, error: 'encrypted-room-key: invalid iv' };
-    }
-    if (!data.targetId || typeof data.targetId !== 'string') {
-      return { valid: false, error: 'encrypted-room-key: targetId required as string' };
-    }
-    if (!data.code) {
-      return { valid: false, error: 'encrypted-room-key: code required' };
-    }
-    break;
-  case 'new-room-key':
-    if (!data.encrypted || !isValidBase64(data.encrypted)) {
-      return { valid: false, error: 'new-room-key: invalid encrypted' };
-    }
-    if (!data.iv || !isValidBase64(data.iv)) {
-      return { valid: false, error: 'new-room-key: invalid iv' };
-    }
-    if (!data.targetId || typeof data.targetId !== 'string') {
-      return { valid: false, error: 'new-room-key: targetId required as string' };
-    }
-    if (!data.code) {
-      return { valid: false, error: 'new-room-key: code required' };
-    }
-    break;
-  case 'join':
-    if (!data.code) {
-      return { valid: false, error: 'join: code required' };
-    }
-    if (!data.username) {
-      return { valid: false, error: 'join: username required' };
-    }
-    if (data.totpCode && typeof data.totpCode !== 'string') {
-      return { valid: false, error: 'join: totpCode must be a string if provided' };
-    }
-    break;
-  case 'check-totp':
-    if (!data.code) {
-      return { valid: false, error: 'check-totp: code required' };
-    }
-    break;
-  case 'set-max-clients':
-    if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
-      return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
-    }
-    if (!data.code) {
-      return { valid: false, error: 'set-max-clients: code required' };
-    }
-    break;
-  case 'offer':
-  case 'answer':
-    if (!data.offer && !data.answer) {
-      return { valid: false, error: `${data.type}: offer or answer required` };
-    }
-    if (!data.targetId || typeof data.targetId !== 'string') {
-      return { valid: false, error: `${data.type}: targetId required as string` };
-    }
-    if (!data.code) {
-      return { valid: false, error: `${data.type}: code required` };
-    }
-    break;
-  case 'candidate':
-    if (!data.candidate) {
-      return { valid: false, error: 'candidate: candidate required' };
-    }
-    if (!data.targetId || typeof data.targetId !== 'string') {
-      return { valid: false, error: 'candidate: targetId required as string' };
-    }
-    if (!data.code) {
-      return { valid: false, error: 'candidate: code required' };
-    }
-    break;
-  case 'submit-random':
-    if (!data.code) {
-      return { valid: false, error: 'submit-random: code required' };
-    }
-    break;
-  case 'get-random-codes':
-    // No additional fields needed
-    break;
-  case 'relay-message':
-  case 'relay-image':
-  case 'relay-voice':
-  case 'relay-file':
-    const payloadField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
-    if (!data[payloadField] || !isValidBase64(data[payloadField])) {
-      return { valid: false, error: `${data.type}: invalid ${payloadField}` };
-    }
-    if (!data.iv || !isValidBase64(data.iv)) {
-      return { valid: false, error: `${data.type}: invalid iv` };
-    }
-    if (!data.salt || !isValidBase64(data.salt)) {
-      return { valid: false, error: `${data.type}: invalid salt` };
-    }
-    if (!data.signature || !isValidBase64(data.signature)) {
-      return { valid: false, error: `${data.type}: invalid signature` };
-    }
-    if (!data.messageId || typeof data.messageId !== 'string') {
-      return { valid: false, error: `${data.type}: messageId required as string` };
-    }
-    if (!data.code) {
-      return { valid: false, error: `${data.type}: code required` };
-    }
-    break;
-  case 'get-stats':
-  case 'get-features':
-  case 'toggle-feature':
-    if (!data.secret || typeof data.secret !== 'string') {
-      return { valid: false, error: `${data.type}: secret required as string` };
-    }
-    if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
-      return { valid: false, error: 'toggle-feature: feature required as string' };
-    }
-    break;
-  case 'ping':
-  case 'pong':
-    // No additional fields needed
-    break;
-  case 'set-totp':
-    if (!data.code) {
-      return { valid: false, error: 'set-totp: code required' };
-    }
-    if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
-      return { valid: false, error: 'set-totp: valid base32 secret required' };
-    }
-    break;
-  default:
-    return { valid: false, error: 'Unknown message type' };
+    case 'connect':
+      if (!data.clientId || typeof data.clientId !== 'string') {
+        return { valid: false, error: 'connect: clientId required as string' };
+      }
+      break;
+    case 'refresh-token':
+      if (!data.refreshToken || typeof data.refreshToken !== 'string') {
+        return { valid: false, error: 'refresh-token: refreshToken required as string' };
+      }
+      break;
+    case 'public-key':
+      if (!data.publicKey || !isValidBase64(data.publicKey)) {
+        return { valid: false, error: 'public-key: invalid publicKey format' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'public-key: code required' };
+      }
+      break;
+    case 'encrypted-room-key':
+      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
+        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'encrypted-room-key: invalid iv' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'encrypted-room-key: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'encrypted-room-key: code required' };
+      }
+      break;
+    case 'new-room-key':
+      if (!data.encrypted || !isValidBase64(data.encrypted)) {
+        return { valid: false, error: 'new-room-key: invalid encrypted' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'new-room-key: invalid iv' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'new-room-key: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'new-room-key: code required' };
+      }
+      break;
+    case 'join':
+      if (!data.code) {
+        return { valid: false, error: 'join: code required' };
+      }
+      if (!data.username) {
+        return { valid: false, error: 'join: username required' };
+      }
+      if (data.totpCode && typeof data.totpCode !== 'string') {
+        return { valid: false, error: 'join: totpCode must be a string if provided' };
+      }
+      break;
+    case 'check-totp':
+      if (!data.code) {
+        return { valid: false, error: 'check-totp: code required' };
+      }
+      break;
+    case 'set-max-clients':
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
+        return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'set-max-clients: code required' };
+      }
+      break;
+    case 'offer':
+    case 'answer':
+      if (!data.offer && !data.answer) {
+        return { valid: false, error: `${data.type}: offer or answer required` };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: `${data.type}: targetId required as string` };
+      }
+      if (!data.code) {
+        return { valid: false, error: `${data.type}: code required` };
+      }
+      break;
+    case 'candidate':
+      if (!data.candidate) {
+        return { valid: false, error: 'candidate: candidate required' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'candidate: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'candidate: code required' };
+      }
+      break;
+    case 'submit-random':
+      if (!data.code) {
+        return { valid: false, error: 'submit-random: code required' };
+      }
+      break;
+    case 'get-random-codes':
+      // No additional fields needed
+      break;
+    case 'relay-message':
+    case 'relay-image':
+    case 'relay-voice':
+    case 'relay-file':
+      const payloadField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
+      if (!data[payloadField] || !isValidBase64(data[payloadField])) {
+        return { valid: false, error: `${data.type}: invalid ${payloadField}` };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: `${data.type}: invalid iv` };
+      }
+      if (!data.salt || !isValidBase64(data.salt)) {
+        return { valid: false, error: `${data.type}: invalid salt` };
+      }
+      if (!data.signature || !isValidBase64(data.signature)) {
+        return { valid: false, error: `${data.type}: invalid signature` };
+      }
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: `${data.type}: messageId required as string` };
+      }
+      if (!data.code) {
+        return { valid: false, error: `${data.type}: code required` };
+      }
+      break;
+    case 'get-stats':
+    case 'get-features':
+    case 'toggle-feature':
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: `${data.type}: secret required as string` };
+      }
+      if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
+        return { valid: false, error: 'toggle-feature: feature required as string' };
+      }
+      break;
+    case 'ping':
+    case 'pong':
+      // No additional fields needed
+      break;
+    case 'set-totp':
+      if (!data.code) {
+        return { valid: false, error: 'set-totp: code required' };
+      }
+      if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
+        return { valid: false, error: 'set-totp: valid base32 secret required' };
+      }
+      break;
+    default:
+      return { valid: false, error: 'Unknown message type' };
   }
 
   return { valid: true };

@@ -1,349 +1,341 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
- <meta charset="UTF-8">
- <meta name="viewport" content="width=device-width, initial-scale=1.0">
- <title>Anonomoose Admin Dashboard</title>
- <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'sha256-7rwBwscuTFWF0kdC50SzLSDtn7ntbbhM0aVb4QMm9z8='; style-src 'self' https://cdn.jsdelivr.net 'nonce-randomNonce123'; img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; connect-src 'self' wss://signaling-server-zc6m.onrender.com;">
- <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
- <link rel="icon" type="image/png" href="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f60e.png"/>
- <style>
- body {
- background-color: #000;
- color: #fff;
- min-height: 100vh;
- display: flex;
- justify-content: center;
- align-items: center;
- margin: 0;
- padding-top: 40px;
- }
- .container {
- text-align: center;
- padding: 20px;
- background-color: #fff;
- color: #000;
- border-radius: 10px;
- box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
- max-width: 500px;
- width: 100%;
- }
- #statsDisplay {
- margin-top: 1rem;
- text-align: left;
- font-size: 1rem;
- color: #333;
- }
- #statsDisplay p {
- margin: 0.5rem 0;
- }
- #errorMessage {
- font-size: 1.2rem;
- font-weight: bold;
- color: #e53e3e;
- margin: 1rem 0;
- }
- #featuresContainer {
- margin-top: 2rem;
- text-align: left;
- }
- .feature-toggle {
- display: flex;
- justify-content: space-between;
- align-items: center;
- margin-bottom: 1rem;
- }
- .feature-toggle button {
- background-color: #10b981;
- color: white;
- padding: 0.5rem 1rem;
- border-radius: 0.5rem;
- cursor: pointer;
- }
- .feature-toggle button.off {
- background-color: #ef4444;
- }
- </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anonomoose Admin Dashboard</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'sha256-7rwBwscuTFWF0kdC50SzLSDtn7ntbbhM0aVb4QMm9z8='; style-src 'self' https://cdn.jsdelivr.net 'nonce-randomNonce123'; img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; connect-src 'self' wss://signaling-server-zc6m.onrender.com;">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
+  <link rel="icon" type="image/png" href="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f60e.png"/>
+  <style>
+  body {
+  background-color: #000;
+  color: #fff;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0;
+  padding-top: 40px;
+  }
+  .container {
+  text-align: center;
+  padding: 20px;
+  background-color: #fff;
+  color: #000;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  max-width: 500px;
+  width: 100%;
+  }
+  #statsDisplay {
+  margin-top: 1rem;
+  text-align: left;
+  font-size: 1rem;
+  color: #333;
+  }
+  #statsDisplay p {
+  margin: 0.5rem 0;
+  }
+  #errorMessage {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #e53e3e;
+  margin: 1rem 0;
+  }
+  #featuresContainer {
+  margin-top: 2rem;
+  text-align: left;
+  }
+  .feature-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  }
+  .feature-toggle button {
+  background-color: #10b981;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  }
+  .feature-toggle button.off {
+  background-color: #ef4444;
+  }
+  </style>
 </head>
 <body>
- <div class="container">
- <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">Anonomoose Admin Dashboard</h1>
- <div id="status" class="text-center mb-4 text-gray-600">Enter admin password to view stats</div>
- <input id="adminPassword" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter admin password" aria-describedby="passwordHelp">
- <div id="passwordHelp" class="text-sm text-gray-600 mb-2">Enter the ADMIN_SECRET from your server</div>
- <button id="submitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-4 hover:bg-blue-600 transition-colors" aria-label="Submit admin password">Submit</button>
- <div id="statsDisplay" class="hidden"></div>
- <div id="featuresContainer" class="hidden">
- <h2 class="text-xl font-bold mb-4">Feature Toggles</h2>
- <div class="feature-toggle">
- <span>Service Enabled</span>
- <button id="toggleService" aria-label="Toggle service">Loading...</button>
- </div>
- <div class="feature-toggle">
- <span>Image Messages</span>
- <button id="toggleImages" aria-label="Toggle image messages">Loading...</button>
- </div>
- <div class="feature-toggle">
- <span>Voice Messages</span>
- <button id="toggleVoice" aria-label="Toggle voice messages">Loading...</button>
- </div>
- <div class="feature-toggle">
- <span>Voice Calls</span>
- <button id="toggleVoiceCalls" aria-label="Toggle voice calls">Loading...</button>
- </div>
- <div class="feature-toggle">
- <span>Audio Toggle</span>
- <button id="toggleAudioToggle" aria-label="Toggle audio toggle">Loading...</button>
- </div>
- <div class="feature-toggle">
- <span>Grok Bot</span>
- <button id="toggleGrokBot" aria-label="Toggle Grok bot">Loading...</button>
- </div>
- <div class="feature-toggle">
- <span>Totp Rooms</span>
- <button id="toggleTotp" aria-label="Toggle Totp rooms">Loading...</button>
- </div>
- </div>
- <div class="text-center mt-4">
- <a href="index.html" class="text-blue-500 hover:underline">Back to Chat</a>
- </div>
- </div>
- <script>
- let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
- const statusElement = document.getElementById('status');
- const adminPasswordInput = document.getElementById('adminPassword');
- const submitButton = document.getElementById('submitButton');
- const statsDisplay = document.getElementById('statsDisplay');
- const featuresContainer = document.getElementById('featuresContainer');
- let clientId = Math.random().toString(36).substr(2, 9);
- let token = '';
- let reconnectAttempts = 0;
- const maxReconnectAttempts = 5;
- let lastToggleTime = 0;
- let csrfToken = '';
+  <div class="container">
+  <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">Anonomoose Admin Dashboard</h1>
+  <div id="status" class="text-center mb-4 text-gray-600">Enter admin password to view stats</div>
+  <input id="adminPassword" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter admin password" aria-describedby="passwordHelp">
+  <div id="passwordHelp" class="text-sm text-gray-600 mb-2">Enter the ADMIN_SECRET from your server</div>
+  <button id="submitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-4 hover:bg-blue-600 transition-colors" aria-label="Submit admin password">Submit</button>
+  <div id="statsDisplay" class="hidden"></div>
+  <div id="featuresContainer" class="hidden">
+  <h2 class="text-xl font-bold mb-4">Feature Toggles</h2>
+  <div class="feature-toggle">
+  <span>Service Enabled</span>
+  <button id="toggleService" aria-label="Toggle service">Loading...</button>
+  </div>
+  <div class="feature-toggle">
+  <span>Image Messages</span>
+  <button id="toggleImages" aria-label="Toggle image messages">Loading...</button>
+  </div>
+  <div class="feature-toggle">
+  <span>Voice Messages</span>
+  <button id="toggleVoice" aria-label="Toggle voice messages">Loading...</button>
+  </div>
+  <div class="feature-toggle">
+  <span>Voice Calls</span>
+  <button id="toggleVoiceCalls" aria-label="Toggle voice calls">Loading...</button>
+  </div>
+  <div class="feature-toggle">
+  <span>Audio Toggle</span>
+  <button id="toggleAudioToggle" aria-label="Toggle audio toggle">Loading...</button>
+  </div>
+  <div class="feature-toggle">
+  <span>Grok Bot</span>
+  <button id="toggleGrokBot" aria-label="Toggle Grok bot">Loading...</button>
+  </div>
+  </div>
+  <div class="text-center mt-4">
+  <a href="index.html" class="text-blue-500 hover:underline">Back to Chat</a>
+  </div>
+  </div>
+  <script>
+  let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+  const statusElement = document.getElementById('status');
+  const adminPasswordInput = document.getElementById('adminPassword');
+  const submitButton = document.getElementById('submitButton');
+  const statsDisplay = document.getElementById('statsDisplay');
+  const featuresContainer = document.getElementById('featuresContainer');
+  let clientId = Math.random().toString(36).substr(2, 9);
+  let token = '';
+  let reconnectAttempts = 0;
+  const maxReconnectAttempts = 5;
+  let lastToggleTime = 0;
+  let csrfToken = '';
 
- if (localStorage.getItem('clientId')) {
- clientId = localStorage.getItem('clientId');
- } else {
- localStorage.setItem('clientId', clientId);
- }
+  if (localStorage.getItem('clientId')) {
+    clientId = localStorage.getItem('clientId');
+  } else {
+    localStorage.setItem('clientId', clientId);
+  }
 
- function showStatusMessage(message, duration = 3000) {
- statusElement.textContent = message;
- statusElement.setAttribute('aria-live', 'assertive');
- setTimeout(() => {
- statusElement.textContent = 'Enter admin password to view stats';
- statusElement.setAttribute('aria-live', 'polite');
- }, duration);
- }
+  function showStatusMessage(message, duration = 3000) {
+    statusElement.textContent = message;
+    statusElement.setAttribute('aria-live', 'assertive');
+    setTimeout(() => {
+      statusElement.textContent = 'Enter admin password to view stats';
+      statusElement.setAttribute('aria-live', 'polite');
+    }, duration);
+  }
 
- function fetchStatsAndFeatures() {
- const secret = adminPasswordInput.value.trim();
- if (!secret) {
- showStatusMessage('Please enter the admin password.');
- adminPasswordInput.focus();
- return;
- }
- if (socket.readyState === WebSocket.OPEN && token) {
- statusElement.textContent = 'Fetching server stats and features...';
- socket.send(JSON.stringify({ type: 'get-stats', secret, clientId, token, csrfToken }));
- socket.send(JSON.stringify({ type: 'get-features', secret, clientId, token, csrfToken }));
- } else {
- showStatusMessage('Connecting to server...');
- }
- }
+  function fetchStatsAndFeatures() {
+    const secret = adminPasswordInput.value.trim();
+    if (!secret) {
+      showStatusMessage('Please enter the admin password.');
+      adminPasswordInput.focus();
+      return;
+    }
+    if (socket.readyState === WebSocket.OPEN && token) {
+      statusElement.textContent = 'Fetching server stats and features...';
+      socket.send(JSON.stringify({ type: 'get-stats', secret, clientId, token, csrfToken }));
+      socket.send(JSON.stringify({ type: 'get-features', secret, clientId, token, csrfToken }));
+    } else {
+      showStatusMessage('Connecting to server...');
+    }
+  }
 
- function toggleFeature(feature) {
- const now = Date.now();
- if (now - lastToggleTime < 1000) {
- showStatusMessage('Please wait before toggling again.', 2000);
- return;
- }
- lastToggleTime = now;
- const secret = adminPasswordInput.value.trim();
- if (feature === 'service' && !confirm('Toggling the service will disconnect all users. Continue?')) {
- return;
- }
- if (socket.readyState === WebSocket.OPEN) {
- socket.send(JSON.stringify({ type: 'toggle-feature', feature, secret, clientId, token, csrfToken }));
- } else {
- showStatusMessage('Connection closed. Reconnecting to toggle...');
- }
- }
+  function toggleFeature(feature) {
+    const now = Date.now();
+    if (now - lastToggleTime < 1000) {
+      showStatusMessage('Please wait before toggling again.', 2000);
+      return;
+    }
+    lastToggleTime = now;
+    const secret = adminPasswordInput.value.trim();
+    if (feature === 'service' && !confirm('Toggling the service will disconnect all users. Continue?')) {
+      return;
+    }
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'toggle-feature', feature, secret, clientId, token, csrfToken }));
+    } else {
+      showStatusMessage('Connection closed. Reconnecting to toggle...');
+    }
+  }
 
- socket.onopen = () => {
- console.log('Admin page WebSocket opened');
- if (socket.readyState === WebSocket.OPEN) {
- socket.send(JSON.stringify({ type: 'connect', clientId }));
- }
- reconnectAttempts = 0;
- statusElement.textContent = 'Connected. Enter admin password to view stats.';
- adminPasswordInput.focus();
- };
+  socket.onopen = () => {
+    console.log('Admin page WebSocket opened');
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'connect', clientId }));
+    }
+    reconnectAttempts = 0;
+    statusElement.textContent = 'Connected. Enter admin password to view stats.';
+    adminPasswordInput.focus();
+  };
 
- socket.onmessage = (event) => {
- console.log('Received message:', event.data);
- try {
- const data = JSON.parse(event.data);
- if (data.type === 'connected') {
- token = data.accessToken;
- csrfToken = data.csrfToken;
- console.log('Received token and CSRF:', token, csrfToken);
- statusElement.textContent = 'Connected. Enter admin password to view stats.';
- adminPasswordInput.focus();
- } else if (data.type === 'stats') {
- statsDisplay.innerHTML = '';
- statsDisplay.classList.remove('hidden');
- statusElement.textContent = 'Server stats retrieved.';
- const stats = [
- `Daily Users: ${data.dailyUsers}`,
- `Daily Connections: ${data.dailyConnections}`,
- `Weekly Users: ${data.weeklyUsers}`,
- `Weekly Connections: ${data.weeklyConnections}`,
- `Monthly Users: ${data.monthlyUsers}`,
- `Monthly Connections: ${data.monthlyConnections}`,
- `Yearly Users: ${data.yearlyUsers}`,
- `Yearly Connections: ${data.yearlyConnections}`,
- `All-Time Users: ${data.allTimeUsers}`,
- `Active Rooms: ${data.activeRooms}`,
- `Total Clients: ${data.totalClients}`
- ];
- stats.forEach(stat => {
- const p = document.createElement('p');
- p.textContent = stat;
- statsDisplay.appendChild(p);
- });
- } else if (data.type === 'features') {
- featuresContainer.classList.remove('hidden');
- document.getElementById('toggleService').textContent = data.enableService ? 'On' : 'Off';
- document.getElementById('toggleService').classList.toggle('off', !data.enableService);
- document.getElementById('toggleImages').textContent = data.enableImages ? 'On' : 'Off';
- document.getElementById('toggleImages').classList.toggle('off', !data.enableImages);
- document.getElementById('toggleVoice').textContent = data.enableVoice ? 'On' : 'Off';
- document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
- document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
- document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
- document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
- document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
- document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
- document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
- document.getElementById('toggleTotp').textContent = data.enableTotp ? 'On' : 'Off';
- document.getElementById('toggleTotp').classList.toggle('off', !data.enableTotp);
- if (!data.enableService) {
- statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
- }
- } else if (data.type === 'feature-toggled') {
- const button = document.getElementById(`toggle${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`);
- button.textContent = data.enabled ? 'On' : 'Off';
- button.classList.toggle('off', !data.enabled);
- showStatusMessage(`Feature ${data.feature} toggled to ${data.enabled ? 'On' : 'Off'}`);
- if (data.feature === 'service' && !data.enabled) {
- statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
- } else if (data.feature === 'service' && data.enabled) {
- statusElement.textContent = 'Server stats retrieved.';
- }
- } else if (data.type === 'features-update') {
- document.getElementById('toggleService').textContent = data.enableService ? 'On' : 'Off';
- document.getElementById('toggleService').classList.toggle('off', !data.enableService);
- document.getElementById('toggleImages').textContent = data.enableImages ? 'On' : 'Off';
- document.getElementById('toggleImages').classList.toggle('off', !data.enableImages);
- document.getElementById('toggleVoice').textContent = data.enableVoice ? 'On' : 'Off';
- document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
- document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
- document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
- document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
- document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
- document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
- document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
- document.getElementById('toggleTotp').textContent = data.enableTotp ? 'On' : 'Off';
- document.getElementById('toggleTotp').classList.toggle('off', !data.enableTotp);
- showStatusMessage(`Features updated: ${data.enableService ? 'Service enabled' : 'Service disabled'}`);
- if (!data.enableService) {
- statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
- }
- } else if (data.type === 'error') {
- if (data.message.includes('Service has been disabled by admin.')) {
- statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
- return;
- }
- statsDisplay.innerHTML = '';
- statsDisplay.classList.add('hidden');
- featuresContainer.classList.add('hidden');
- showStatusMessage(data.message || 'Error fetching stats. Please try again.');
- console.error('Server error:', data.message);
- if (data.message.includes('Invalid or expired token')) {
- if (socket.readyState === WebSocket.OPEN) {
- socket.send(JSON.stringify({ type: 'connect', clientId }));
- }
- } else if (data.message.includes('Invalid admin secret')) {
- adminPasswordInput.value = '';
- adminPasswordInput.focus();
- } else if (data.message.includes('Token revoked')) {
- showStatusMessage('Session expired. Reconnecting...');
- token = '';
- socket.close();
- } else if (data.message.includes('Rate limit exceeded')) {
- showStatusMessage('Rate limit exceeded. Retrying in 5 seconds...', 5000);
- setTimeout(() => {
- if (socket.readyState === WebSocket.OPEN && token) {
- fetchStatsAndFeatures();
- }
- }, 5000);
- }
- }
- } catch (error) {
- console.error('Error parsing message:', error);
- showStatusMessage('Error fetching stats. Please try again.');
- statsDisplay.classList.add('hidden');
- featuresContainer.classList.add('hidden');
- }
- };
+  socket.onmessage = (event) => {
+    console.log('Received message:', event.data);
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'connected') {
+        token = data.accessToken;
+        csrfToken = data.csrfToken;
+        console.log('Received token and CSRF:', token, csrfToken);
+        statusElement.textContent = 'Connected. Enter admin password to view stats.';
+        adminPasswordInput.focus();
+      } else if (data.type === 'stats') {
+        statsDisplay.innerHTML = '';
+        statsDisplay.classList.remove('hidden');
+        statusElement.textContent = 'Server stats retrieved.';
+        const stats = [
+          `Daily Users: ${data.dailyUsers}`,
+          `Daily Connections: ${data.dailyConnections}`,
+          `Weekly Users: ${data.weeklyUsers}`,
+          `Weekly Connections: ${data.weeklyConnections}`,
+          `Monthly Users: ${data.monthlyUsers}`,
+          `Monthly Connections: ${data.monthlyConnections}`,
+          `Yearly Users: ${data.yearlyUsers}`,
+          `Yearly Connections: ${data.yearlyConnections}`,
+          `All-Time Users: ${data.allTimeUsers}`,
+          `Active Rooms: ${data.activeRooms}`,
+          `Total Clients: ${data.totalClients}`
+        ];
+        stats.forEach(stat => {
+          const p = document.createElement('p');
+          p.textContent = stat;
+          statsDisplay.appendChild(p);
+        });
+      } else if (data.type === 'features') {
+        featuresContainer.classList.remove('hidden');
+        document.getElementById('toggleService').textContent = data.enableService ? 'On' : 'Off';
+        document.getElementById('toggleService').classList.toggle('off', !data.enableService);
+        document.getElementById('toggleImages').textContent = data.enableImages ? 'On' : 'Off';
+        document.getElementById('toggleImages').classList.toggle('off', !data.enableImages);
+        document.getElementById('toggleVoice').textContent = data.enableVoice ? 'On' : 'Off';
+        document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
+        document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
+        document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
+        document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
+        document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
+        document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
+        document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
+        if (!data.enableService) {
+          statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
+        }
+      } else if (data.type === 'feature-toggled') {
+        const button = document.getElementById(`toggle${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`);
+        button.textContent = data.enabled ? 'On' : 'Off';
+        button.classList.toggle('off', !data.enabled);
+        showStatusMessage(`Feature ${data.feature} toggled to ${data.enabled ? 'On' : 'Off'}`);
+        if (data.feature === 'service' && !data.enabled) {
+          statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
+        } else if (data.feature === 'service' && data.enabled) {
+          statusElement.textContent = 'Server stats retrieved.';
+        }
+      } else if (data.type === 'features-update') {
+        document.getElementById('toggleService').textContent = data.enableService ? 'On' : 'Off';
+        document.getElementById('toggleService').classList.toggle('off', !data.enableService);
+        document.getElementById('toggleImages').textContent = data.enableImages ? 'On' : 'Off';
+        document.getElementById('toggleImages').classList.toggle('off', !data.enableImages);
+        document.getElementById('toggleVoice').textContent = data.enableVoice ? 'On' : 'Off';
+        document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
+        document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
+        document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
+        document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
+        document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
+        document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
+        document.getElementById('toggleGrokBot').classList.toggle('off', !data.enableGrokBot);
+        showStatusMessage(`Features updated: ${data.enableService ? 'Service enabled' : 'Service disabled'}`);
+        if (!data.enableService) {
+          statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
+        }
+      } else if (data.type === 'error') {
+        if (data.message.includes('Service has been disabled by admin.')) {
+          statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
+          return;
+        }
+        statsDisplay.innerHTML = '';
+        statsDisplay.classList.add('hidden');
+        featuresContainer.classList.add('hidden');
+        showStatusMessage(data.message || 'Error fetching stats. Please try again.');
+        console.error('Server error:', data.message);
+        if (data.message.includes('Invalid or expired token')) {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'connect', clientId }));
+          }
+        } else if (data.message.includes('Invalid admin secret')) {
+          adminPasswordInput.value = '';
+          adminPasswordInput.focus();
+        } else if (data.message.includes('Token revoked')) {
+          showStatusMessage('Session expired. Reconnecting...');
+          token = '';
+          socket.close();
+        } else if (data.message.includes('Rate limit exceeded')) {
+          showStatusMessage('Rate limit exceeded. Retrying in 5 seconds...', 5000);
+          setTimeout(() => {
+            if (socket.readyState === WebSocket.OPEN && token) {
+              fetchStatsAndFeatures();
+            }
+          }, 5000);
+        }
+      }
+    } catch (error) {
+      console.error('Error parsing message:', error);
+      showStatusMessage('Error fetching stats. Please try again.');
+      statsDisplay.classList.add('hidden');
+      featuresContainer.classList.add('hidden');
+    }
+  };
 
- socket.onerror = (error) => {
- console.error('WebSocket error:', error);
- showStatusMessage('Connection error. Reconnecting...');
- statsDisplay.classList.add('hidden');
- featuresContainer.classList.add('hidden');
- };
+  socket.onerror = (error) => {
+    console.error('WebSocket error:', error);
+    showStatusMessage('Connection error. Reconnecting...');
+    statsDisplay.classList.add('hidden');
+    featuresContainer.classList.add('hidden');
+  };
 
- socket.onclose = () => {
- console.log('WebSocket closed');
- showStatusMessage('Disconnected. Reconnecting...');
- statsDisplay.classList.add('hidden');
- featuresContainer.classList.add('hidden');
- if (reconnectAttempts >= maxReconnectAttempts) {
- showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
- return;
- }
- const delay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
- reconnectAttempts++;
- setTimeout(() => {
- socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
- socket.onopen = socket.onopen;
- socket.onmessage = socket.onmessage;
- socket.onerror = socket.onerror;
- socket.onclose = socket.onclose;
- }, delay);
- };
+  socket.onclose = () => {
+    console.log('WebSocket closed');
+    showStatusMessage('Disconnected. Reconnecting...');
+    statsDisplay.classList.add('hidden');
+    featuresContainer.classList.add('hidden');
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
+      return;
+    }
+    const delay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
+    reconnectAttempts++;
+    setTimeout(() => {
+      socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+      socket.onopen = socket.onopen;
+      socket.onmessage = socket.onmessage;
+      socket.onerror = socket.onerror;
+      socket.onclose = socket.onclose;
+    }, delay);
+  };
 
- submitButton.onclick = () => {
- fetchStatsAndFeatures();
- };
+  submitButton.onclick = () => {
+    fetchStatsAndFeatures();
+  };
 
- adminPasswordInput.addEventListener('keydown', (event) => {
- if (event.key === 'Enter') {
- event.preventDefault();
- fetchStatsAndFeatures();
- }
- });
+  adminPasswordInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      fetchStatsAndFeatures();
+    }
+  });
 
- document.getElementById('toggleService').onclick = () => toggleFeature('service');
- document.getElementById('toggleImages').onclick = () => toggleFeature('images');
- document.getElementById('toggleVoice').onclick = () => toggleFeature('voice');
- document.getElementById('toggleVoiceCalls').onclick = () => toggleFeature('voiceCalls');
- document.getElementById('toggleAudioToggle').onclick = () => toggleFeature('audioToggle');
- document.getElementById('toggleGrokBot').onclick = () => toggleFeature('grokBot');
- document.getElementById('toggleTotp').onclick = () => toggleFeature('totp');
- </script>
+  document.getElementById('toggleService').onclick = () => toggleFeature('service');
+  document.getElementById('toggleImages').onclick = () => toggleFeature('images');
+  document.getElementById('toggleVoice').onclick = () => toggleFeature('voice');
+  document.getElementById('toggleVoiceCalls').onclick = () => toggleFeature('voiceCalls');
+  document.getElementById('toggleAudioToggle').onclick = () => toggleFeature('audioToggle');
+  document.getElementById('toggleGrokBot').onclick = () => toggleFeature('grokBot');
+  </script>
 </body>
 </html>

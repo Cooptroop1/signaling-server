@@ -1,6 +1,3 @@
-// main.js
-// Core logic: peer connections, message sending, handling offers, etc.
-// Global vars for dynamic TURN creds from server
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -89,11 +86,10 @@ async function sendMedia(file, type) {
     base64 = canvas.toDataURL('image/jpeg', quality);
     URL.revokeObjectURL(img.src);
   } else if (type === 'voice') {
-    const mp3Blob = await encodeAudioToMp3(file);
     base64 = await new Promise(resolve => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(mp3Blob);
+      reader.readAsDataURL(file);
     });
   } else { // type === 'file'
     base64 = await new Promise(resolve => {
@@ -1020,13 +1016,14 @@ async function startVoiceRecording() {
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream);
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
     voiceChunks = [];
     mediaRecorder.ondataavailable = (event) => {
       voiceChunks.push(event.data);
     };
     mediaRecorder.onstop = async () => {
-      const audioBlob = new Blob(voiceChunks, { type: 'audio/webm' });
+      const audioBlob = new Blob(voiceChunks, { type: mimeType });
       sendMedia(audioBlob, 'voice');
       stream.getTracks().forEach(track => track.stop());
       mediaRecorder = null;

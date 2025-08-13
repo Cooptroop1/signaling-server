@@ -1,4 +1,128 @@
+
 let reconnectAttempts = 0;
+const imageRateLimits = new Map();
+const voiceRateLimits = new Map();
+let globalMessageRate = { count: 0, startTime: Date.now() };
+function generateCode() {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const randomBytes = window.crypto.getRandomValues(new Uint8Array(16));
+  let result = '';
+  for (let i = 0; i < 16; i++) {
+    result += chars[randomBytes[i] % chars.length];
+    if (i % 4 === 3 && i < 15) result += '-';
+  }
+  return result;
+}
+let code = generateCode();
+let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9); // Prefer cookie
+let username = '';
+let isInitiator = false;
+let isConnected = false;
+let maxClients = 2;
+let totalClients = 0;
+let peerConnections = new Map();
+let dataChannels = new Map();
+let connectionTimeouts = new Map();
+let retryCounts = new Map();
+const maxRetries = 2;
+let candidatesQueues = new Map();
+let processedMessageIds = new Set();
+let usernames = new Map();
+const messageRateLimits = new Map();
+let codeSentToRandom = false;
+let useRelay = false;
+let token = '';
+let refreshToken = '';
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true }; // Global features state
+let keyPair;
+let roomMaster;
+let signingKey; // New: Cached signing key for HMAC
+let remoteAudios = new Map();
+let refreshingToken = false;
+let signalingQueue = new Map();
+let connectedClients = new Set(); // New: Track connected client IDs for ratchet
+let clientPublicKeys = new Map(); // New: Initiator stores public keys of clients
+let initiatorPublic; // New: Non-initiators store initiator's public key
+// Declare UI variables globally
+let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
+if (typeof window !== 'undefined') {
+  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+  console.log('WebSocket created');
+  if (getCookie('clientId')) {
+    clientId = getCookie('clientId');
+  } else {
+    setCookie('clientId', clientId, 365);
+  }
+  username = localStorage.getItem('username')?.trim() || '';
+  globalMessageRate.startTime = performance.now();
+  statusElement = document.getElementById('status');
+  codeDisplayElement = document.getElementById('codeDisplay');
+  copyCodeButton = document.getElementById('copyCodeButton');
+  initialContainer = document.getElementById('initialContainer');
+  usernameContainer = document.getElementById('usernameContainer');
+  connectContainer = document.getElementById('connectContainer');
+  chatContainer = document.getElementById('chatContainer');
+  newSessionButton = document.getElementById('newSessionButton');
+  maxClientsContainer = document.getElementById('maxClientsContainer');
+  inputContainer = document.querySelector('.input-container');
+  messages = document.getElementById('messages');
+  cornerLogo = document.getElementById('cornerLogo');
+  button2 = document.getElementById('button2');
+  helpText = document.getElementById('helpText');
+  helpModal = document.getElementById('helpModal');
+  (async () => {
+    keyPair = await window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-384' },
+      true,
+      ['deriveKey', 'deriveBits']
+    );
+  })();
+  let cycleTimeout;
+  function triggerCycle() {
+    if (cycleTimeout) clearTimeout(cycleTimeout);
+    cornerLogo.classList.add('wink');
+    cycleTimeout = setTimeout(() => {
+      cornerLogo.classList.remove('wink');
+    }, 500);
+    setTimeout(triggerCycle, 60000);
+  }
+  setTimeout(triggerCycle, 60000);
+}
+// Event handlers and listeners
+helpText.addEventListener('click', () => {
+  helpModal.classList.add('active');
+  helpModal.focus();
+});
+helpModal.addEventListener('click', () => {
+  helpModal.classList.remove('active');
+  helpText.focus();
+});
+helpModal.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    helpModal.classList.remove('active');
+    helpText.focus();
+  }
+});
+const addUserText = document.getElementById('addUserText');
+const addUserModal = document.getElementById('addUserModal');
+addUserText.addEventListener('click', () => {
+  if (isInitiator) {
+    addUserModal.classList.add('active');
+    addUserModal.focus();
+  }
+});
+addUserModal.addEventListener('click', () => {
+  addUserModal.classList.remove('active');
+  addUserText.focus();
+});
+addUserModal.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    addUserModal.classList.remove('active');
+    addUserText.focus();
+  }
+});
+let pendingCode = null;
+let pendingJoin = null;
 const maxReconnectAttempts = 5; // Limit reconnect attempts
 let refreshFailures = 0;
 let refreshBackoff = 1000; // Initial backoff 1s
@@ -208,15 +332,13 @@ socket.onmessage = async (event) => {
         // New: Periodic ratchet timer (every 5 minutes)
         setInterval(triggerRatchet, 5 * 60 * 1000);
       } else {
-        const publicKey = await exportPublicKey(keyPair.privateKey);
+        const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
       updateMaxClientsUI();
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
-      initializeMaxClientsUI();
-      updateFeaturesUI();
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
@@ -262,8 +384,6 @@ socket.onmessage = async (event) => {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
       }
-      initializeMaxClientsUI();
-      updateFeaturesUI();
     }
     if (message.type === 'max-clients') {
       maxClients = Math.min(message.maxClients, 10);

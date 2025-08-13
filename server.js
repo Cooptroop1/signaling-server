@@ -873,7 +873,11 @@ wss.on('connection', (ws, req) => {
  features[featureKey] = !features[featureKey];
  saveFeatures();
  const timestamp = new Date().toISOString();
+ try {
  fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
+ } catch (err) {
+ console.error('Error appending to log file:', err);
+ }
  ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
  // Send features-update to all clients, error only to non-admins
  wss.clients.forEach(client => {
@@ -982,7 +986,11 @@ function restrictRate(ws) {
  rateLimits.set(ws.clientId, rateLimit);
  if (rateLimit.count > 50) {
  console.warn(`Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages in 60s`);
+ try {
  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages\n`);
+ } catch (err) {
+ console.error('Error appending to log file:', err);
+ }
  return false;
  }
  return true;
@@ -1002,7 +1010,11 @@ function restrictIpRate(ip, action) {
  ipRateLimits.set(key, rateLimit);
  if (rateLimit.count > 5) {
  console.warn(`IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count} in 60s`);
+ try {
  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count}\n`);
+ } catch (err) {
+ console.error('Error appending to log file:', err);
+ }
  return false;
  }
  return true;
@@ -1018,7 +1030,11 @@ function restrictIpDaily(ip, action) {
  ipDailyLimits.set(key, dailyLimit);
  if (dailyLimit.count > 100) {
  console.warn(`Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count} in day ${day}`);
+ try {
  fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count}\n`);
+ } catch (err) {
+ console.error('Error appending to log file:', err);
+ }
  return false;
  }
  return true;
@@ -1042,13 +1058,12 @@ function incrementFailure(ip) {
  ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
  const timestamp = new Date().toISOString();
  const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
- fs.appendFileSync(LOG_FILE, banLogEntry, (err) => {
- if (err) {
- console.error('Error appending ban log:', err);
- } else {
+ try {
+ fs.appendFileSync(LOG_FILE, banLogEntry);
  console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+ } catch (err) {
+ console.error('Error appending ban log:', err);
  }
- });
  ipFailureCounts.delete(hashedIp); // Reset failure count after ban
  }
 }
@@ -1094,11 +1109,11 @@ function logStats(data) {
  }
  }
  const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
- fs.appendFileSync(LOG_FILE, logEntry, (err) => {
- if (err) {
+ try {
+ fs.appendFileSync(LOG_FILE, logEntry);
+ } catch (err) {
  console.error('Error appending to log file:', err);
  }
- });
 }
 
 function updateLogFile() {
@@ -1108,14 +1123,12 @@ function updateLogFile() {
  const connectionCount = dailyConnections.get(day)?.size || 0;
  const allTimeUserCount = allTimeUsers.size;
  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
- 
- fs.appendFileSync(LOG_FILE, logEntry, (err) => {
- if (err) {
- console.error('Error writing to log file:', err);
- } else {
+ try {
+ fs.appendFileSync(LOG_FILE, logEntry);
  console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
+ } catch (err) {
+ console.error('Error writing to log file:', err);
  }
- });
  // New: Update aggregated stats
  if (!aggregatedStats.daily) aggregatedStats.daily = {};
  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };

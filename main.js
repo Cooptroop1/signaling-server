@@ -401,6 +401,13 @@ function setupDataChannel(dataChannel, targetId) {
       audio.setAttribute('alt', 'Received voice message');
       audio.addEventListener('click', () => createAudioModal(data.data, 'messageInput'));
       messageDiv.appendChild(audio);
+    } else if (data.type === 'file') {
+      const link = document.createElement('a');
+      link.href = data.data;
+      link.download = data.filename || 'file';
+      link.textContent = `Download ${data.filename || 'file'}`;
+      link.setAttribute('alt', 'Received file');
+      messageDiv.appendChild(link);
     } else {
       messageDiv.appendChild(document.createTextNode(sanitizeMessage(data.content)));
     }

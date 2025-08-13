@@ -28,6 +28,14 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
 
 // Add HTTP request handler to serve static files with nonce injection
 server.on('request', (req, res) => {
+  // Redirect HTTP to HTTPS in production
+  const proto = req.headers['x-forwarded-proto'];
+  if (proto && proto !== 'https') {
+    res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
+    res.end();
+    return;
+  }
+
   // Add HSTS header to all responses
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
@@ -224,7 +232,7 @@ function validateMessage(data) {
       break;
     case 'encrypted-room-key':
       if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
-        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey' };
+        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey format' };
       }
       if (!data.iv || !isValidBase64(data.iv)) {
         return { valid: false, error: 'encrypted-room-key: invalid iv' };

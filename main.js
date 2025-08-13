@@ -19,8 +19,7 @@ let pendingTotpSecret = null; // New: For delaying set-totp until after init
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
-    voice: ['audio/webm', 'audio/ogg'],
-    file: [] // For arbitrary files, validate on server/client as needed
+    voice: ['audio/webm', 'audio/ogg']
   };
   // Check if feature is enabled before proceeding
   if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
@@ -34,7 +33,7 @@ async function sendMedia(file, type) {
     return;
   }
   if (file.size > 5 * 1024 * 1024) {
-    showStatusMessage(`Error: File size exceeds 5MB limit.`);
+    showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
@@ -395,13 +394,6 @@ function setupDataChannel(dataChannel, targetId) {
       audio.setAttribute('alt', 'Received voice message');
       audio.addEventListener('click', () => createAudioModal(data.data, 'messageInput'));
       messageDiv.appendChild(audio);
-    } else if (data.type === 'file') {
-      const link = document.createElement('a');
-      link.href = data.data;
-      link.download = data.filename || 'file';
-      link.textContent = `Download ${data.filename || 'file'}`;
-      link.setAttribute('alt', 'Received file');
-      messageDiv.appendChild(link);
     } else {
       messageDiv.appendChild(document.createTextNode(sanitizeMessage(data.content)));
     }
@@ -794,7 +786,7 @@ function updateFeaturesUI() {
   const grokButton = document.getElementById('grokButton');
   if (imageButton) {
     imageButton.classList.toggle('hidden', !features.enableImages);
-    imageButton.title = features.enableImages ? 'Send Image' : 'Images disabled by admin';
+    imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
   }
   if (voiceButton) {
     voiceButton.classList.toggle('hidden', !features.enableVoice);

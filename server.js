@@ -1,4 +1,3 @@
-
 // server.js
 const WebSocket = require('ws');
 const fs = require('fs');
@@ -54,17 +53,18 @@ server.on('request', (req, res) => {
       const nonce = crypto.randomBytes(16).toString('base64');
       // Update CSP to use nonce and allow specific inline style hash
       let updatedCSP = "default-src 'self'; " +
-        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
-        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-        "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai;";
+      `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+      `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
+      "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+      "media-src 'self' blob: data:; " +
+      "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
+      "object-src 'none'; base-uri 'self';";
       // Replace the meta CSP in the HTML
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
-        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+      `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       // Add nonce to inline <script> and <style> tags
-      data = data.replace(/<script>/g, `<script nonce="${nonce}">`);
-      data = data.replace(/<style>/g, `<style nonce="${nonce}">`);
+      data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
+      data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
       // Handle secure cookies for sessions (clientId)
       let clientIdFromCookie;
       const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {

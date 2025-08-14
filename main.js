@@ -87,7 +87,9 @@ async function sendMedia(file, type) {
     canvas.width = width;
     canvas.height = height;
     ctx.drawImage(img, 0, 0, width, height);
-    base64 = canvas.toDataURL('image/jpeg', quality);
+    // Check for WebP support and use it if available
+    const format = isWebPSupported() ? 'image/webp' : 'image/jpeg';
+    base64 = canvas.toDataURL(format, quality);
     URL.revokeObjectURL(img.src);
   } else if (type === 'voice') {
     base64 = await new Promise(resolve => {
@@ -1132,4 +1134,13 @@ async function triggerRatchet() {
   } else {
     console.warn('PFS ratchet failed: No keys available to send to any clients.');
   }
+}
+
+// New: Function to check WebP support
+function isWebPSupported() {
+  const elem = document.createElement('canvas');
+  if (!!(elem.getContext && elem.getContext('2d'))) {
+    return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
+  }
+  return false;
 }

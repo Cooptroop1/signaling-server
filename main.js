@@ -1,5 +1,3 @@
-
-
 // main.js
 // Core logic: peer connections, message sending, handling offers, etc.
 let turnUsername = '';
@@ -19,6 +17,8 @@ let pendingTotpSecret = null; // New: For delaying set-totp until after init
 let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
+// New: Message counter for ratchet triggering
+let messageCount = 0;
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -161,6 +161,11 @@ async function sendMedia(file, type) {
   messages.scrollTop = 0;
   processedMessageIds.add(messageId);
   document.getElementById(`${type}Button`)?.focus();
+  // Increment message count and check for ratchet
+  messageCount++;
+  if (isInitiator && messageCount % 100 === 0) {
+    triggerRatchet();
+  }
 }
 
 async function startPeerConnection(targetId, isOfferer) {
@@ -551,6 +556,16 @@ async function sendMessage(content) {
       messageInput?.focus();
       return;
     }
+    // New: Check for /ratchet command
+    if (content === '/ratchet' && isInitiator) {
+      triggerRatchet();
+      showStatusMessage('Key ratchet triggered manually.');
+      const messageInput = document.getElementById('messageInput');
+      messageInput.value = '';
+      messageInput.style.height = '2.5rem';
+      messageInput?.focus();
+      return;
+    }
     const messageId = generateMessageId();
     const sanitizedContent = sanitizeMessage(content);
     const timestamp = Date.now();
@@ -586,6 +601,11 @@ async function sendMessage(content) {
     messageInput.value = '';
     messageInput.style.height = '2.5rem';
     messageInput?.focus();
+    // Increment message count and check for ratchet
+    messageCount++;
+    if (isInitiator && messageCount % 100 === 0) {
+      triggerRatchet();
+    }
   } else {
     showStatusMessage('Error: No connections or username not set.');
     document.getElementById('messageInput')?.focus();

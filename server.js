@@ -86,14 +86,14 @@ server.on('request', (req, res) => {
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
         "object-src 'none'; base-uri 'self';";
       // Replace the meta CSP in the HTML
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       // Add nonce to inline <script> and <style> tags
-      data = data.toString().replace(/<script>/g, `<script nonce="${nonce}">`);
-      data = data.toString().replace(/<style>/g, `<style nonce="${nonce}">`);
+      data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
+      data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
       // Handle secure cookies for sessions (clientId)
       let clientIdFromCookie;
       const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
@@ -412,7 +412,7 @@ setInterval(async () => {
       await redisClient.sRem('randomCodes', code);
     }
   }
-  broadcastRandomCodes();
+  await broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
 
@@ -460,8 +460,9 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
       return;
     }
+    let data;
     try {
-      const data = JSON.parse(message);
+      data = JSON.parse(message);
       // New: Validate incoming data structure
       const validation = validateMessage(data);
       if (!validation.valid) {
@@ -852,7 +853,6 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        // Use pub/sub for relay broadcast
         await broadcast(data.code, {
           type: data.type.replace('relay-', ''),
           messageId: data.messageId,
@@ -871,11 +871,11 @@ wss.on('connection', (ws, req) => {
           const day = now.toISOString().slice(0, 10);
           let activeRooms = 0;
           let totalClients = 0;
-          // Scan for room keys (pattern '*', but for production use keys carefully)
           let cursor = 0;
           do {
-            const [nextCursor, keys] = await redisClient.scan(cursor, { MATCH: '[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}', COUNT: 100 });
-            cursor = parseInt(nextCursor);
+            const result = await redisClient.scan(cursor, { MATCH: '[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}', COUNT: 100 });
+            cursor = result.cursor;
+            const keys = result.keys;
             activeRooms += keys.length;
             for (const key of keys) {
               const clientsJson = await redisClient.hGet(key, 'clients');
@@ -950,8 +950,7 @@ wss.on('connection', (ws, req) => {
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
-      incrementFailure(clientIp);
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' })); // Removed data.code as it's out of scope
     }
   });
   ws.on('close', async () => {

@@ -92,8 +92,8 @@ server.on('request', (req, res) => {
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       // Add nonce to inline <script> and <style> tags
-      data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
-      data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
+      data = data.toString().replace(/<script>/g, `<script nonce="${nonce}">`);
+      data = data.toString().replace(/<style/g, `<style nonce="${nonce}">`);
       // Handle secure cookies for sessions (clientId)
       let clientIdFromCookie;
       const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
@@ -950,7 +950,7 @@ wss.on('connection', (ws, req) => {
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' })); // Removed data.code as it's out of scope
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.' })); // Removed data.code
     }
   });
   ws.on('close', async () => {

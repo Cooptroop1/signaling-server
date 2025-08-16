@@ -201,8 +201,7 @@ socket.onmessage = async (event) => {
       refreshBackoff = 1000;
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingJoin) {
-        const publicKey = await exportPublicKey(keyPair.publicKey);
-        socket.send(JSON.stringify({ type: 'join', ...pendingJoin, publicKey, token }));
+        socket.send(JSON.stringify({ type: 'join', ...pendingJoin, token }));
         pendingJoin = null;
       }
       processSignalingQueue();
@@ -300,8 +299,7 @@ socket.onmessage = async (event) => {
         showTotpSecretModal(pendingTotpSecret.display);
         pendingTotpSecret = null;
       }
-      const publicKey = await exportPublicKey(keyPair.publicKey);
-      socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       return;
     }
     if (message.type === 'totp-enabled') {
@@ -316,6 +314,7 @@ socket.onmessage = async (event) => {
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${window.isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
       connectedClients.add(clientId);
+      clientPublicKeys.set(clientId, await exportPublicKey(keyPair.publicKey));
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (window.isInitiator) {
@@ -349,7 +348,7 @@ socket.onmessage = async (event) => {
         usernames.set(message.clientId, message.username);
       }
       connectedClients.add(message.clientId);
-      if (message.publicKey) clientPublicKeys.set(message.clientId, message.publicKey);
+      clientPublicKeys.set(message.clientId, message.publicKey);
       updateMaxClientsUI();
       if (window.isInitiator && message.clientId !== clientId) {
         console.log(`Initiator starting peer connection with new client ${message.clientId}`);
@@ -873,7 +872,6 @@ cornerLogo.addEventListener('click', () => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('DOM loaded, initializing maxClients UI');
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
@@ -914,14 +912,14 @@ function setupWaitingForJoin(codeParam) {
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN && token) {
-        socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
+        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       } else {
         pendingJoin = { code, clientId, username };
         if (socket.readyState !== WebSocket.OPEN) {
           socket.addEventListener('open', () => {
-            console.log('WebSocket opened, sending check-totp for existing chat');
+            console.log('WebSocket opened, sending join for existing chat');
             if (token) {
-              socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
+              socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
               pendingJoin = null;
             }
           }, { once: true });
@@ -934,14 +932,14 @@ function setupWaitingForJoin(codeParam) {
     codeDisplayElement.classList.remove('hidden');
     copyCodeButton.classList.remove('hidden');
     if (socket.readyState === WebSocket.OPEN && token) {
-      socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
     } else {
       pendingJoin = { code, clientId, username };
       if (socket.readyState !== WebSocket.OPEN) {
         socket.addEventListener('open', () => {
-          console.log('WebSocket opened, sending check-totp for existing chat');
+          console.log('WebSocket opened, sending join for existing chat');
           if (token) {
-            socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
+            socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
             pendingJoin = null;
           }
         }, { once: true });
@@ -949,9 +947,4 @@ function setupWaitingForJoin(codeParam) {
     }
     document.getElementById('messageInput')?.focus();
   }
-}
-
-async function joinWithTotp(code, totpCode) {
-  const publicKey = await exportPublicKey(keyPair.publicKey);
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, publicKey, token }));
 }

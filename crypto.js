@@ -26,208 +26,131 @@ async function importPublicKey(base64) {
   );
 }
 
+async function encrypt(text, master) {
+  const salt = window.crypto.getRandomValues(new Uint8Array(16));
+  const hkdfKey = await window.crypto.subtle.importKey(
+    'raw',
+    master,
+    { name: 'HKDF' },
+    false,
+    ['deriveKey']
+  );
+  const derivedKey = await window.crypto.subtle.deriveKey(
+    { name: 'HKDF', salt, info: new Uint8Array(0), hash: 'SHA-256' },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(text);
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    derivedKey,
+    encoded
+  );
+  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv), salt: arrayBufferToBase64(salt) };
+}
+
+async function decrypt(encrypted, iv, salt, master) {
+  const hkdfKey = await window.crypto.subtle.importKey(
+    'raw',
+    master,
+    { name: 'HKDF' },
+    false,
+    ['deriveKey']
+  );
+  const derivedKey = await window.crypto.subtle.deriveKey(
+    { name: 'HKDF', salt: base64ToArrayBuffer(salt), info: new Uint8Array(0), hash: 'SHA-256' },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  const decoded = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+    derivedKey,
+    base64ToArrayBuffer(encrypted)
+  );
+  return new TextDecoder().decode(decoded);
+}
+
+async function encryptBytes(key, data) {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    data
+  );
+  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
+}
+
+async function decryptBytes(key, encrypted, iv) {
+  return window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+    key,
+    base64ToArrayBuffer(encrypted)
+  );
+}
+
 async function deriveSharedKey(privateKey, publicKey) {
   const sharedBits = await window.crypto.subtle.deriveBits(
     { name: 'ECDH', public: publicKey },
     privateKey,
     256
   );
-  return new Uint8Array(sharedBits);
+  return await window.crypto.subtle.importKey(
+    "raw",
+    sharedBits,
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
 
-class DoubleRatchet {
-  constructor(isAlice, sharedKey, remoteRatchetPub) {
-    this.isAlice = isAlice;
-    this.rootKey = sharedKey;
-    this.sendChainKey = null;
-    this.recvChainKey = null;
-    this.sendCount = 0;
-    this.recvCount = 0;
-    this.prevSendCount = 0;
-    this.ratchetKeyPair = null;
-    this.remoteRatchetPub = remoteRatchetPub;
-    this.skippedMessages = {};
-    this.maxSkip = 1000;
-
-    this.ratchetKeyPair = this.generateDHKeyPair();
-
-    if (isAlice) {
-      this.dhRatchet(remoteRatchetPub);
-    }
-  }
-
-  async generateDHKeyPair() {
-    return await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
-      true,
-      ['deriveBits']
-    );
-  }
-
-  async dh(privateKey, publicKey) {
-    return await window.crypto.subtle.deriveBits(
-      { name: 'ECDH', public: publicKey },
-      privateKey,
-      256
-    );
-  }
-
-  async hmac(key, data) {
-    const cryptoKey = await window.crypto.subtle.importKey(
-      'raw',
-      key,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    return await window.crypto.subtle.sign('HMAC', cryptoKey, data);
-  }
-
-  async kdf_rk(rk, dh_out) {
-    const temp = await this.hmac(rk, dh_out);
-    const new_rk = await this.hmac(temp, new Uint8Array([0x01]));
-    const ck = await this.hmac(temp, new Uint8Array([0x02]));
-    return [new Uint8Array(new_rk), new Uint8Array(ck)];
-  }
-
-  async kdf_ck(ck) {
-    const new_ck = await this.hmac(ck, new Uint8Array([0x01]));
-    const mk = await this.hmac(ck, new Uint8Array([0x02]));
-    return [new Uint8Array(new_ck), new Uint8Array(mk)];
-  }
-
-  async dhRatchet(remotePub) {
-    this.prevSendCount = this.sendCount;
-    this.sendCount = 0;
-    this.recvCount = 0;
-    this.remoteRatchetPub = remotePub;
-
-    const dh_out = await this.dh(this.ratchetKeyPair.privateKey, this.remoteRatchetPub);
-
-    let new_rk, new_ck;
-    if (this.isAlice) {
-      [new_rk, new_ck] = await this.kdf_rk(this.rootKey, dh_out);
-      this.recvChainKey = new_ck;
-      this.sendChainKey = new_ck; // initial
-    } else {
-      [new_rk, new_ck] = await this.kdf_rk(this.rootKey, dh_out);
-      this.sendChainKey = new_ck;
-      this.recvChainKey = new_ck;
-    }
-    this.rootKey = new_rk;
-
-    this.ratchetKeyPair = await this.generateDHKeyPair();
-
-    const dh_out2 = await this.dh(this.ratchetKeyPair.privateKey, this.remoteRatchetPub);
-    [this.rootKey, this.sendChainKey] = await this.kdf_rk(this.rootKey, dh_out2);
-  }
-
-  async ratchetEncrypt(plaintext) {
-    if (this.sendChainKey === null) {
-      this.dhRatchet(this.remoteRatchetPub); // initial if not
-    }
-    const [new_send_ck, mk] = await this.kdf_ck(this.sendChainKey);
-    this.sendChainKey = new_send_ck;
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const header = {
-      dh: await exportPublicKey(this.ratchetKeyPair.publicKey),
-      pn: this.prevSendCount,
-      n: this.sendCount
-    };
-    this.sendCount += 1;
-    const headerBytes = new TextEncoder().encode(JSON.stringify(header));
-    const key = await window.crypto.subtle.importKey(
-      'raw',
-      mk,
-      'AES-GCM',
-      false,
-      ['encrypt']
-    );
-    const encrypted = await window.crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv, additionalData: headerBytes },
-      key,
-      new TextEncoder().encode(plaintext)
-    );
-    return {
-      header,
-      ciphertext: arrayBufferToBase64(encrypted),
-      iv: arrayBufferToBase64(iv)
-    };
-  }
-
-  async ratchetDecrypt(header, ciphertext, iv) {
-    let plaintext = this.trySkippedMessageKeys(header, ciphertext, iv);
-    if (plaintext) return plaintext;
-
-    if (header.dh !== await exportPublicKey(this.remoteRatchetPub)) {
-      this.skipMessageKeys(header.pn);
-      this.dhRatchet(await importPublicKey(header.dh));
-    }
-
-    this.skipMessageKeys(header.n);
-    const [new_recv_ck, mk] = await this.kdf_ck(this.recvChainKey);
-    this.recvChainKey = new_recv_ck;
-    this.recvCount += 1;
-
-    const headerBytes = new TextEncoder().encode(JSON.stringify(header));
-    const key = await window.crypto.subtle.importKey(
-      'raw',
-      mk,
-      'AES-GCM',
-      false,
-      ['decrypt']
-    );
-    const decrypted = await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv), additionalData: headerBytes },
-      key,
-      base64ToArrayBuffer(ciphertext)
-    );
-    return new TextDecoder().decode(decrypted);
-  }
-
-  async trySkippedMessageKeys(header, ciphertext, iv) {
-    const key = `${await exportPublicKey(this.remoteRatchetPub)}-${header.n}`;
-    if (this.skippedMessages[key]) {
-      const mk = this.skippedMessages[key];
-      delete this.skippedMessages[key];
-      const headerBytes = new TextEncoder().encode(JSON.stringify(header));
-      const keyObj = await window.crypto.subtle.importKey(
-        'raw',
-        mk,
-        'AES-GCM',
-        false,
-        ['decrypt']
-      );
-      const decrypted = await window.crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: base64ToArrayBuffer(iv), additionalData: headerBytes },
-        keyObj,
-        base64ToArrayBuffer(ciphertext)
-      );
-      return new TextDecoder().decode(decrypted);
-    }
-    return null;
-  }
-
-  async skipMessageKeys(until) {
-    if (this.recvCount + this.maxSkip < until) {
-      throw new Error('Too many skipped messages');
-    }
-    if (this.recvChainKey !== null) {
-      while (this.recvCount < until) {
-        const [new_recv_ck, mk] = await this.kdf_ck(this.recvChainKey);
-        this.recvChainKey = new_recv_ck;
-        const key = `${await exportPublicKey(this.remoteRatchetPub)}-${this.recvCount}`;
-        this.skippedMessages[key] = mk;
-        this.recvCount += 1;
-      }
-    }
-  }
+async function encryptRaw(key, data) {
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(data); // Encode string to bytes
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encoded
+  );
+  return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
 }
 
-async function generateTotpSecret() {
-  return otplib.authenticator.generateSecret(32); // Changed to 32 characters
+async function signMessage(signingKey, data) {
+  const encoded = new TextEncoder().encode(data);
+  return arrayBufferToBase64(await window.crypto.subtle.sign(
+    { name: 'HMAC' },
+    signingKey,
+    encoded
+  ));
 }
 
-function generateTotpUri(roomCode, secret) {
-  return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
+async function verifyMessage(signingKey, signature, data) {
+  const encoded = new TextEncoder().encode(data);
+  return await window.crypto.subtle.verify(
+    { name: 'HMAC' },
+    signingKey,
+    base64ToArrayBuffer(signature),
+    encoded
+  );
+}
+
+async function deriveSigningKey(master) {
+  const hkdfKey = await window.crypto.subtle.importKey(
+    'raw',
+    master,
+    { name: 'HKDF' },
+    false,
+    ['deriveKey']
+  );
+  return await window.crypto.subtle.deriveKey(
+    { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
+    hkdfKey,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
 }

@@ -3,6 +3,7 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
+  base64 = base64.replace(/%2F/g, '/').replace(/%2B/g, '+').replace(/%3D/g, '='); // Fix URL-encoded base64
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -99,7 +100,13 @@ async function deriveSharedKey(privateKey, publicKey) {
     privateKey,
     256
   );
-  return new Uint8Array(sharedBits);
+  return await window.crypto.subtle.importKey(
+    "raw",
+    sharedBits,
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
 
 async function encryptRaw(key, data) {

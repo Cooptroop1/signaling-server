@@ -1,4 +1,3 @@
-// server.js
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -261,11 +260,20 @@ function validateMessage(data) {
       }
       break;
     case 'public-key':
+    case 'public-key-response':
       if (!data.publicKey || !isValidBase64(data.publicKey)) {
-        return { valid: false, error: 'public-key: invalid publicKey format' };
+        return { valid: false, error: `${data.type}: invalid publicKey format` };
       }
       if (!data.code) {
-        return { valid: false, error: 'public-key: code required' };
+        return { valid: false, error: `${data.type}: code required` };
+      }
+      break;
+    case 'request-public-key':
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'request-public-key: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'request-public-key: code required' };
       }
       break;
     case 'encrypted-room-key':
@@ -305,6 +313,9 @@ function validateMessage(data) {
       }
       if (data.totpCode && typeof data.totpCode !== 'string') {
         return { valid: false, error: 'join: totpCode must be a string if provided' };
+      }
+      if (data.publicKey && !isValidBase64(data.publicKey)) {
+        return { valid: false, error: 'join: invalid publicKey format' };
       }
       break;
     case 'check-totp':
@@ -372,6 +383,32 @@ function validateMessage(data) {
       }
       if (!data.code) {
         return { valid: false, error: `${data.type}: code required` };
+      }
+      break;
+    case 'relay-chunk':
+      if (!data.chunk || !isValidBase64(data.chunk)) {
+        return { valid: false, error: 'relay-chunk: invalid chunk' };
+      }
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'relay-chunk: messageId required as string' };
+      }
+      if (!data.relayType || !['relay-image', 'relay-voice', 'relay-file'].includes(data.relayType)) {
+        return { valid: false, error: 'relay-chunk: invalid relayType' };
+      }
+      if (typeof data.index !== 'number' || typeof data.total !== 'number' || data.index >= data.total) {
+        return { valid: false, error: 'relay-chunk: invalid index or total' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'relay-chunk: invalid iv' };
+      }
+      if (!data.salt || !isValidBase64(data.salt)) {
+        return { valid: false, error: 'relay-chunk: invalid salt' };
+      }
+      if (!data.signature || !isValidBase64(data.signature)) {
+        return { valid: false, error: 'relay-chunk: invalid signature' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'relay-chunk: code required' };
       }
       break;
     case 'get-stats':
@@ -499,9 +536,14 @@ sub.on('message', (channel, event) => {
           localClients.clear();
           wss.clients.forEach(ws => ws.close());
         }
-      } else if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') {
+      } else if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-chunk') {
         if (localRooms.has(data.code)) {
-          localBroadcast(data.code, { type: data.type.replace('relay-', ''), messageId: data.messageId, username: data.username, encryptedContent: data.encryptedContent, encryptedData: data.encryptedData, iv: data.iv, salt: data.salt, signature: data.signature }, data.clientId);
+          localBroadcast(data.code, { type: data.type.replace('relay-', ''), messageId: data.messageId, username: data.username, encryptedContent: data.encryptedContent, encryptedData: data.encryptedData, iv: data.iv, salt: data.salt, signature: data.signature, chunk: data.chunk, index: data.index, total: data.total, relayType: data.relayType }, data.clientId);
+        }
+      } else if (data.type === 'request-public-key' || data.type === 'public-key-response') {
+        const targetWs = localClients.get(data.targetId)?.ws;
+        if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+          targetWs.send(JSON.stringify(data));
         }
       }
     } else if (channel === `signal:${instanceId}`) {
@@ -554,8 +596,7 @@ wss.on('connection', (ws, req) => {
       console.error('Error checking ban:', err);
     }
   })();
-  let clientId, code, username;
-  let isAdmin = false;
+  let clientId, code, username, publicKey;
   ws.on('message', async (message) => {
     if (!restrictRate(ws)) {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
@@ -582,7 +623,7 @@ wss.on('connection', (ws, req) => {
           data[key] = validator.escape(validator.trim(data[key]));
         }
       });
-      if (data.type === 'public-key' && data.publicKey) {
+      if (data.type === 'public-key' || data.type === 'public-key-response') {
         if (!isValidBase64(data.publicKey)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format' }));
           await incrementFailure(clientIp);
@@ -708,10 +749,22 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      if (data.type === 'public-key') {
+      if (data.type === 'public-key' || data.type === 'public-key-response') {
         const targetInstance = await redis.hget(`client:${data.clientId}`, 'instance');
         if (targetInstance === instanceId) {
           // Forward local if needed
+        } else {
+          pub.publish(`signal:${targetInstance}`, JSON.stringify(data));
+        }
+        return;
+      }
+      if (data.type === 'request-public-key') {
+        const targetInstance = await redis.hget(`client:${data.targetId}`, 'instance');
+        if (targetInstance === instanceId) {
+          const targetWs = localClients.get(data.targetId)?.ws;
+          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({ type: 'request-public-key', targetId: data.clientId, code: data.code, clientId: data.targetId }));
+          }
         } else {
           pub.publish(`signal:${targetInstance}`, JSON.stringify(data));
         }
@@ -722,7 +775,7 @@ wss.on('connection', (ws, req) => {
         if (targetInstance === instanceId) {
           const targetWs = localClients.get(data.targetId)?.ws;
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, clientId: data.clientId, code: data.code }));
+            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
           }
         } else {
           pub.publish(`signal:${targetInstance}`, JSON.stringify(data));
@@ -759,6 +812,7 @@ wss.on('connection', (ws, req) => {
         code = data.code;
         clientId = data.clientId;
         username = data.username;
+        publicKey = data.publicKey; // Store publicKey from join message
         if (!validateUsername(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username: 1-16 alphanumeric characters.', code: data.code }));
           await incrementFailure(clientIp);
@@ -851,7 +905,7 @@ wss.on('connection', (ws, req) => {
         }
         const clientsKey = `room_clients:${code}`;
         await redis.sadd(clientsKey, clientId);
-        await redis.hset(`client:${clientId}`, 'instance', instanceId, 'username', username);
+        await redis.hset(`client:${clientId}`, 'instance', instanceId, 'username', username, 'publicKey', publicKey || '');
         localClients.get(clientId).username = username;
         localClients.get(clientId).code = code;
         if (!localRooms.has(code)) {
@@ -860,7 +914,7 @@ wss.on('connection', (ws, req) => {
         localRooms.get(code).myClients.add(clientId);
         const total = await redis.scard(clientsKey);
         localRooms.get(code).totalClients = total;
-        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total }));
+        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total, publicKey }));
         if (total > 1 && await redis.sismember('randomCodes', code)) {
           await redis.srem('randomCodes', code);
         }
@@ -1028,6 +1082,27 @@ wss.on('connection', (ws, req) => {
         }
         pub.publish('signaling', JSON.stringify(data));
         console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
+      }
+      if (data.type === 'relay-chunk') {
+        const roomKey = `room:${data.code}`;
+        try {
+          if (!await redis.exists(roomKey)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
+            await incrementFailure(clientIp);
+            return;
+          }
+          if (!await redis.sismember(`room_clients:${data.code}`, data.clientId)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
+            await incrementFailure(clientIp);
+            return;
+          }
+          pub.publish('signaling', JSON.stringify(data));
+          console.log(`Relayed chunk ${data.index}/${data.total} for message ${data.messageId} from ${data.clientId} in code ${data.code}`);
+        } catch (err) {
+          console.error('Error processing relay-chunk:', err);
+          ws.send(JSON.stringify({ type: 'error', message: 'Server error processing chunk.' }));
+          return;
+        }
       }
       if (data.type === 'get-stats') {
         if (data.secret === ADMIN_SECRET) {

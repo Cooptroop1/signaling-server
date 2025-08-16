@@ -321,7 +321,7 @@ async function startPeerConnection(targetId, isOfferer) {
 
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
-  const chunkBuffers = new Map(); // messageId => {chunks: [], total: number, timeout: timer}
+  const chunkBuffers = new Map(); // messageId => {chunks: [], total: number, received: number, timeout: timer}
   dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
     (async () => {
@@ -388,7 +388,11 @@ function setupDataChannel(dataChannel, targetId) {
     }
     if (data.type === 'enc_chunk') {
       // Handle chunked encrypted message
-      const buffer = chunkBuffers.get(data.messageId) || { chunks: new Array(data.total), received: 0, timeout: null };
+      let buffer = chunkBuffers.get(data.messageId);
+      if (!buffer) {
+        buffer = { chunks: new Array(data.total), received: 0, timeout: null };
+        chunkBuffers.set(data.messageId, buffer);
+      }
       buffer.chunks[data.index] = data.chunk;
       buffer.received += 1;
       if (buffer.received === data.total) {
@@ -411,7 +415,6 @@ function setupDataChannel(dataChannel, targetId) {
             chunkBuffers.delete(data.messageId);
           }, 30000); // 30s timeout
         }
-        chunkBuffers.set(data.messageId, buffer);
         return; // Wait for more chunks
       }
     } else if (data.type === 'enc_msg') {

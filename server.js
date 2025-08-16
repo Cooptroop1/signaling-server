@@ -897,6 +897,10 @@ wss.on('connection', (ws, req) => {
         const total = await redis.scard(clientsKey);
         localRooms.get(code).totalClients = total;
         pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total }));
+        // New: Remove from randomCodes if this join makes total >1 (i.e., code "chosen")
+        if (total > 1 && await redis.sismember('randomCodes', code)) {
+          await redis.srem('randomCodes', code);
+        }
       }
       if (data.type === 'check-totp') {
         const totpKey = `totp:${data.code}`;
@@ -983,6 +987,7 @@ wss.on('connection', (ws, req) => {
             const room = JSON.parse(roomStr);
             if (room.initiator === data.clientId) {
               await redis.sadd('randomCodes', data.code);
+              ws.send(JSON.stringify({ type: 'random-submitted', code: data.code }));
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board.', code: data.code }));
               await incrementFailure(clientIp);

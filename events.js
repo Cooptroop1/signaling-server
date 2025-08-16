@@ -33,12 +33,14 @@ let useRelay = false;
 let token = '';
 let refreshToken = '';
 let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
-let keyPair;
 let roomMaster;
 let signingKey;
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
+let connectedClients = new Set();
+let clientPublicKeys = new Map();
+let initiatorPublic;
 let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
 function getCookie(name) {
   const value = `; ${document.cookie}`;

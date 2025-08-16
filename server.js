@@ -10,6 +10,7 @@ const url = require('url');
 const crypto = require('crypto');
 const otplib = require('otplib');
 const Redis = require('ioredis');
+
 // Global error handlers to prevent crashes
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -17,6 +18,7 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
+
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -31,6 +33,7 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   });
   console.log('Using HTTPS server for local development');
 }
+
 // Add HTTP request handler to serve static files with nonce injection
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
@@ -59,10 +62,8 @@ server.on('request', (req, res) => {
         "media-src 'self' blob: data:; " +
         "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
         "object-src 'none'; base-uri 'self';";
-      data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
-      data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
-      data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
-      let clientIdFromCookie;
+      data = data.toString().replace(/<script>/g, `<script nonce="${nonce}">`);
+      res.setHeader('Content-Security-Policy', updatedCSP);
       const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
         const [name, value] = cookie.trim().split('=');
         acc[name] = value;
@@ -80,11 +81,14 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
+
 const wss = new WebSocket.Server({ server });
+
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const FEATURES_FILE = path.join('/data', 'features.json');
 const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
+
 const rateLimits = new Map();
 const allTimeUsers = new Set();
 const ipRateLimits = new Map();
@@ -93,11 +97,14 @@ const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
+
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
+
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
+
 const secretFile = path.join('/data', 'jwt_secret.txt');
 const previousSecretFile = path.join('/data', 'previous_jwt_secret.txt');
 let JWT_SECRET = process.env.JWT_SECRET;
@@ -122,6 +129,7 @@ if (fs.existsSync(secretFile)) {
     console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
   }
 }
+
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
   throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
@@ -130,7 +138,9 @@ const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
 if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
 }
+
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
+
 let features = {
   enableService: true,
   enableImages: true,
@@ -139,6 +149,7 @@ let features = {
   enableAudioToggle: true,
   enableGrokBot: true
 };
+
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const redisOptions = {
   retryStrategy(times) {
@@ -152,10 +163,12 @@ const redisOptions = {
     }
   }
 };
+
 const redis = new Redis(REDIS_URL, redisOptions);
 const pub = new Redis(REDIS_URL, redisOptions);
 const sub = new Redis(REDIS_URL, redisOptions);
 const instanceId = uuidv4();
+
 [redis, pub, sub].forEach(client => {
   client.on('error', (err) => {
     console.error('Redis Client Error:', err);
@@ -167,9 +180,12 @@ const instanceId = uuidv4();
     console.log('Redis client ready');
   });
 });
+
 sub.subscribe('signaling', `signal:${instanceId}`);
+
 const localClients = new Map();
 const localRooms = new Map();
+
 (async () => {
   try {
     let featuresStr = await redis.get('features');
@@ -191,6 +207,7 @@ const localRooms = new Map();
     console.error('Error loading features from Redis:', err);
   }
 })();
+
 function saveFeatures() {
   const cleanFeatures = {
     enableService: features.enableService,
@@ -203,19 +220,24 @@ function saveFeatures() {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(cleanFeatures));
   console.log('Saved features to disk:', cleanFeatures);
 }
+
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
 }
+
 function isValidBase32(str) {
   return /^[A-Z2-7]+$/i.test(str) && str.length >= 16;
 }
+
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   return base64Regex.test(str) && str.length % 4 === 0;
 }
+
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -349,27 +371,25 @@ function validateMessage(data) {
     case 'relay-image':
     case 'relay-voice':
     case 'relay-file':
-      const payloadField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
-      if (!data[payloadField] || !isValidBase64(data[payloadField])) {
-        return { valid: false, error: `${data.type}: invalid ${payloadField}` };
+      if (!data.sender || typeof data.sender !== 'string') {
+        return { valid: false, error: `${data.type}: sender required as string` };
       }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: `${data.type}: invalid iv` };
+      if (typeof data.payloads !== 'object' || data.payloads === null) {
+        return { valid: false, error: `${data.type}: payloads must be an object` };
       }
-      if (!data.salt || !isValidBase64(data.salt)) {
-        return { valid: false, error: `${data.type}: invalid salt` };
-      }
-      if (!data.signature || !isValidBase64(data.signature)) {
-        return { valid: false, error: `${data.type}: invalid signature` };
-      }
-      if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: `${data.type}: messageId required as string` };
+      for (const target in data.payloads) {
+        const p = data.payloads[target];
+        if (typeof p !== 'object' || !p.header || !p.ciphertext || !p.iv || !isValidBase64(p.ciphertext) || !isValidBase64(p.iv)) {
+          return { valid: false, error: `${data.type}: invalid payload for target ${target}` };
+        }
+        // Optional: validate header structure
       }
       if (!data.code) {
         return { valid: false, error: `${data.type}: code required` };
       }
       break;
     case 'relay-chunk':
+      // Similar validation as above, but for chunks
       if (!data.chunk || !isValidBase64(data.chunk)) {
         return { valid: false, error: 'relay-chunk: invalid chunk' };
       }
@@ -421,6 +441,7 @@ function validateMessage(data) {
   }
   return { valid: true };
 }
+
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -430,6 +451,7 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
+
 setInterval(async () => {
   try {
     const codes = await redis.smembers('randomCodes');
@@ -443,6 +465,7 @@ setInterval(async () => {
     console.error('Error in random codes cleanup:', err);
   }
 }, 3600000);
+
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
@@ -450,6 +473,7 @@ const pingInterval = setInterval(() => {
     ws.ping();
   });
 }, 50000);
+
 setInterval(async () => {
   try {
     const now = Date.now();
@@ -465,6 +489,7 @@ setInterval(async () => {
     console.error('Error cleaning revoked tokens:', err);
   }
 }, 3600000);
+
 sub.on('message', (channel, event) => {
   try {
     const data = JSON.parse(event);
@@ -517,7 +542,7 @@ sub.on('message', (channel, event) => {
         }
       } else if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-chunk') {
         if (localRooms.has(data.code)) {
-          localBroadcast(data.code, { type: data.type.replace('relay-', ''), messageId: data.messageId, username: data.username, encryptedContent: data.encryptedContent, encryptedData: data.encryptedData, iv: data.iv, salt: data.salt, signature: data.signature, chunk: data.chunk, index: data.index, total: data.total, relayType: data.relayType }, data.clientId);
+          localBroadcast(data.code, { type: data.type.replace('relay-', ''), sender: data.sender, payloads: data.payloads, chunk: data.chunk, index: data.index, total: data.total, relayType: data.relayType }, data.clientId);
         }
       } else if (data.type === 'request-public-key' || data.type === 'public-key-response') {
         const targetWs = localClients.get(data.targetId)?.ws;
@@ -535,6 +560,7 @@ sub.on('message', (channel, event) => {
     console.error('Error handling pub/sub event:', error);
   }
 });
+
 function localBroadcast(code, msg, excludeClientId = null) {
   const room = localRooms.get(code);
   if (room) {
@@ -548,6 +574,7 @@ function localBroadcast(code, msg, excludeClientId = null) {
     });
   }
 }
+
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -1017,17 +1044,6 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
           return;
         }
-        const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
-        if (payload && payload.length > 9333333) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
-          await incrementFailure(clientIp);
-          return;
-        }
-        if (payload && !isValidBase64(payload)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid base64 format in payload.', code: data.code }));
-          await incrementFailure(clientIp);
-          return;
-        }
         const roomKey = `room:${data.code}`;
         try {
           if (!await redis.exists(roomKey)) {
@@ -1035,26 +1051,18 @@ wss.on('connection', (ws, req) => {
             await incrementFailure(clientIp);
             return;
           }
-        } catch (err) {
-          console.error('Error checking room existence:', err);
-          ws.send(JSON.stringify({ type: 'error', message: 'Server error checking room.' }));
-          return;
-        }
-        const senderId = data.clientId;
-        const clientsKey = `room_clients:${data.code}`;
-        try {
-          if (!await redis.sismember(clientsKey, senderId)) {
+          if (!await redis.sismember(`room_clients:${data.code}`, data.clientId)) {
             ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
             await incrementFailure(clientIp);
             return;
           }
+          pub.publish('signaling', JSON.stringify(data));
+          console.log(`Relayed ${data.type} from ${data.clientId} in code ${data.code} (content not logged for privacy)`);
         } catch (err) {
-          console.error('Error checking membership:', err);
-          ws.send(JSON.stringify({ type: 'error', message: 'Server error checking membership.' }));
+          console.error('Error processing relay:', err);
+          ws.send(JSON.stringify({ type: 'error', message: 'Server error processing relay.' }));
           return;
         }
-        pub.publish('signaling', JSON.stringify(data));
-        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} (content not logged for privacy)`);
       }
       if (data.type === 'relay-chunk') {
         const roomKey = `room:${data.code}`;
@@ -1092,20 +1100,7 @@ wss.on('connection', (ws, req) => {
             const monthly = await computeAggregate(30);
             const yearly = await computeAggregate(365);
             const allTimeUsersCount = await redis.pfcount('allTimeUsers');
-            ws.send(JSON.stringify({
-              type: 'stats',
-              dailyUsers: await redis.scard(`dailyUsers:${day}`) || 0,
-              dailyConnections: await redis.scard(`dailyConnections:${day}`) || 0,
-              weeklyUsers: weekly.users,
-              weeklyConnections: weekly.connections,
-              monthlyUsers: monthly.users,
-              monthlyConnections: monthly.connections,
-              yearlyUsers: yearly.users,
-              yearlyConnections: yearly.connections,
-              allTimeUsers: allTimeUsersCount,
-              activeRooms,
-              totalClients
-            }));
+            ws.send(JSON.stringify({ type: 'stats', dailyUsers: await redis.scard(`dailyUsers:${day}`) || 0, dailyConnections: await redis.scard(`dailyConnections:${day}`) || 0, weeklyUsers: weekly.users, weeklyConnections: weekly.connections, monthlyUsers: monthly.users, monthlyConnections: monthly.connections, yearlyUsers: yearly.users, yearlyConnections: yearly.connections, allTimeUsers: allTimeUsersCount, activeRooms, totalClients }));
           } catch (err) {
             console.error('Error fetching stats:', err);
             ws.send(JSON.stringify({ type: 'error', message: 'Server error fetching stats.' }));
@@ -1230,6 +1225,7 @@ wss.on('connection', (ws, req) => {
     }
   });
 });
+
 function restrictRate(ws) {
   if (ws.isAdmin) return true;
   if (!ws.clientId) return true;
@@ -1248,6 +1244,7 @@ function restrictRate(ws) {
   }
   return true;
 }
+
 async function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const key = `iprate:${hashedIp}:${action}`;
@@ -1262,6 +1259,7 @@ async function restrictIpRate(ip, action) {
   }
   return true;
 }
+
 async function restrictIpDaily(ip, action) {
   const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
@@ -1274,6 +1272,7 @@ async function restrictIpDaily(ip, action) {
   }
   return true;
 }
+
 async function incrementFailure(ip) {
   const hashedIp = hashIp(ip);
   const failureKey = `ipfailure:${hashedIp}`;
@@ -1299,14 +1298,17 @@ async function incrementFailure(ip) {
     await redis.del(failureKey);
   }
 }
+
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
+
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
+
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
@@ -1340,6 +1342,7 @@ function logStats(data) {
   const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
   fs.appendFileSync(LOG_FILE, logEntry);
 }
+
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -1359,6 +1362,7 @@ function updateLogFile() {
     }
   })();
 }
+
 fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
@@ -1366,6 +1370,7 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
+
 async function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;
@@ -1382,9 +1387,11 @@ async function computeAggregate(days) {
   }
   return { users, connections };
 }
+
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
+
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });

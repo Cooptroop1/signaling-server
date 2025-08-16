@@ -33,14 +33,12 @@ let useRelay = false;
 let token = '';
 let refreshToken = '';
 let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
+let keyPair;
 let roomMaster;
 let signingKey;
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
-let connectedClients = new Set();
-let clientPublicKeys = new Map();
-let initiatorPublic;
 let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
 function getCookie(name) {
   const value = `; ${document.cookie}`;
@@ -470,8 +468,15 @@ socket.onmessage = async (event) => {
         showStatusMessage('Tampered message detected. Ignoring.');
         return;
       }
-      let jsonString = await decrypt(encrypted, message.iv, message.salt, roomMaster);
-      const payload = JSON.parse(jsonString);
+      let payload;
+      try {
+        const jsonString = await decrypt(encrypted, message.iv, message.salt, roomMaster);
+        payload = JSON.parse(jsonString);
+      } catch (error) {
+        console.error('Decryption failed:', error);
+        showStatusMessage('Failed to decrypt message.');
+        return;
+      }
       const senderUsername = payload.username;
       const messages = document.getElementById('messages');
       const isSelf = senderUsername === username;

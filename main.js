@@ -1,32 +1,30 @@
-
-// main.js
-// Core logic: peer connections, message sending, handling offers, etc.
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
-// New: Flag to prevent concurrent renegotiations
-let renegotiating = new Map(); // Per targetId
-// New: Track audio output mode
-let audioOutputMode = 'earpiece'; // Default to earpiece
-// New: TOTP state
+let renegotiating = new Map(); 
+let audioOutputMode = 'earpiece'; 
 let totpEnabled = false;
 let totpSecret = '';
-let pendingTotpSecret = null; // New: For delaying set-totp until after init
+let pendingTotpSecret = null; 
 let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
-// New: Message counter for ratchet triggering
 let messageCount = 0;
+let ratchets = new Map(); // Per peer DoubleRatchet
+let clientPublicKeys = new Map(); // clientId => base64 public key
+let keyPair; // Global ECDH keypair
+(async () => {
+  keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
+})();
 
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
     voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
   };
-  // Check if feature is enabled before proceeding
   if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} messages are disabled by admin.`);
     document.getElementById(`${type}Button`)?.focus();
@@ -42,7 +40,6 @@ async function sendMedia(file, type) {
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  // Rate limiting
   const rateLimits = type === 'image' ? imageRateLimits : voiceRateLimits;
   const now = performance.now();
   const rateLimit = rateLimits.get(clientId) || { count: 0, startTime: now };
@@ -88,7 +85,6 @@ async function sendMedia(file, type) {
     canvas.width = width;
     canvas.height = height;
     ctx.drawImage(img, 0, 0, width, height);
-    // Check for WebP support and use it if available
     const format = isWebPSupported() ? 'image/webp' : 'image/jpeg';
     base64 = canvas.toDataURL(format, quality);
     URL.revokeObjectURL(img.src);
@@ -108,26 +104,25 @@ async function sendMedia(file, type) {
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const payload = { messageId, type, data: base64, filename: type === 'file' ? file.name : undefined, username, timestamp };
-  const jsonString = JSON.stringify(payload);
+  const plaintext = JSON.stringify(payload);
   if (useRelay) {
     if (!roomMaster) {
       showStatusMessage('Error: Encryption key not available for relay mode.');
       return;
     }
-    const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-    const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
+    const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
+    const signature = await signMessage(signingKey, encrypted);
     sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
-  } else if (dataChannels.size > 0) {
-    dataChannels.forEach((dataChannel) => {
-      if (dataChannel.readyState === 'open') {
-        dataChannel.send(jsonString);
-      }
-    });
   } else {
-    showStatusMessage('Error: No connections.');
-    return;
+    for (const targetId of dataChannels.keys()) {
+      const ratchet = ratchets.get(targetId);
+      if (ratchet) {
+        const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
+        const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
+        dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+      }
+    }
   }
-  // Display locally
   const messages = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-bubble self';
@@ -164,10 +159,9 @@ async function sendMedia(file, type) {
   messages.scrollTop = 0;
   processedMessageIds.add(messageId);
   document.getElementById(`${type}Button`)?.focus();
-  // Increment message count and check for ratchet
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
-    triggerRatchet();
+    // Optional: Trigger asymmetric ratchet on pairs if needed, but Double Ratchet handles it internally
   }
 }
 
@@ -265,13 +259,11 @@ async function startPeerConnection(targetId, isOfferer) {
       const audio = document.createElement('audio');
       audio.srcObject = event.streams[0];
       audio.autoplay = true;
-      // Default to lower volume for earpiece simulation
       audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
       audio.play().catch(error => console.error('Error playing remote audio:', error));
       remoteAudios.set(targetId, audio);
       document.getElementById('remoteAudioContainer').appendChild(audio);
       document.getElementById('remoteAudioContainer').classList.remove('hidden');
-      // Attempt to set audio output to default (earpiece) if supported
       setAudioOutput(audio, targetId);
     }
   };
@@ -286,7 +278,6 @@ async function startPeerConnection(targetId, isOfferer) {
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
   };
-  // New: Listen for signaling state changes for debugging
   peerConnection.onsignalingstatechange = () => {
     console.log(`Signaling state for ${targetId}: ${peerConnection.signalingState}`);
   };
@@ -313,7 +304,7 @@ async function startPeerConnection(targetId, isOfferer) {
         privacyStatus.classList.remove('hidden');
       }
     }
-  }, 10000); // 10s timeout for fallback
+  }, 10000);
   connectionTimeouts.set(targetId, timeout);
 }
 
@@ -321,6 +312,12 @@ function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
+    (async () => {
+      const theirPub = clientPublicKeys.get(targetId);
+      const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
+      const isSender = clientId > targetId;
+      ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
+    })();
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
@@ -333,7 +330,6 @@ function setupDataChannel(dataChannel, targetId) {
     retryCounts.delete(targetId);
     updateMaxClientsUI();
     document.getElementById('messageInput')?.focus();
-    // Show audio output button only if features allow
     if (features.enableVoiceCalls && features.enableAudioToggle) {
       document.getElementById('audioOutputButton').classList.remove('hidden');
     } else {
@@ -373,6 +369,15 @@ function setupDataChannel(dataChannel, targetId) {
         stopVoiceCall();
       }
       return;
+    }
+    if (data.type === 'enc_msg') {
+      const ratchet = ratchets.get(targetId);
+      if (!ratchet) {
+        console.error(`No ratchet for sender ${targetId}`);
+        return;
+      }
+      const plaintext = await ratchet.decrypt(data.encrypted, data.iv, data.header, data.dhPub);
+      data = JSON.parse(plaintext);
     }
     if (!data.messageId || !data.username || (!data.content && !data.data)) {
       console.log(`Invalid message format from ${targetId}:`, data);
@@ -421,13 +426,6 @@ function setupDataChannel(dataChannel, targetId) {
     }
     messages.prepend(messageDiv);
     messages.scrollTop = 0;
-    if (isInitiator) {
-      dataChannels.forEach((dc, id) => {
-        if (id !== targetId && dc.readyState === 'open') {
-          dc.send(event.data); // Forward the original data (unencrypted in P2P)
-        }
-      });
-    }
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
@@ -468,7 +466,6 @@ async function handleOffer(offer, targetId) {
   }
   const peerConnection = peerConnections.get(targetId);
   try {
-    // Handle negotiation glare: rollback if have local offer pending
     if (peerConnection.signalingState === 'have-local-offer') {
       console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
       await peerConnection.setLocalDescription({type: 'rollback'});
@@ -528,7 +525,6 @@ async function handleAnswer(answer, targetId) {
 
 function handleCandidate(candidate, targetId) {
   console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
-  // Ignore invalid candidates where both sdpMid and sdpMLineIndex are null
   if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
     console.warn(`Ignoring invalid ICE candidate from ${targetId}: both sdpMid and sdpMLineIndex null`);
     return;
@@ -559,10 +555,10 @@ async function sendMessage(content) {
       messageInput?.focus();
       return;
     }
-    // New: Check for /ratchet command
     if (content === '/ratchet' && isInitiator) {
-      triggerRatchet();
-      showStatusMessage('Key ratchet triggered manually.');
+      // Manual trigger not needed with Double Ratchet, but can force DH ratchet on all pairs
+      ratchets.forEach(ratchet => ratchet.dhRatchet(null)); // Force asymmetric
+      showStatusMessage('Manual ratchet triggered on all pairs.');
       const messageInput = document.getElementById('messageInput');
       messageInput.value = '';
       messageInput.style.height = '2.5rem';
@@ -573,21 +569,24 @@ async function sendMessage(content) {
     const sanitizedContent = sanitizeMessage(content);
     const timestamp = Date.now();
     const payload = { messageId, content: sanitizedContent, username, timestamp };
-    const jsonString = JSON.stringify(payload);
+    const plaintext = JSON.stringify(payload);
     if (useRelay) {
       if (!roomMaster) {
         showStatusMessage('Error: Encryption key not available for relay mode.');
         return;
       }
-      const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-      const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
+      const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
+      const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      dataChannels.forEach((dataChannel, targetId) => {
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(jsonString);
+      for (const targetId of dataChannels.keys()) {
+        const ratchet = ratchets.get(targetId);
+        if (ratchet) {
+          const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
+          const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
+          dataChannels.get(targetId).send(JSON.stringify(channelPayload));
         }
-      });
+      }
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -604,11 +603,7 @@ async function sendMessage(content) {
     messageInput.value = '';
     messageInput.style.height = '2.5rem';
     messageInput?.focus();
-    // Increment message count and check for ratchet
     messageCount++;
-    if (isInitiator && messageCount % 100 === 0) {
-      triggerRatchet();
-    }
   } else {
     showStatusMessage('Error: No connections or username not set.');
     document.getElementById('messageInput')?.focus();
@@ -711,9 +706,18 @@ function sendSignalingMessage(type, additionalData) {
 }
 
 function broadcastVoiceCallEvent(eventType) {
-  dataChannels.forEach((dataChannel) => {
+  const payload = { type: eventType };
+  const plaintext = JSON.stringify(payload);
+  dataChannels.forEach(async (dataChannel, targetId) => {
     if (dataChannel.readyState === 'open') {
-      dataChannel.send(JSON.stringify({ type: eventType }));
+      const ratchet = ratchets.get(targetId);
+      if (ratchet) {
+        const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
+        const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
+        dataChannel.send(JSON.stringify(channelPayload));
+      } else {
+        dataChannel.send(plaintext); // Fallback plaintext for control
+      }
     }
   });
 }
@@ -762,13 +766,11 @@ async function autoConnect(codeParam) {
   console.log('Loaded username from localStorage:', username);
   if (validateCode(codeParam)) {
     if (validateUsername(username)) {
-      console.log('Valid username and code, joining chat');
       codeDisplayElement.textContent = `Using code: ${code}`;
       codeDisplayElement.classList.remove('hidden');
       copyCodeButton.classList.remove('hidden');
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
-      // Send check-totp instead of direct join
       if (socket.readyState === WebSocket.OPEN) {
         console.log('Sending check-totp');
         socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
@@ -780,7 +782,7 @@ async function autoConnect(codeParam) {
         }, { once: true });
       }
       document.getElementById('messageInput')?.focus();
-      updateFeaturesUI(); // Ensure features UI is updated after showing chat
+      updateFeaturesUI();
     } else {
       console.log('No valid username, prompting for username');
       usernameContainer.classList.remove('hidden');
@@ -804,10 +806,9 @@ async function autoConnect(codeParam) {
         copyCodeButton.classList.remove('hidden');
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
-        // Send check-totp after username set
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
         document.getElementById('messageInput')?.focus();
-        updateFeaturesUI(); // Ensure features UI is updated after showing chat
+        updateFeaturesUI();
       };
     }
   } else {
@@ -820,7 +821,6 @@ async function autoConnect(codeParam) {
   }
 }
 
-// New: Function to update UI based on features
 function updateFeaturesUI() {
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
@@ -839,14 +839,14 @@ function updateFeaturesUI() {
     voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
     voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
     if (!features.enableVoiceCalls && voiceCallActive) {
-      stopVoiceCall(); // Force stop call if feature disabled
+      stopVoiceCall();
     }
   }
   if (audioOutputButton) {
     const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
     audioOutputButton.classList.toggle('hidden', shouldHide);
     if (shouldHide && voiceCallActive) {
-      stopVoiceCall(); // Force stop if toggle disabled during call
+      stopVoiceCall();
     }
     audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
     audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
@@ -884,7 +884,6 @@ async function sendToGrok(query) {
     }
     const data = await response.json();
     const botResponse = data.choices[0].message.content;
-    // Display bot response
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message-bubble other';
@@ -931,7 +930,6 @@ function saveGrokKey() {
   }
 }
 
-// New: Function to set audio output
 async function setAudioOutput(audioElement, targetId) {
   try {
     if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
@@ -946,23 +944,22 @@ async function setAudioOutput(audioElement, targetId) {
           console.log(`Set audio output for ${targetId} to ${targetDevice.label}`);
         } else {
           console.warn(`No suitable ${audioOutputMode} device found for ${targetId}, using default`);
-          audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback
+          audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
         }
       } else {
         console.warn(`No audio output devices available for ${targetId}`);
-        audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback
+        audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
       }
     } else {
       console.log(`setSinkId not supported, using volume adjustment for ${targetId}`);
-      audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback for iOS or unsupported browsers
+      audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
     }
   } catch (error) {
     console.error(`Error setting audio output for ${targetId}:`, error);
-    audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0; // Fallback
+    audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
   }
 }
 
-// New: Function to toggle audio output mode
 function toggleAudioOutput() {
   audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
   console.log(`Toggling audio output to ${audioOutputMode}`);
@@ -976,7 +973,6 @@ function toggleAudioOutput() {
   showStatusMessage(`Audio output set to ${audioOutputMode}`);
 }
 
-// New: TOTP Functions
 async function startTotpRoom(serverGenerated) {
   const usernameInput = document.getElementById('totpUsernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -996,14 +992,13 @@ async function startTotpRoom(serverGenerated) {
       return;
     }
   }
-  // Add padding for server validation if needed
-  let secretToSend = totpSecret.toUpperCase().replace(/=+$/, ''); // Remove existing padding
+  let secretToSend = totpSecret.toUpperCase().replace(/=+$/, '');
   const len = secretToSend.length;
   const paddingLen = (8 - len % 8) % 8;
   secretToSend += '='.repeat(paddingLen);
   totpEnabled = true;
   code = generateCode();
-  pendingTotpSecret = { display: totpSecret, send: secretToSend }; // Store both for display and send
+  pendingTotpSecret = { display: totpSecret, send: secretToSend };
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
   document.getElementById('totpOptionsModal').classList.remove('active');
   codeDisplayElement.textContent = `Your code: ${code}`;
@@ -1022,126 +1017,44 @@ function showTotpSecretModal(secret) {
   console.log('Showing TOTP modal with secret:', secret);
   document.getElementById('totpSecretDisplay').textContent = secret;
   const qrCanvas = document.getElementById('qrCodeCanvas');
-  qrCanvas.innerHTML = ''; // Clear previous QR if any
+  qrCanvas.innerHTML = '';
   new QRCode(qrCanvas, generateTotpUri(code, secret));
   document.getElementById('totpSecretModal').classList.add('active');
+}
+
+function showTotpInputModal(codeParam) {
+  const totpInputModal = document.getElementById('totpInputModal');
+  totpInputModal.dataset.code = codeParam;
+  totpInputModal.classList.add('active');
+  document.getElementById('totpCodeInput')?.focus();
 }
 
 async function joinWithTotp(code, totpCode) {
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }
 
-// Function to start voice recording
-async function startVoiceRecording() {
-  if (!features.enableVoice) {
-    showStatusMessage('Voice messages are disabled by admin.');
-    return;
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showStatusMessage('Microphone not supported.');
-    return;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeTypes = [
-      'audio/mp4',
-      'audio/webm;codecs=opus',
-      'audio/ogg;codecs=opus',
-      'audio/webm',
-      'audio/ogg'
-    ];
-    const mimeType = mimeTypes.find(MediaRecorder.isTypeSupported) || 'audio/webm';
-    if (!mimeType) {
-      showStatusMessage('Voice recording not supported in this browser.');
-      return;
-    }
-    console.log('Using mimeType for recording:', mimeType);
-    mediaRecorder = new MediaRecorder(stream, { mimeType });
-    voiceChunks = [];
-    mediaRecorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) {
-        voiceChunks.push(event.data);
-        console.log('Data available, chunk size:', event.data.size);
-      } else {
-        console.warn('Empty data chunk received');
-      }
-    });
-    mediaRecorder.addEventListener('stop', async () => {
-      console.log('Recorder stopped, chunks length:', voiceChunks.length);
-      const audioBlob = new Blob(voiceChunks, { type: mimeType });
-      console.log('Audio blob created, size:', audioBlob.size, 'type:', mimeType);
-      if (audioBlob.size === 0) {
-        showStatusMessage('No audio recorded. Speak louder or check microphone.');
-        return;
-      }
-      sendMedia(audioBlob, 'voice');
-      stream.getTracks().forEach(track => track.stop());
-      mediaRecorder = null;
-      voiceChunks = [];
-      document.getElementById('voiceButton').classList.remove('recording');
-      document.getElementById('voiceTimer').style.display = 'none';
-      document.getElementById('voiceTimer').textContent = '';
-      clearInterval(voiceTimerInterval);
-    });
-    mediaRecorder.start(1000); // Collect data every 1 second
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceTimer').style.display = 'flex';
-    let time = 0;
-    voiceTimerInterval = setInterval(() => {
-      time++;
-      document.getElementById('voiceTimer').textContent = `00:${time < 10 ? '0' + time : time}`;
-      if (time >= 30) {
-        stopVoiceRecording();
-      }
-    }, 1000);
-  } catch (error) {
-    console.error('Error starting voice recording:', error);
-    showStatusMessage('Failed to access microphone for voice message.');
-  }
-}
-
-// Function to stop voice recording
-function stopVoiceRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-  }
-}
-
-async function triggerRatchet() {
-  if (!isInitiator || connectedClients.size <= 1) return;
-  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-  let success = 0;
-  for (const cId of connectedClients) {
-    if (cId === clientId) continue;
-    const publicKey = clientPublicKeys.get(cId);
-    if (!publicKey) {
-      console.warn(`No public key for client ${cId}, skipping ratchet send`);
-      continue;
-    }
-    try {
-      const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
-      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
-      success++;
-    } catch (error) {
-      console.error(`Error sending new room key to ${cId}:`, error);
-    }
-  }
-  if (success > 0) {
-    roomMaster = newRoomMaster;
-    signingKey = await deriveSigningKey(roomMaster);
-    console.log('PFS ratchet complete, new roomMaster set.');
-  } else {
-    console.warn('PFS ratchet failed: No keys available to send to any clients.');
-  }
-}
-
-// New: Function to check WebP support
 function isWebPSupported() {
   const elem = document.createElement('canvas');
   if (!!(elem.getContext && elem.getContext('2d'))) {
     return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
   }
   return false;
+}
+
+function updateDots() {
+  const userDots = document.getElementById('userDots');
+  if (!userDots) return;
+  userDots.innerHTML = '';
+  const greenCount = totalClients;
+  const redCount = maxClients - greenCount;
+  for (let i = 0; i < greenCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot online';
+    userDots.appendChild(dot);
+  }
+  for (let i = 0; i < redCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot offline';
+    userDots.appendChild(dot);
+  }
 }

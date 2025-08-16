@@ -1083,7 +1083,8 @@ function showTotpInputModal(codeParam) {
 }
 
 async function joinWithTotp(code, totpCode) {
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
+  const publicKey = await exportPublicKey(keyPair.publicKey);
+  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, publicKey, token }));
 }
 
 function isWebPSupported() {

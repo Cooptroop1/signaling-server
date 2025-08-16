@@ -33,7 +33,6 @@ let useRelay = false;
 let token = '';
 let refreshToken = '';
 let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
-let keyPair;
 let roomMaster;
 let signingKey;
 let remoteAudios = new Map();
@@ -65,9 +64,6 @@ cornerLogo = document.getElementById('cornerLogo');
 button2 = document.getElementById('button2');
 helpText = document.getElementById('helpText');
 helpModal = document.getElementById('helpModal');
-(async () => {
-  keyPair = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey', 'deriveBits']);
-})();
 let cycleTimeout;
 function triggerCycle() {
   if (cycleTimeout) clearTimeout(cycleTimeout);
@@ -338,8 +334,8 @@ socket.onmessage = async (event) => {
       }
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
-      if (window.isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
-        console.log(`Initiator initiating peer connection with client ${message.clientId}`);
+      if (window.isInitiator && message.clientId !== clientId) {
+        console.log(`Initiator starting peer connection with new client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
       if (voiceCallActive) {

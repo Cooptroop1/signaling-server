@@ -21,6 +21,18 @@ let keyPair;
   keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
 })();
 
+async function createRatchet(targetId, theirPub) {
+  try {
+    const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
+    const isSender = clientId > targetId;
+    ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
+    console.log('Ratchet initialized for ' + targetId);
+  } catch (e) {
+    console.error('Failed to create ratchet for ' + targetId + ': ' + e);
+    useRelay = true;
+  }
+}
+
 async function sendMedia(file, type) {
   const validTypes = { image: ['image/jpeg', 'image/png'], voice: ['audio/webm', 'audio/ogg', 'audio/mp4'] };
   if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
@@ -326,17 +338,21 @@ function setupDataChannel(dataChannel, targetId) {
   const chunkBuffers = new Map(); // messageId => {chunks: [], total: number, received: number, timeout: timer}
   dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
-    (async () => {
-      const theirPub = clientPublicKeys.get(targetId);
-      if (!theirPub) {
-        console.error(`No public key for ${targetId}, falling back to relay mode for this peer`);
-        useRelay = true;
-        return;
-      }
-      const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
-      const isSender = clientId > targetId;
-      ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
-    })();
+    const theirPub = clientPublicKeys.get(targetId);
+    if (!theirPub) {
+      console.error(`No public key for ${targetId}, retrying in 500ms`);
+      setTimeout(() => {
+        const theirPubRetry = clientPublicKeys.get(targetId);
+        if (theirPubRetry) {
+          createRatchet(targetId, theirPubRetry);
+        } else {
+          console.error(`Still no public key for ${targetId}, falling back to relay mode for this peer`);
+          useRelay = true;
+        }
+      }, 500);
+    } else {
+      createRatchet(targetId, theirPub);
+    }
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');

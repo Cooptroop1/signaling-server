@@ -204,12 +204,12 @@ const localRooms = new Map(); // code => {totalClients: number, maxClients: numb
     if (featuresStr) {
       const parsed = JSON.parse(featuresStr);
       features = {
-        enableService: parsed.enableService,
-        enableImages: parsed.enableImages,
-        enableVoice: parsed.enableVoice,
-        enableVoiceCalls: parsed.enableVoiceCalls,
-        enableAudioToggle: parsed.enableAudioToggle,
-        enableGrokBot: parsed.enableGrokBot
+        enableService: parsed.enableService || true,
+        enableImages: parsed.enableImages || true,
+        enableVoice: parsed.enableVoice || true,
+        enableVoiceCalls: parsed.enableVoiceCalls || true,
+        enableAudioToggle: parsed.enableAudioToggle || true,
+        enableGrokBot: parsed.enableGrokBot || true
       };
     } else {
       await redis.set('features', JSON.stringify(features));
@@ -1202,15 +1202,15 @@ wss.on('connection', (ws, req) => {
           }
         }
         pub.publish('signaling', JSON.stringify({ type: 'disconnect', code, clientId: ws.clientId, totalClients: remaining, isInitiator: isInitiatorDisconnect }));
-      }
-      if (ws.clientId) localClients.delete(ws.clientId);
-      if (code && localRooms.has(code)) {
-        localRooms.get(code).myClients.delete(ws.clientId);
-        localRooms.get(code).totalClients = remaining;
-        if (localRooms.get(code).myClients.size === 0) {
-          localRooms.delete(code);
+        if (localRooms.has(code)) {
+          localRooms.get(code).myClients.delete(ws.clientId);
+          localRooms.get(code).totalClients = remaining;
+          if (localRooms.get(code).myClients.size === 0) {
+            localRooms.delete(code);
+          }
         }
       }
+      if (ws.clientId) localClients.delete(ws.clientId);
     } catch (err) {
       console.error('Error in ws close handler:', err);
     }

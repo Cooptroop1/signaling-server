@@ -1,3 +1,5 @@
+window.isInitiator = false; // Global for utils/init access
+
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -13,9 +15,9 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
-let ratchets = new Map(); // Per peer DoubleRatchet
-let clientPublicKeys = new Map(); // clientId => base64 public key
-let keyPair; // Global ECDH keypair
+let ratchets = new Map();
+let clientPublicKeys = new Map();
+let keyPair;
 (async () => {
   keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
 })();
@@ -113,15 +115,15 @@ async function sendMedia(file, type) {
     const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
     const signature = await signMessage(signingKey, encrypted);
     sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
-  } else {
-    for (const targetId of dataChannels.keys()) {
-      const ratchet = ratchets.get(targetId);
-      if (ratchet) {
-        const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
-        const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
-        dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+  } else if (dataChannels.size > 0) {
+    dataChannels.forEach((dataChannel) => {
+      if (dataChannel.readyState === 'open') {
+        dataChannel.send(plaintext);
       }
-    }
+    });
+  } else {
+    showStatusMessage('Error: No connections.');
+    return;
   }
   const messages = document.getElementById('messages');
   const messageDiv = document.createElement('div');
@@ -160,8 +162,8 @@ async function sendMedia(file, type) {
   processedMessageIds.add(messageId);
   document.getElementById(`${type}Button`)?.focus();
   messageCount++;
-  if (isInitiator && messageCount % 100 === 0) {
-    // Optional: Trigger asymmetric ratchet on pairs if needed, but Double Ratchet handles it internally
+  if (window.isInitiator && messageCount % 100 === 0) {
+    triggerRatchet();
   }
 }
 
@@ -312,12 +314,6 @@ function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
-    (async () => {
-      const theirPub = clientPublicKeys.get(targetId);
-      const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
-      const isSender = clientId > targetId;
-      ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
-    })();
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
@@ -370,15 +366,6 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
-    if (data.type === 'enc_msg') {
-      const ratchet = ratchets.get(targetId);
-      if (!ratchet) {
-        console.error(`No ratchet for sender ${targetId}`);
-        return;
-      }
-      const plaintext = await ratchet.decrypt(data.encrypted, data.iv, data.header, data.dhPub);
-      data = JSON.parse(plaintext);
-    }
     if (!data.messageId || !data.username || (!data.content && !data.data)) {
       console.log(`Invalid message format from ${targetId}:`, data);
       return;
@@ -426,6 +413,13 @@ function setupDataChannel(dataChannel, targetId) {
     }
     messages.prepend(messageDiv);
     messages.scrollTop = 0;
+    if (window.isInitiator) {
+      dataChannels.forEach((dc, id) => {
+        if (id !== targetId && dc.readyState === 'open') {
+          dc.send(event.data);
+        }
+      });
+    }
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
@@ -456,33 +450,30 @@ function setupDataChannel(dataChannel, targetId) {
 
 async function handleOffer(offer, targetId) {
   console.log(`Handling offer from ${targetId} for code: ${code}`);
+  if (!peerConnections.has(targetId)) {
+    console.log(`No peer connection for ${targetId}, starting new one and queuing offer`);
+    startPeerConnection(targetId, false);
+    candidatesQueues.get(targetId).push({ type: 'offer', offer });
+    return;
+  }
+  const peerConnection = peerConnections.get(targetId);
   if (offer.type !== 'offer') {
     console.error(`Invalid offer type from ${targetId}:`, offer.type);
     return;
   }
-  if (!peerConnections.has(targetId)) {
-    console.log(`No existing peer connection for ${targetId}, starting new one`);
-    startPeerConnection(targetId, false);
+  if (peerConnection.signalingState === 'have-local-offer') {
+    console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
+    await peerConnection.setLocalDescription({type: 'rollback'});
   }
-  const peerConnection = peerConnections.get(targetId);
-  try {
-    if (peerConnection.signalingState === 'have-local-offer') {
-      console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
-      await peerConnection.setLocalDescription({type: 'rollback'});
-    }
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
-    const queue = candidatesQueues.get(targetId) || [];
-    queue.forEach(candidate => {
-      handleCandidate(candidate, targetId);
-    });
-    candidatesQueues.set(targetId, []);
-  } catch (error) {
-    console.error(`Error handling offer from ${targetId}:`, error);
-    showStatusMessage('Failed to connect to peer.');
-  }
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
+  const queue = candidatesQueues.get(targetId) || [];
+  queue.forEach(candidate => {
+    handleCandidate(candidate, targetId);
+  });
+  candidatesQueues.set(targetId, []);
 }
 
 async function handleAnswer(answer, targetId) {
@@ -503,24 +494,19 @@ async function handleAnswer(answer, targetId) {
     candidatesQueues.get(targetId).push({ type: 'answer', answer });
     return;
   }
-  try {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    const queue = candidatesQueues.get(targetId) || [];
-    queue.forEach(item => {
-      if (item.type === 'answer') {
-        peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
-          console.error(`Error applying queued answer from ${targetId}:`, error);
-          showStatusMessage('Error processing peer response.');
-        });
-      } else {
-        handleCandidate(item.candidate, targetId);
-      }
-    });
-    candidatesQueues.set(targetId, []);
-  } catch (error) {
-    console.error(`Error handling answer from ${targetId}:`, error);
-    showStatusMessage('Error connecting to peer.');
-  }
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+  const queue = candidatesQueues.get(targetId) || [];
+  queue.forEach(item => {
+    if (item.type === 'answer') {
+      peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
+        console.error(`Error applying queued answer from ${targetId}:`, error);
+        showStatusMessage('Error processing peer response.');
+      });
+    } else {
+      handleCandidate(item.candidate, targetId);
+    }
+  });
+  candidatesQueues.set(targetId, []);
 }
 
 function handleCandidate(candidate, targetId) {
@@ -555,10 +541,8 @@ async function sendMessage(content) {
       messageInput?.focus();
       return;
     }
-    if (content === '/ratchet' && isInitiator) {
-      // Manual trigger not needed with Double Ratchet, but can force DH ratchet on all pairs
-      ratchets.forEach(ratchet => ratchet.dhRatchet(null)); // Force asymmetric
-      showStatusMessage('Manual ratchet triggered on all pairs.');
+    if (content === '/ratchet' && window.isInitiator) {
+      triggerRatchet();
       const messageInput = document.getElementById('messageInput');
       messageInput.value = '';
       messageInput.style.height = '2.5rem';
@@ -569,24 +553,21 @@ async function sendMessage(content) {
     const sanitizedContent = sanitizeMessage(content);
     const timestamp = Date.now();
     const payload = { messageId, content: sanitizedContent, username, timestamp };
-    const plaintext = JSON.stringify(payload);
+    const jsonString = JSON.stringify(payload);
     if (useRelay) {
       if (!roomMaster) {
         showStatusMessage('Error: Encryption key not available for relay mode.');
         return;
       }
-      const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
+      const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
       const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      for (const targetId of dataChannels.keys()) {
-        const ratchet = ratchets.get(targetId);
-        if (ratchet) {
-          const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
-          const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
-          dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+      dataChannels.forEach((dataChannel, targetId) => {
+        if (dataChannel.readyState === 'open') {
+          dataChannel.send(jsonString);
         }
-      }
+      });
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -604,6 +585,9 @@ async function sendMessage(content) {
     messageInput.style.height = '2.5rem';
     messageInput?.focus();
     messageCount++;
+    if (window.isInitiator && messageCount % 100 === 0) {
+      triggerRatchet();
+    }
   } else {
     showStatusMessage('Error: No connections or username not set.');
     document.getElementById('messageInput')?.focus();
@@ -706,18 +690,9 @@ function sendSignalingMessage(type, additionalData) {
 }
 
 function broadcastVoiceCallEvent(eventType) {
-  const payload = { type: eventType };
-  const plaintext = JSON.stringify(payload);
-  dataChannels.forEach(async (dataChannel, targetId) => {
+  dataChannels.forEach((dataChannel) => {
     if (dataChannel.readyState === 'open') {
-      const ratchet = ratchets.get(targetId);
-      if (ratchet) {
-        const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
-        const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
-        dataChannel.send(JSON.stringify(channelPayload));
-      } else {
-        dataChannel.send(plaintext); // Fallback plaintext for control
-      }
+      dataChannel.send(JSON.stringify({ type: eventType }));
     }
   });
 }
@@ -766,6 +741,7 @@ async function autoConnect(codeParam) {
   console.log('Loaded username from localStorage:', username);
   if (validateCode(codeParam)) {
     if (validateUsername(username)) {
+      console.log('Valid username and code, joining chat');
       codeDisplayElement.textContent = `Using code: ${code}`;
       codeDisplayElement.classList.remove('hidden');
       copyCodeButton.classList.remove('hidden');
@@ -1022,13 +998,6 @@ function showTotpSecretModal(secret) {
   document.getElementById('totpSecretModal').classList.add('active');
 }
 
-function showTotpInputModal(codeParam) {
-  const totpInputModal = document.getElementById('totpInputModal');
-  totpInputModal.dataset.code = codeParam;
-  totpInputModal.classList.add('active');
-  document.getElementById('totpCodeInput')?.focus();
-}
-
 async function joinWithTotp(code, totpCode) {
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }
@@ -1045,7 +1014,7 @@ function updateDots() {
   const userDots = document.getElementById('userDots');
   if (!userDots) return;
   userDots.innerHTML = '';
-  const greenCount = totalClients;
+  const greenCount = Math.min(totalClients, maxClients);
   const redCount = maxClients - greenCount;
   for (let i = 0; i < greenCount; i++) {
     const dot = document.createElement('div');

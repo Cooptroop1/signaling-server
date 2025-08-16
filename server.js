@@ -303,9 +303,6 @@ function validateMessage(data) {
       if (!data.username) {
         return { valid: false, error: 'join: username required' };
       }
-      if (data.publicKey && !isValidBase64(data.publicKey)) {
-        return { valid: false, error: 'join: invalid publicKey format' };
-      }
       if (data.totpCode && typeof data.totpCode !== 'string') {
         return { valid: false, error: 'join: totpCode must be a string if provided' };
       }
@@ -788,6 +785,7 @@ wss.on('connection', (ws, req) => {
         }
         const roomKey = `room:${code}`;
         let roomStr = await redis.get(roomKey);
+        let room;
         let isNewRoom = false;
         if (!roomStr) {
           isNewRoom = true;
@@ -808,7 +806,7 @@ wss.on('connection', (ws, req) => {
           const clientData = await redis.hgetall(`client:${clientId}`);
           if (members.includes(clientId)) {
             if (clientData.username === username) {
-              // Reconnect
+              // Reconnect, update instance
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
               await incrementFailure(clientIp);
@@ -857,12 +855,12 @@ wss.on('connection', (ws, req) => {
         localClients.get(clientId).username = username;
         localClients.get(clientId).code = code;
         if (!localRooms.has(code)) {
-          localRooms.set(code, { totalClients: 0, maxClients: room.maxClients, myClients: new Set(), initiator: room.initiator });
+          localRooms.set(code, { totalClients: 0, myClients: new Set(), initiator: room.initiator, maxClients: room.maxClients });
         }
         localRooms.get(code).myClients.add(clientId);
         const total = await redis.scard(clientsKey);
         localRooms.get(code).totalClients = total;
-        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total, publicKey: data.publicKey }));
+        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total }));
         if (total > 1 && await redis.sismember('randomCodes', code)) {
           await redis.srem('randomCodes', code);
         }

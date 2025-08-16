@@ -202,7 +202,15 @@ const localRooms = new Map(); // code => {totalClients: number, maxClients: numb
   try {
     let featuresStr = await redis.get('features');
     if (featuresStr) {
-      features = JSON.parse(featuresStr);
+      const parsed = JSON.parse(featuresStr);
+      features = {
+        enableService: parsed.enableService,
+        enableImages: parsed.enableImages,
+        enableVoice: parsed.enableVoice,
+        enableVoiceCalls: parsed.enableVoiceCalls,
+        enableAudioToggle: parsed.enableAudioToggle,
+        enableGrokBot: parsed.enableGrokBot
+      };
     } else {
       await redis.set('features', JSON.stringify(features));
     }
@@ -214,8 +222,16 @@ const localRooms = new Map(); // code => {totalClients: number, maxClients: numb
 
 // Save features to file for backup
 function saveFeatures() {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
-  console.log('Saved features to disk:', features);
+  const cleanFeatures = {
+    enableService: features.enableService,
+    enableImages: features.enableImages,
+    enableVoice: features.enableVoice,
+    enableVoiceCalls: features.enableVoiceCalls,
+    enableAudioToggle: features.enableAudioToggle,
+    enableGrokBot: features.enableGrokBot
+  };
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(cleanFeatures));
+  console.log('Saved features to disk:', cleanFeatures);
 }
 
 // New: Function to save aggregated stats to disk
@@ -472,7 +488,7 @@ sub.on('message', (channel, event) => {
       if (data.type === 'join') {
         if (localRooms.has(data.code)) {
           localRooms.get(data.code).totalClients = data.totalClients;
-          localBroadcast(data.code, { type: 'join-notify', clientId: data.clientId, username: data.username, totalClients: data.totalClients });
+          localBroadcast(data.code, { type: 'join-notify', clientId: data.clientId, username: data.username, code: data.code, totalClients: data.totalClients });
         }
       } else if (data.type === 'disconnect') {
         if (localRooms.has(data.code)) {
@@ -580,6 +596,13 @@ wss.on('connection', (ws, req) => {
     let data;
     try {
       data = JSON.parse(message);
+    } catch (err) {
+      console.error('Invalid JSON in message:', err);
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format.' }));
+      await incrementFailure(clientIp);
+      return;
+    }
+    try {
       const validation = validateMessage(data);
       if (!validation.valid) {
         ws.send(JSON.stringify({ type: 'error', message: validation.error }));
@@ -868,12 +891,12 @@ wss.on('connection', (ws, req) => {
         localClients.get(clientId).username = username;
         localClients.get(clientId).code = code;
         if (!localRooms.has(code)) {
-          const scard = await redis.scard(clientsKey);
-          localRooms.set(code, { totalClients: scard, myClients: new Set(), initiator: room.initiator, maxClients: room.maxClients });
+          localRooms.set(code, { totalClients: 0, myClients: new Set(), initiator: room.initiator, maxClients: room.maxClients });
         }
         localRooms.get(code).myClients.add(clientId);
-        localRooms.get(code).totalClients++;
-        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: localRooms.get(code).totalClients }));
+        const total = await redis.scard(clientsKey);
+        localRooms.get(code).totalClients = total;
+        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total }));
       }
       if (data.type === 'check-totp') {
         const totpKey = `totp:${data.code}`;
@@ -898,8 +921,9 @@ wss.on('connection', (ws, req) => {
             if (data.clientId === room.initiator) {
               room.maxClients = Math.min(data.maxClients, 10);
               await redis.set(roomKey, JSON.stringify(room));
-              pub.publish('signaling', JSON.stringify({ type: 'max-clients', code: data.code, maxClients: room.maxClients, totalClients: localRooms.get(data.code).totalClients }));
-              logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: localRooms.get(data.code).totalClients });
+              const total = await redis.scard(`room_clients:${data.code}`);
+              pub.publish('signaling', JSON.stringify({ type: 'max-clients', code: data.code, maxClients: room.maxClients, totalClients: total }));
+              logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: total });
             }
           }
         } catch (err) {
@@ -1055,8 +1079,8 @@ wss.on('connection', (ws, req) => {
             const allTimeUsersCount = await redis.pfcount('allTimeUsers');
             ws.send(JSON.stringify({
               type: 'stats',
-              dailyUsers: await redis.scard(`dailyUsers:${day}`),
-              dailyConnections: await redis.scard(`dailyConnections:${day}`),
+              dailyUsers: await redis.scard(`dailyUsers:${day}`) || 0,
+              dailyConnections: await redis.scard(`dailyConnections:${day}`) || 0,
               weeklyUsers: weekly.users,
               weeklyConnections: weekly.connections,
               monthlyUsers: monthly.users,
@@ -1093,7 +1117,7 @@ wss.on('connection', (ws, req) => {
               const timestamp = new Date().toISOString();
               fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
               ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
-              pub.publish('signaling', JSON.stringify({ type: 'features-update', ...features }));
+              pub.publish('signaling', JSON.stringify({ type: 'features-update', enableService: features.enableService, enableImages: features.enableImages, enableVoice: features.enableVoice, enableVoiceCalls: features.enableVoiceCalls, enableAudioToggle: features.enableAudioToggle, enableGrokBot: features.enableGrokBot }));
               if (data.feature === 'service' && !features.enableService) {
                 // Clear all rooms and clients
                 const roomKeys = await redis.keys('room:*');
@@ -1152,7 +1176,7 @@ wss.on('connection', (ws, req) => {
           }
         }
       }
-      const code = localClients.get(ws.clientId)?.code;
+      const code = localClients.has(ws.clientId) ? localClients.get(ws.clientId).code : null;
       if (code) {
         const clientsKey = `room_clients:${code}`;
         await redis.srem(clientsKey, ws.clientId);
@@ -1179,7 +1203,7 @@ wss.on('connection', (ws, req) => {
         }
         pub.publish('signaling', JSON.stringify({ type: 'disconnect', code, clientId: ws.clientId, totalClients: remaining, isInitiator: isInitiatorDisconnect }));
       }
-      localClients.delete(ws.clientId);
+      if (ws.clientId) localClients.delete(ws.clientId);
       if (code && localRooms.has(code)) {
         localRooms.get(code).myClients.delete(ws.clientId);
         localRooms.get(code).totalClients = remaining;

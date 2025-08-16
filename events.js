@@ -33,7 +33,6 @@ let useRelay = false;
 let token = '';
 let refreshToken = '';
 let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
-let keyPair;
 let roomMaster;
 let signingKey;
 let remoteAudios = new Map();
@@ -471,15 +470,8 @@ socket.onmessage = async (event) => {
         showStatusMessage('Tampered message detected. Ignoring.');
         return;
       }
-      let payload;
-      try {
-        const jsonString = await decrypt(encrypted, message.iv, message.salt, roomMaster);
-        payload = JSON.parse(jsonString);
-      } catch (error) {
-        console.error('Decryption failed:', error);
-        showStatusMessage('Failed to decrypt message.');
-        return;
-      }
+      let jsonString = await decrypt(encrypted, message.iv, message.salt, roomMaster);
+      const payload = JSON.parse(jsonString);
       const senderUsername = payload.username;
       const messages = document.getElementById('messages');
       const isSelf = senderUsername === username;

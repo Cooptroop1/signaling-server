@@ -9,7 +9,6 @@ function showStatusMessage(message, duration = 3000) {
   }
 }
 
-// Sanitize message content to prevent XSS
 function sanitizeMessage(content) {
   const div = document.createElement('div');
   div.textContent = content;
@@ -30,9 +29,7 @@ function validateCode(code) {
   return code && regex.test(code);
 }
 
-// Keepalive timer ID
-let keepAliveTimer = null; // Moved from events.js to utils.js
-// Keepalive function to prevent WebSocket timeout
+let keepAliveTimer = null;
 function startKeepAlive() {
   if (keepAliveTimer) clearInterval(keepAliveTimer);
   keepAliveTimer = setInterval(() => {
@@ -90,13 +87,13 @@ function cleanupPeerConnection(targetId) {
 }
 
 function initializeMaxClientsUI() {
-  log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
+  log('info', `initializeMaxClientsUI called, isInitiator: ${window.isInitiator}`);
   const addUserText = document.getElementById('addUserText');
   const addUserModal = document.getElementById('addUserModal');
   const addUserRadios = document.getElementById('addUserRadios');
   if (addUserText && addUserModal && addUserRadios) {
-    addUserText.classList.toggle('hidden', !isInitiator);
-    if (isInitiator) {
+    addUserText.classList.toggle('hidden', !window.isInitiator);
+    if (window.isInitiator) {
       log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
       addUserRadios.innerHTML = '';
       for (let n = 2; n <= 10; n++) {
@@ -104,9 +101,9 @@ function initializeMaxClientsUI() {
         button.textContent = n;
         button.setAttribute('aria-label', `Set maximum users to ${n}`);
         button.className = n === maxClients ? 'active' : '';
-        button.disabled = !isInitiator;
+        button.disabled = !window.isInitiator;
         button.addEventListener('click', () => {
-          if (isInitiator) {
+          if (window.isInitiator) {
             log('info', `Button clicked for maxClients: ${n}`);
             setMaxClients(n);
             document.querySelectorAll('#addUserRadios button').forEach(btn => btn.classList.remove('active'));
@@ -127,20 +124,20 @@ function initializeMaxClientsUI() {
 }
 
 function updateMaxClientsUI() {
-  log('info', `updateMaxClientsUI called, maxClients: ${maxClients}, isInitiator: ${isInitiator}`);
+  log('info', `updateMaxClientsUI called, maxClients: ${maxClients}, isInitiator: ${window.isInitiator}`);
   if (statusElement) {
     statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
   }
   const addUserText = document.getElementById('addUserText');
   if (addUserText) {
-    addUserText.classList.toggle('hidden', !isInitiator);
+    addUserText.classList.toggle('hidden', !window.isInitiator);
   }
   const buttons = document.querySelectorAll('#addUserRadios button');
   log('info', `Found buttons in modal: ${buttons.length}`);
   buttons.forEach(button => {
     const value = parseInt(button.textContent);
     button.classList.toggle('active', value === maxClients);
-    button.disabled = !isInitiator;
+    button.disabled = !window.isInitiator;
   });
   if (messages) {
     if (!isConnected) {
@@ -152,10 +149,10 @@ function updateMaxClientsUI() {
 }
 
 function setMaxClients(n) {
-  if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
+  if (window.isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
     maxClients = Math.min(n, 10);
     log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);
-    socket.send(JSON.stringify({ type: 'set-max-clients', maxClients: maxClients, code, clientId, token }));
+    socket.send(JSON.stringify({ type: 'set-max-clients', maxClients, code, clientId, token }));
     updateMaxClientsUI();
   } else {
     log('warn', 'setMaxClients failed: not initiator, no token, or socket not open');
@@ -235,11 +232,41 @@ function createAudioModal(base64, focusId) {
   });
 }
 
-// New: TOTP Utilities (using otplib)
 function generateTotpSecret() {
-  return otplib.authenticator.generateSecret(32); // Changed to 32 characters
+  return otplib.authenticator.generateSecret(32);
 }
 
 function generateTotpUri(roomCode, secret) {
   return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
 }
+
+async function triggerRatchet() {
+  if (!window.isInitiator || connectedClients.size <= 1) return;
+  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  let success = 0;
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) {
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      continue;
+    }
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      success++;
+    } catch (error) {
+      console.error(`Error sending new room key to ${cId}:`, error);
+    }
+  }
+  if (success > 0) {
+    roomMaster = newRoomMaster;
+    signingKey = await deriveSigningKey(roomMaster);
+    console.log('PFS ratchet complete, new roomMaster set.');
+  } else {
+    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+  }
+}
+window.triggerRatchet = triggerRatchet; // Global access

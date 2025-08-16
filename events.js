@@ -33,12 +33,15 @@ let useRelay = false;
 let token = '';
 let refreshToken = '';
 let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
+let keyPair;
 let roomMaster;
 let signingKey;
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
 let connectedClients = new Set();
+let clientPublicKeys = new Map();
+let initiatorPublic;
 let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
 function getCookie(name) {
   const value = `; ${document.cookie}`;
@@ -313,6 +316,7 @@ socket.onmessage = async (event) => {
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${window.isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
       connectedClients.add(clientId);
+      clientPublicKeys.set(clientId, await exportPublicKey(keyPair.publicKey));
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (window.isInitiator) {
@@ -324,7 +328,7 @@ socket.onmessage = async (event) => {
           showTotpSecretModal(pendingTotpSecret.display);
           pendingTotpSecret = null;
         }
-        setInterval(triggerRatchet, 5 * 60 * 1000);
+        setInterval(window.triggerRatchet, 5 * 60 * 1000);
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
@@ -346,6 +350,7 @@ socket.onmessage = async (event) => {
         usernames.set(message.clientId, message.username);
       }
       connectedClients.add(message.clientId);
+      clientPublicKeys.set(message.clientId, message.publicKey);
       updateMaxClientsUI();
       if (window.isInitiator && message.clientId !== clientId) {
         console.log(`Initiator starting peer connection with new client ${message.clientId}`);
@@ -353,6 +358,19 @@ socket.onmessage = async (event) => {
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
+      }
+    }
+    if (message.type === 'group-public-keys') {
+      for (const [id, pk] of Object.entries(message.keys)) {
+        clientPublicKeys.set(id, pk);
+      }
+      console.log('Received group public keys');
+      return;
+    }
+    if (message.type === 'connect-to') {
+      const newId = message.newId;
+      if (!peerConnections.has(newId)) {
+        startPeerConnection(newId, true);
       }
     }
     if (message.type === 'client-disconnected') {
@@ -410,7 +428,7 @@ socket.onmessage = async (event) => {
           clientId,
           token
         }));
-        await triggerRatchet();
+        await window.triggerRatchet();
       } catch (error) {
         console.error('Error handling public-key:', error);
         showStatusMessage('Key exchange failed.');

@@ -15,12 +15,10 @@ const Redis = require('ioredis');
 // Global error handlers to prevent crashes
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Optionally, exit or handle
 });
 
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
-  // Optionally, exit or handle
 });
 
 // Check for certificate files for local HTTPS
@@ -183,7 +181,6 @@ const instanceId = uuidv4();
 [redis, pub, sub].forEach(client => {
   client.on('error', (err) => {
     console.error('Redis Client Error:', err);
-    // Optionally, attempt reconnect or handle gracefully without crashing
   });
   client.on('reconnecting', () => {
     console.log('Redis client reconnecting...');
@@ -500,7 +497,14 @@ sub.on('message', (channel, event) => {
           localBroadcast(data.code, { type: 'initiator-changed', newInitiator: data.newInitiator, totalClients: data.totalClients });
         }
       } else if (data.type === 'features-update') {
-        features = data;
+        features = {
+          enableService: data.enableService,
+          enableImages: data.enableImages,
+          enableVoice: data.enableVoice,
+          enableVoiceCalls: data.enableVoiceCalls,
+          enableAudioToggle: data.enableAudioToggle,
+          enableGrokBot: data.enableGrokBot
+        };
         wss.clients.forEach(client => {
           if (client.readyState === WebSocket.OPEN) {
             client.send(JSON.stringify({ type: 'features-update', ...features }));
@@ -573,8 +577,9 @@ wss.on('connection', (ws, req) => {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
       return;
     }
+    let data;
     try {
-      const data = JSON.parse(message);
+      data = JSON.parse(message);
       const validation = validateMessage(data);
       if (!validation.valid) {
         ws.send(JSON.stringify({ type: 'error', message: validation.error }));
@@ -811,19 +816,29 @@ wss.on('connection', (ws, req) => {
             return;
           }
           const members = await redis.smembers(clientsKey);
+          const clientData = await redis.hgetall(`client:${clientId}`);
           if (members.includes(clientId)) {
-            const existingUsername = await redis.hget(`client:${clientId}`, 'username');
-            if (existingUsername === username) {
+            if (clientData.username === username) {
               // Reconnect, update instance
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
               await incrementFailure(clientIp);
               return;
             }
-          } else if (members.some(async id => await redis.hget(`client:${id}`, 'username') === username)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
-            await incrementFailure(clientIp);
-            return;
+          } else {
+            let usernameTaken = false;
+            for (const id of members) {
+              const memberUsername = await redis.hget(`client:${id}`, 'username');
+              if (memberUsername === username) {
+                usernameTaken = true;
+                break;
+              }
+            }
+            if (usernameTaken) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
+              await incrementFailure(clientIp);
+              return;
+            }
           }
           const initiatorInstance = await redis.hget(`client:${room.initiator}`, 'instance');
           if (!initiatorInstance && room.initiator !== clientId) {
@@ -1114,7 +1129,7 @@ wss.on('connection', (ws, req) => {
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data?.code }));
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data ? data.code : 'unknown' }));
       await incrementFailure(clientIp);
     }
   });
@@ -1198,6 +1213,61 @@ function restrictRate(ws) {
   return true;
 }
 
+async function restrictIpRate(ip, action) {
+  const hashedIp = hashIp(ip);
+  const key = `iprate:${hashedIp}:${action}`;
+  const count = await redis.incr(key);
+  if (count === 1) {
+    await redis.expire(key, 60);
+  }
+  if (count > 5) {
+    console.warn(`IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${count} in 60s`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${count}\n`);
+    return false;
+  }
+  return true;
+}
+
+async function restrictIpDaily(ip, action) {
+  const hashedIp = hashIp(ip);
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `ipdaily:${hashedIp}:${action}:${day}`;
+  const count = await redis.incr(key);
+  if (count > 100) {
+    console.warn(`Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${count} in day ${day}`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${count}\n`);
+    return false;
+  }
+  return true;
+}
+
+async function incrementFailure(ip) {
+  const hashedIp = hashIp(ip);
+  const failureKey = `ipfailure:${hashedIp}`;
+  const count = await redis.incr(failureKey);
+  if (count === 1) {
+    await redis.expire(failureKey, 300); // 5 min window
+  }
+  if (count % 5 === 0) {
+    console.warn(`High failure rate for hashed IP ${hashedIp}: ${count} failures`);
+  }
+  if (count >= 10) {
+    // Exponential ban durations: 5min, 30min, 1hr
+    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+    let banLevel = await redis.get(`banlevel:${hashedIp}`) || 0;
+    banLevel = Math.min(parseInt(banLevel) + 1, 2);
+    await redis.set(`banlevel:${hashedIp}`, banLevel, 'EX', 3600);
+    const duration = banDurations[banLevel];
+    const expiry = Date.now() + duration;
+    await redis.set(`ban:${hashedIp}`, expiry);
+    const timestamp = new Date().toISOString();
+    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${banLevel}\n`;
+    fs.appendFileSync(LOG_FILE, banLogEntry);
+    console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${banLevel} (${duration / 60000} minutes)`);
+    await redis.del(failureKey); // Reset failure count after ban
+  }
+}
+
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
@@ -1247,9 +1317,9 @@ function updateLogFile() {
   const day = now.toISOString().slice(0, 10);
   (async () => {
     try {
-      const userCount = await redis.scard(`dailyUsers:${day}`);
-      const connectionCount = await redis.scard(`dailyConnections:${day}`);
-      const allTimeUserCount = await redis.pfcount('allTimeUsers');
+      const userCount = await redis.scard(`dailyUsers:${day}`) || 0;
+      const connectionCount = await redis.scard(`dailyConnections:${day}`) || 0;
+      const allTimeUserCount = await redis.pfcount('allTimeUsers') || 0;
       const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
       fs.appendFileSync(LOG_FILE, logEntry);
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);

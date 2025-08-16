@@ -1,4 +1,6 @@
+
 // main.js
+// Core logic: peer connections, message sending, handling offers, etc.
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -301,10 +303,9 @@ async function startPeerConnection(targetId, isOfferer) {
   }
   const timeout = setTimeout(() => {
     if (!dataChannels.get(targetId) || dataChannels.get(targetId).readyState !== 'open') {
-      console.log(`P2P timed out with ${targetId}, falling back to relay`);
+      console.log(`P2P failed with ${targetId}, falling back to relay`);
       useRelay = true;
-      // Changed: Show neutral message instead of failure
-      showStatusMessage('Switching to secure relay mode for connection.');
+      showStatusMessage('P2P connection failed, switching to server relay mode.');
       cleanupPeerConnection(targetId);
       const privacyStatus = document.getElementById('privacyStatus');
       if (privacyStatus) {
@@ -312,8 +313,147 @@ async function startPeerConnection(targetId, isOfferer) {
         privacyStatus.classList.remove('hidden');
       }
     }
-  }, 30000); // Increased to 30s to reduce false positives
+  }, 10000); // 10s timeout for fallback
   connectionTimeouts.set(targetId, timeout);
+}
+
+function setupDataChannel(dataChannel, targetId) {
+  console.log('setupDataChannel initialized for targetId:', targetId);
+  dataChannel.onopen = () => {
+    console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
+    isConnected = true;
+    initialContainer.classList.add('hidden');
+    usernameContainer.classList.add('hidden');
+    connectContainer.classList.add('hidden');
+    chatContainer.classList.remove('hidden');
+    newSessionButton.classList.remove('hidden');
+    inputContainer.classList.remove('hidden');
+    messages.classList.remove('waiting');
+    clearTimeout(connectionTimeouts.get(targetId));
+    retryCounts.delete(targetId);
+    updateMaxClientsUI();
+    document.getElementById('messageInput')?.focus();
+    // Show audio output button only if features allow
+    if (features.enableVoiceCalls && features.enableAudioToggle) {
+      document.getElementById('audioOutputButton').classList.remove('hidden');
+    } else {
+      document.getElementById('audioOutputButton').classList.add('hidden');
+    }
+  };
+  dataChannel.onmessage = async (event) => {
+    const now = performance.now();
+    const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
+    if (now - rateLimit.startTime >= 1000) {
+      rateLimit.count = 0;
+      rateLimit.startTime = now;
+    }
+    rateLimit.count += 1;
+    messageRateLimits.set(targetId, rateLimit);
+    if (rateLimit.count > 10) {
+      console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
+      showStatusMessage('Message rate limit reached, please slow down.');
+      return;
+    }
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (e) {
+      console.error(`Invalid message from ${targetId}:`, e);
+      showStatusMessage('Invalid message received.');
+      return;
+    }
+    if (data.type === 'voice-call-start') {
+      if (!voiceCallActive) {
+        startVoiceCall();
+      }
+      return;
+    }
+    if (data.type === 'voice-call-end') {
+      if (voiceCallActive) {
+        stopVoiceCall();
+      }
+      return;
+    }
+    if (!data.messageId || !data.username || (!data.content && !data.data)) {
+      console.log(`Invalid message format from ${targetId}:`, data);
+      return;
+    }
+    if (processedMessageIds.has(data.messageId)) {
+      console.log(`Duplicate message ${data.messageId} from ${targetId}`);
+      return;
+    }
+    processedMessageIds.add(data.messageId);
+    const senderUsername = usernames.get(targetId) || data.username;
+    const messages = document.getElementById('messages');
+    const isSelf = senderUsername === username;
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'timestamp';
+    timeSpan.textContent = new Date(data.timestamp).toLocaleTimeString();
+    messageDiv.appendChild(timeSpan);
+    messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+    if (data.type === 'image') {
+      const img = document.createElement('img');
+      img.src = data.data;
+      img.style.maxWidth = '100%';
+      img.style.borderRadius = '0.5rem';
+      img.style.cursor = 'pointer';
+      img.setAttribute('alt', 'Received image');
+      img.addEventListener('click', () => createImageModal(data.data, 'messageInput'));
+      messageDiv.appendChild(img);
+    } else if (data.type === 'voice') {
+      const audio = document.createElement('audio');
+      audio.src = data.data;
+      audio.controls = true;
+      audio.setAttribute('alt', 'Received voice message');
+      audio.addEventListener('click', () => createAudioModal(data.data, 'messageInput'));
+      messageDiv.appendChild(audio);
+    } else if (data.type === 'file') {
+      const link = document.createElement('a');
+      link.href = data.data;
+      link.download = data.filename || 'file';
+      link.textContent = `Download ${data.filename || 'file'}`;
+      link.setAttribute('alt', 'Received file');
+      messageDiv.appendChild(link);
+    } else {
+      messageDiv.appendChild(document.createTextNode(sanitizeMessage(data.content)));
+    }
+    messages.prepend(messageDiv);
+    messages.scrollTop = 0;
+    if (isInitiator) {
+      dataChannels.forEach((dc, id) => {
+        if (id !== targetId && dc.readyState === 'open') {
+          dc.send(event.data); // Forward the original data (unencrypted in P2P)
+        }
+      });
+    }
+  };
+  dataChannel.onerror = (error) => {
+    console.error(`Data channel error with ${targetId}:`, error);
+    showStatusMessage('Error in peer connection.');
+  };
+  dataChannel.onclose = () => {
+    console.log(`Data channel closed with ${targetId}`);
+    showStatusMessage('Peer disconnected.');
+    cleanupPeerConnection(targetId);
+    messageRateLimits.delete(targetId);
+    imageRateLimits.delete(targetId);
+    voiceRateLimits.delete(targetId);
+    if (remoteAudios.has(targetId)) {
+      const audio = remoteAudios.get(targetId);
+      audio.remove();
+      remoteAudios.delete(targetId);
+      if (remoteAudios.size === 0) {
+        document.getElementById('remoteAudioContainer').classList.add('hidden');
+      }
+    }
+    if (dataChannels.size === 0) {
+      inputContainer.classList.add('hidden');
+      messages.classList.add('waiting');
+      document.getElementById('audioOutputButton').classList.add('hidden');
+    }
+  };
 }
 
 async function handleOffer(offer, targetId) {
@@ -618,6 +758,7 @@ async function autoConnect(codeParam) {
   usernameContainer.classList.add('hidden');
   chatContainer.classList.remove('hidden');
   codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
   console.log('Loaded username from localStorage:', username);
   if (validateCode(codeParam)) {
     if (validateUsername(username)) {

@@ -299,7 +299,8 @@ socket.onmessage = async (event) => {
         showTotpSecretModal(pendingTotpSecret.display);
         pendingTotpSecret = null;
       }
-      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      const publicKey = await exportPublicKey(keyPair.publicKey);
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
       return;
     }
     if (message.type === 'totp-enabled') {
@@ -314,7 +315,6 @@ socket.onmessage = async (event) => {
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${window.isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
       connectedClients.add(clientId);
-      clientPublicKeys.set(clientId, await exportPublicKey(keyPair.publicKey));
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (window.isInitiator) {
@@ -348,7 +348,7 @@ socket.onmessage = async (event) => {
         usernames.set(message.clientId, message.username);
       }
       connectedClients.add(message.clientId);
-      clientPublicKeys.set(message.clientId, message.publicKey);
+      if (message.publicKey) clientPublicKeys.set(message.clientId, message.publicKey);
       updateMaxClientsUI();
       if (window.isInitiator && message.clientId !== clientId) {
         console.log(`Initiator starting peer connection with new client ${message.clientId}`);

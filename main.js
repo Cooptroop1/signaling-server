@@ -1,3 +1,4 @@
+
 window.isInitiator = false;
 
 let turnUsername = '';
@@ -19,21 +20,8 @@ let ratchets = new Map(); // Per peer DoubleRatchet
 let clientPublicKeys = new Map(); // clientId => base64 public key
 let keyPair;
 (async () => {
-  keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey', 'deriveBits']);
+  keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
 })();
-
-async function waitForPublicKey(targetId) {
-  const maxAttempts = 10;
-  let attempts = 0;
-  while (!clientPublicKeys.has(targetId) && attempts < maxAttempts) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    attempts++;
-  }
-  if (!clientPublicKeys.has(targetId)) {
-    throw new Error(`Public key for ${targetId} not received after waiting`);
-  }
-  return clientPublicKeys.get(targetId);
-}
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -50,12 +38,7 @@ async function sendMedia(file, type) {
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  if (!keyPair || !clientPublicKeys.size) {
-    showStatusMessage('Error: Encryption keys not initialized. Try reconnecting.');
-    document.getElementById(`${type}Button`)?.focus();
-    return;
-  }
-  if (file.size > 1 * 1024 * 1024) {
+  if (file.size > 1 * 1024 * 1024) { // 1MB max for relay
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 1MB limit.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
@@ -349,18 +332,18 @@ async function startPeerConnection(targetId, isOfferer) {
 
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
-  dataChannel.onopen = async () => {
+  dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
-    try {
-      const theirPub = await waitForPublicKey(targetId);
+    (async () => {
+      const theirPub = clientPublicKeys.get(targetId);
+      if (!theirPub) {
+        console.error(`No public key for ${targetId}`);
+        return;
+      }
       const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
       const isSender = clientId > targetId;
       ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
-    } catch (error) {
-      console.error(`Failed to initialize ratchet for ${targetId}:`, error);
-      showStatusMessage('Encryption setup failed. Try reconnecting.');
-      return;
-    }
+    })();
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
@@ -620,14 +603,11 @@ async function sendMessage(content) {
       const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      for (const targetId of dataChannels.keys()) {
-        const ratchet = ratchets.get(targetId);
-        if (ratchet) {
-          const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
-          const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
-          dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+      dataChannels.forEach((dataChannel, targetId) => {
+        if (dataChannel.readyState === 'open') {
+          dataChannel.send(plaintext);
         }
-      }
+      });
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -1066,8 +1046,7 @@ function showTotpInputModal(codeParam) {
 }
 
 async function joinWithTotp(code, totpCode) {
-  const publicKey = await exportPublicKey(keyPair.publicKey);
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, publicKey, token }));
+  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }
 
 function isWebPSupported() {
@@ -1095,4 +1074,3 @@ function updateDots() {
     userDots.appendChild(dot);
   }
 }
-</xaiArtifact>

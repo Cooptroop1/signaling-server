@@ -15,7 +15,7 @@ function generateCode() {
 let code = generateCode();
 let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
 let username = '';
-let isInitiator = false;
+window.isInitiator = false;
 let isConnected = false;
 let maxClients = 2;
 let totalClients = 0;
@@ -33,6 +33,7 @@ let useRelay = false;
 let token = '';
 let refreshToken = '';
 let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
+let keyPair;
 let roomMaster;
 let signingKey;
 let remoteAudios = new Map();
@@ -40,9 +41,8 @@ let refreshingToken = false;
 let signalingQueue = new Map();
 let connectedClients = new Set();
 let clientPublicKeys = new Map();
-let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
-socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-console.log('WebSocket created');
+let initiatorPublic;
+let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
 if (getCookie('clientId')) {
   clientId = getCookie('clientId');
 } else {
@@ -65,6 +65,9 @@ cornerLogo = document.getElementById('cornerLogo');
 button2 = document.getElementById('button2');
 helpText = document.getElementById('helpText');
 helpModal = document.getElementById('helpModal');
+(async () => {
+  keyPair = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey', 'deriveBits']);
+})();
 let cycleTimeout;
 function triggerCycle() {
   if (cycleTimeout) clearTimeout(cycleTimeout);
@@ -92,7 +95,7 @@ helpModal.addEventListener('keydown', (event) => {
 const addUserText = document.getElementById('addUserText');
 const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', () => {
-  if (isInitiator) {
+  if (window.isInitiator) {
     addUserModal.classList.add('active');
     addUserModal.focus();
   }
@@ -269,6 +272,9 @@ socket.onmessage = async (event) => {
         inputContainer.classList.add('hidden');
         messages.classList.remove('waiting');
         socket.close();
+      } else if (message.message.includes('Invalid TOTP code')) {
+        showStatusMessage(message.message);
+        showTotpInputModal(code);
       } else {
         showStatusMessage(message.message);
       }
@@ -292,27 +298,35 @@ socket.onmessage = async (event) => {
     if (message.type === 'init') {
       clientId = message.clientId;
       maxClients = Math.min(message.maxClients, 10);
-      isInitiator = message.isInitiator;
+      window.isInitiator = message.isInitiator;
       features = message.features || features;
       totalClients = 1;
-      console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
+      console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${window.isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
       connectedClients.add(clientId);
-      clientPublicKeys.set(clientId, await exportPublicKey(keyPair.publicKey));
       initializeMaxClientsUI();
       updateFeaturesUI();
-      if (isInitiator) {
+      if (window.isInitiator) {
         isConnected = true;
+        roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+        signingKey = await deriveSigningKey(roomMaster);
+        if (pendingTotpSecret) {
+          socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
+          showTotpSecretModal(pendingTotpSecret.display);
+          pendingTotpSecret = null;
+        }
+        setInterval(triggerRatchet, 5 * 60 * 1000);
       } else {
-        // Non-initiator, public key sent in join
+        const publicKey = await exportPublicKey(keyPair.publicKey);
+        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
-      updateDots();
+      updateMaxClientsUI();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
-      isInitiator = message.newInitiator === clientId;
+      window.isInitiator = message.newInitiator === clientId;
       initializeMaxClientsUI();
       updateMaxClientsUI();
     }
@@ -323,47 +337,40 @@ socket.onmessage = async (event) => {
         usernames.set(message.clientId, message.username);
       }
       connectedClients.add(message.clientId);
-      clientPublicKeys.set(message.clientId, message.publicKey);
       updateMaxClientsUI();
-      updateDots();
-      if (isInitiator && message.clientId !== clientId) {
-        console.log(`Initiator starting peer connection with new client ${message.clientId}`);
-        startPeerConnection(message.clientId, true);
-        // Send group public keys to new joiner
-        const keys = Object.fromEntries(clientPublicKeys);
-        sendSignalingMessage('group-public-keys', { keys, targetId: message.clientId });
-        // Tell existing peers to connect to new
-        dataChannels.forEach((dc, existingId) => {
-          if (dc.readyState === 'open' && existingId !== clientId && existingId !== message.clientId) {
-            dc.send(JSON.stringify({ type: 'connect-to', newId: message.clientId }));
-          }
-        });
-      } else if (!isInitiator && message.clientId !== clientId) {
-        // Existing non-initiator, start connection to new as offerer
+      if (window.isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
+        console.log(`Initiator initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
       }
     }
-    if (message.type === 'group-public-keys') {
-      for (const [id, pk] of Object.entries(message.keys)) {
-        clientPublicKeys.set(id, pk);
+    if (message.type === 'client-disconnected') {
+      totalClients = message.totalClients;
+      console.log(`Client ${message.clientId} disconnected from code: ${code}, total: ${totalClients}`);
+      usernames.delete(message.clientId);
+      connectedClients.delete(message.clientId);
+      clientPublicKeys.delete(message.clientId);
+      cleanupPeerConnection(message.clientId);
+      if (remoteAudios.has(message.clientId)) {
+        const audio = remoteAudios.get(message.clientId);
+        audio.remove();
+        remoteAudios.delete(message.clientId);
+        if (remoteAudios.size === 0) {
+          document.getElementById('remoteAudioContainer').classList.add('hidden');
+        }
       }
-      console.log('Received group public keys');
-      return;
-    }
-    if (message.type === 'connect-to') {
-      const newId = message.newId;
-      if (!peerConnections.has(newId)) {
-        startPeerConnection(newId, true);
+      updateMaxClientsUI();
+      if (totalClients <= 1) {
+        inputContainer.classList.add('hidden');
+        messages.classList.add('waiting');
       }
     }
     if (message.type === 'max-clients') {
       maxClients = Math.min(message.maxClients, 10);
       console.log(`Max clients updated to ${maxClients} for code: ${code}`);
       updateMaxClientsUI();
-      updateDots();
     }
     if (message.type === 'offer' && message.clientId !== clientId) {
       console.log(`Received offer from ${message.clientId} for code: ${code}`);
@@ -377,14 +384,55 @@ socket.onmessage = async (event) => {
       console.log(`Received ICE candidate from ${message.clientId} for code: ${code}`);
       handleCandidate(message.candidate, message.clientId);
     }
-    if (message.type === 'public-key' && isInitiator) {
-      // Legacy, but not used in mesh
+    if (message.type === 'public-key' && window.isInitiator) {
+      try {
+        clientPublicKeys.set(message.clientId, message.publicKey);
+        const joinerPublic = await importPublicKey(message.publicKey);
+        const sharedKey = await deriveSharedKey(keyPair.privateKey, joinerPublic);
+        const { encrypted, iv } = await encryptBytes(sharedKey, roomMaster);
+        const myPublic = await exportPublicKey(keyPair.publicKey);
+        socket.send(JSON.stringify({
+          type: 'encrypted-room-key',
+          encryptedKey: encrypted,
+          iv,
+          publicKey: myPublic,
+          targetId: message.clientId,
+          code,
+          clientId,
+          token
+        }));
+        await triggerRatchet();
+      } catch (error) {
+        console.error('Error handling public-key:', error);
+        showStatusMessage('Key exchange failed.');
+      }
     }
     if (message.type === 'encrypted-room-key') {
-      // Legacy, not used in mesh
+      try {
+        initiatorPublic = message.publicKey;
+        const initiatorPublicImported = await importPublicKey(initiatorPublic);
+        const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
+        const roomMasterBuffer = await decryptBytes(sharedKey, message.encryptedKey, message.iv);
+        roomMaster = new Uint8Array(roomMasterBuffer);
+        signingKey = await deriveSigningKey(roomMaster);
+        console.log('Room master successfully imported.');
+      } catch (error) {
+        console.error('Error handling encrypted-room-key:', error);
+        showStatusMessage('Failed to receive encryption key.');
+      }
     }
     if (message.type === 'new-room-key' && message.targetId === clientId) {
-      // Legacy, not used in mesh
+      try {
+        const importedInitiatorPublic = await importPublicKey(initiatorPublic);
+        const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
+        const newRoomMasterBuffer = await decryptBytes(shared, message.encrypted, message.iv);
+        roomMaster = new Uint8Array(newRoomMasterBuffer);
+        signingKey = await deriveSigningKey(roomMaster);
+        console.log('New room master received and set for PFS.');
+      } catch (error) {
+        console.error('Error handling new-room-key:', error);
+        showStatusMessage('Failed to update encryption key for PFS.');
+      }
     }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
@@ -448,6 +496,10 @@ socket.onmessage = async (event) => {
       features = message;
       console.log('Received features update:', features);
       setTimeout(updateFeaturesUI, 0);
+      if (!features.enableService) {
+        showStatusMessage(`Service disabled by admin. Disconnecting...`);
+        socket.close();
+      }
     }
   } catch (error) {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
@@ -565,7 +617,7 @@ document.getElementById('cancelTotpInputButton').onclick = () => {
   initialContainer.classList.remove('hidden');
 };
 
-document.getElementById('joinWithUsernameButton').onclick = () => {
+document.getElementById('joinWithUsernameButton').onclick = async () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
     showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
@@ -603,7 +655,7 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   document.getElementById('messageInput')?.focus();
 };
 
-document.getElementById('connectButton').onclick = () => {
+document.getElementById('connectButton').onclick = async () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
   const inputCode = document.getElementById('codeInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -770,7 +822,7 @@ document.getElementById('copyCodeButton').onclick = () => {
 };
 
 document.getElementById('button1').onclick = () => {
-  if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
+  if (window.isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
     socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
     showStatusMessage(`Sent code ${code} to random board.`);
     codeSentToRandom = true;
@@ -804,23 +856,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function setupWaitingForJoin(codeParam) {
   code = codeParam;
-  initialContainer.style.display = 'none';
-  connectContainer.style.display = 'none';
-  usernameContainer.style.display = 'none';
-  chatContainer.style.display = 'flex';
-  codeDisplayElement.style.display = 'none';
-  copyCodeButton.style.display = 'none';
+  initialContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
   if (!username || !validateUsername(username)) {
-    usernameContainer.style.display = 'block';
-    chatContainer.style.display = 'none';
+    usernameContainer.classList.remove('hidden');
+    chatContainer.classList.add('hidden');
     statusElement.textContent = 'Please enter a username to join the chat';
     document.getElementById('usernameInput').value = username || '';
     document.getElementById('usernameInput')?.focus();
-    const joinButton = document.getElementById('joinWithUsernameButton');
-    const originalOnclick = joinButton.onclick;
-    joinButton.onclick = () => {
+    document.getElementById('joinWithUsernameButton').onclick = () => {
       const usernameInput = document.getElementById('usernameInput').value.trim();
       if (!validateUsername(usernameInput)) {
         showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
@@ -829,47 +879,42 @@ function setupWaitingForJoin(codeParam) {
       }
       username = usernameInput;
       localStorage.setItem('username', username);
-      usernameContainer.style.display = 'none';
-      chatContainer.style.display = 'flex';
+      usernameContainer.classList.add('hidden');
+      chatContainer.classList.remove('hidden');
       codeDisplayElement.textContent = `Using code: ${code}`;
-      codeDisplayElement.style.display = 'block';
-      copyCodeButton.style.display = 'block';
+      codeDisplayElement.classList.remove('hidden');
+      copyCodeButton.classList.remove('hidden');
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN && token) {
-        const publicKey = await exportPublicKey(keyPair.publicKey);
-        socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       } else {
         pendingJoin = { code, clientId, username };
         if (socket.readyState !== WebSocket.OPEN) {
-          socket.addEventListener('open', async () => {
+          socket.addEventListener('open', () => {
             console.log('WebSocket opened, sending join for existing chat');
             if (token) {
-              const publicKey = await exportPublicKey(keyPair.publicKey);
-              socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+              socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
               pendingJoin = null;
             }
           }, { once: true });
         }
       }
       document.getElementById('messageInput')?.focus();
-      joinButton.onclick = originalOnclick;
     };
   } else {
     codeDisplayElement.textContent = `Using code: ${code}`;
-    codeDisplayElement.style.display = 'block';
-    copyCodeButton.style.display = 'block';
+    codeDisplayElement.classList.remove('hidden');
+    copyCodeButton.classList.remove('hidden');
     if (socket.readyState === WebSocket.OPEN && token) {
-      const publicKey = await exportPublicKey(keyPair.publicKey);
-      socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
     } else {
       pendingJoin = { code, clientId, username };
       if (socket.readyState !== WebSocket.OPEN) {
-        socket.addEventListener('open', async () => {
+        socket.addEventListener('open', () => {
           console.log('WebSocket opened, sending join for existing chat');
           if (token) {
-            const publicKey = await exportPublicKey(keyPair.publicKey);
-            socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+            socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
             pendingJoin = null;
           }
         }, { once: true });

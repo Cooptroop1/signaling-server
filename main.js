@@ -1,17 +1,15 @@
-
 window.isInitiator = false;
-
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map(); 
-let audioOutputMode = 'earpiece'; 
+let renegotiating = new Map();
+let audioOutputMode = 'earpiece';
 let totpEnabled = false;
 let totpSecret = '';
-let pendingTotpSecret = null; 
+let pendingTotpSecret = null;
 let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
@@ -24,10 +22,7 @@ let keyPair;
 })();
 
 async function sendMedia(file, type) {
-  const validTypes = {
-    image: ['image/jpeg', 'image/png'],
-    voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
-  };
+  const validTypes = { image: ['image/jpeg', 'image/png'], voice: ['audio/webm', 'audio/ogg', 'audio/mp4'] };
   if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} messages are disabled by admin.`);
     document.getElementById(`${type}Button`)?.focus();
@@ -133,8 +128,21 @@ async function sendMedia(file, type) {
       const ratchet = ratchets.get(targetId);
       if (ratchet) {
         const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
-        const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
-        dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+        const encryptedBase64 = arrayBufferToBase64(encrypted);
+        const chunkSize = 500000; // ~0.5MB for P2P too
+        if (encryptedBase64.length > chunkSize) {
+          const chunks = [];
+          for (let i = 0; i < encryptedBase64.length; i += chunkSize) {
+            chunks.push(encryptedBase64.slice(i, i + chunkSize));
+          }
+          chunks.forEach((chunk, index) => {
+            const channelPayload = { type: 'enc_chunk', chunk, index, total: chunks.length, messageId, iv: arrayBufferToBase64(iv), header, dhPub };
+            dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+          });
+        } else {
+          const channelPayload = { type: 'enc_msg', encrypted: encryptedBase64, iv: arrayBufferToBase64(iv), header, dhPub };
+          dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+        }
       }
     }
   }
@@ -191,34 +199,15 @@ async function startPeerConnection(targetId, isOfferer) {
   ];
   if (turnUsername && turnCredential) {
     iceServers.push(
-      {
-        urls: "turn:global.relay.metered.ca:80",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turn:global.relay.metered.ca:80?transport=tcp",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turn:global.relay.metered.ca:443",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turns:global.relay.metered.ca:443?transport=tcp",
-        username: turnUsername,
-        credential: turnCredential
-      }
+      { urls: "turn:global.relay.metered.ca:80", username: turnUsername, credential: turnCredential },
+      { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: turnUsername, credential: turnCredential },
+      { urls: "turn:global.relay.metered.ca:443", username: turnUsername, credential: turnCredential },
+      { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: turnUsername, credential: turnCredential }
     );
   } else {
     console.warn('TURN credentials missing, falling back to STUN-only. Set TURN_USERNAME and TURN_CREDENTIAL in env for better P2P.');
   }
-  const peerConnection = new RTCPeerConnection({
-    iceServers,
-    iceTransportPolicy: 'all'
-  });
+  const peerConnection = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'all' });
   peerConnections.set(targetId, peerConnection);
   candidatesQueues.set(targetId, []);
   let dataChannel;
@@ -332,6 +321,7 @@ async function startPeerConnection(targetId, isOfferer) {
 
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
+  const chunkBuffers = new Map(); // messageId => {chunks: [], total: number, timeout: timer}
   dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
     (async () => {
@@ -396,7 +386,35 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
-    if (data.type === 'enc_msg') {
+    if (data.type === 'enc_chunk') {
+      // Handle chunked encrypted message
+      const buffer = chunkBuffers.get(data.messageId) || { chunks: new Array(data.total), received: 0, timeout: null };
+      buffer.chunks[data.index] = data.chunk;
+      buffer.received += 1;
+      if (buffer.received === data.total) {
+        clearTimeout(buffer.timeout);
+        const reassembledEncrypted = buffer.chunks.join('');
+        const ratchet = ratchets.get(targetId);
+        if (!ratchet) {
+          console.error(`No ratchet for sender ${targetId}`);
+          return;
+        }
+        const plaintext = await ratchet.decrypt(reassembledEncrypted, data.iv, data.header, data.dhPub);
+        data = JSON.parse(plaintext);
+        chunkBuffers.delete(data.messageId);
+      } else {
+        // Set timeout for incomplete chunks
+        if (!buffer.timeout) {
+          buffer.timeout = setTimeout(() => {
+            console.error(`Chunk timeout for message ${data.messageId} from ${targetId}`);
+            showStatusMessage('Message chunk timeout; partial data lost.');
+            chunkBuffers.delete(data.messageId);
+          }, 30000); // 30s timeout
+        }
+        chunkBuffers.set(data.messageId, buffer);
+        return; // Wait for more chunks
+      }
+    } else if (data.type === 'enc_msg') {
       const ratchet = ratchets.get(targetId);
       if (!ratchet) {
         console.error(`No ratchet for sender ${targetId}`);
@@ -603,9 +621,27 @@ async function sendMessage(content) {
       const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      dataChannels.forEach((dataChannel, targetId) => {
+      dataChannels.forEach(async (dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {
-          dataChannel.send(plaintext);
+          const ratchet = ratchets.get(targetId);
+          if (ratchet) {
+            const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
+            const encryptedBase64 = arrayBufferToBase64(encrypted);
+            const chunkSize = 500000; // ~0.5MB
+            if (encryptedBase64.length > chunkSize) {
+              const chunks = [];
+              for (let i = 0; i < encryptedBase64.length; i += chunkSize) {
+                chunks.push(encryptedBase64.slice(i, i + chunkSize));
+              }
+              chunks.forEach((chunk, index) => {
+                const channelPayload = { type: 'enc_chunk', chunk, index, total: chunks.length, messageId, iv: arrayBufferToBase64(iv), header, dhPub };
+                dataChannel.send(JSON.stringify(channelPayload));
+              });
+            } else {
+              const channelPayload = { type: 'enc_msg', encrypted: encryptedBase64, iv: arrayBufferToBase64(iv), header, dhPub };
+              dataChannel.send(JSON.stringify(channelPayload));
+            }
+          }
         }
       });
     }
@@ -952,9 +988,7 @@ async function setAudioOutput(audioElement, targetId) {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
       if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker' 
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
-          : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
+        const targetDevice = audioOutputMode === 'speaker' ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
         if (targetDevice) {
           await audioElement.setSinkId(targetDevice.deviceId);
           console.log(`Set audio output for ${targetId} to ${targetDevice.label}`);
@@ -1002,7 +1036,7 @@ async function startTotpRoom(serverGenerated) {
     totpSecret = generateTotpSecret();
   } else {
     totpSecret = document.getElementById('customTotpSecret').value.trim();
-    const base32Regex = /^[A-Z2-7]+=*$/i;
+    const base32Regex = /^[A-Z2-7]+=$/i;
     if (!base32Regex.test(totpSecret) || totpSecret.length < 16) {
       showStatusMessage('Invalid custom TOTP secret format (base32, min 16 chars).');
       return;
@@ -1074,3 +1108,34 @@ function updateDots() {
     userDots.appendChild(dot);
   }
 }
+
+async function triggerRatchet() {
+  if (!window.isInitiator || connectedClients.size <= 1) return;
+  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  let success = 0;
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) {
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      continue;
+    }
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      success++;
+    } catch (error) {
+      console.error(`Error sending new room key to ${cId}:`, error);
+    }
+  }
+  if (success > 0) {
+    roomMaster = newRoomMaster;
+    signingKey = await deriveSigningKey(roomMaster);
+    console.log('PFS ratchet complete, new roomMaster set.');
+  } else {
+    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+  }
+}
+window.triggerRatchet = triggerRatchet; // Global access

@@ -99,13 +99,7 @@ async function deriveSharedKey(privateKey, publicKey) {
     privateKey,
     256
   );
-  return await window.crypto.subtle.importKey(
-    "raw",
-    sharedBits,
-    "AES-GCM",
-    false,
-    ["encrypt", "decrypt"]
-  );
+  return new Uint8Array(sharedBits);
 }
 
 async function encryptRaw(key, data) {
@@ -153,4 +147,98 @@ async function deriveSigningKey(master) {
     false,
     ['sign', 'verify']
   );
+}
+
+// New: Double Ratchet Class
+class DoubleRatchet {
+  constructor(sharedSecret, remotePublicKeyBase64, isSender) {
+    this.sharedSecret = sharedSecret;
+    this.isSender = isSender;
+    this.rootKey = null;
+    this.sendingChainKey = null;
+    this.receivingChainKey = null;
+    this.sendMessageNum = 0;
+    this.recvMessageNum = 0;
+    this.previousSendNum = 0;
+    this.DHs = null;
+    this.DHr = null;
+    this.remotePublicKeyBase64 = remotePublicKeyBase64;
+    this.init();
+  }
+
+  async init() {
+    this.DHs = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
+    this.DHr = await importPublicKey(this.remotePublicKeyBase64);
+    this.rootKey = await this.hkdf(this.sharedSecret, null, 'root', 32);
+    if (this.isSender) {
+      this.dhRatchet(null);
+      this.sendingChainKey = this.rootKey;
+    } else {
+      this.receivingChainKey = this.rootKey;
+    }
+  }
+
+  async hkdf(input, salt, info, length) {
+    const key = await crypto.subtle.importKey('raw', input, { name: 'HKDF' }, false, ['deriveBits']);
+    const derived = await crypto.subtle.deriveBits({ name: 'HKDF', salt: salt || new Uint8Array(), info: new TextEncoder().encode(info), hash: 'SHA-256' }, key, length * 8);
+    return new Uint8Array(derived);
+  }
+
+  async kdf_ck(ck) {
+    const hmac = await crypto.subtle.importKey('raw', ck, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const messageKey = await crypto.subtle.sign({ name: 'HMAC' }, hmac, new Uint8Array([1]));
+    const newCk = await crypto.subtle.sign({ name: 'HMAC' }, hmac, new Uint8Array([2]));
+    return { messageKey: new Uint8Array(messageKey), newCk: new Uint8Array(newCk) };
+  }
+
+  async dhRatchet(remotePub) {
+    if (remotePub) {
+      this.previousSendNum = this.sendMessageNum;
+      this.sendMessageNum = 0;
+      this.recvMessageNum = 0;
+      this.DHr = remotePub;
+    }
+    const dhSecret = await crypto.subtle.deriveBits({ name: 'ECDH', public: this.DHr }, this.DHs.privateKey, 256);
+    const rkCk = await this.hkdf(new Uint8Array(dhSecret), null, 'dh_ratchet', 64);
+    this.rootKey = rkCk.slice(0, 32);
+    if (remotePub) {
+      this.receivingChainKey = rkCk.slice(32);
+    } else {
+      this.sendingChainKey = rkCk.slice(32);
+    }
+    this.DHs = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
+  }
+
+  async encrypt(plaintext) {
+    if (!this.sendingChainKey) {
+      await this.dhRatchet(null);
+    }
+    const { messageKey, newCk } = await this.kdf_ck(this.sendingChainKey);
+    this.sendingChainKey = newCk;
+    this.sendMessageNum += 1;
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const key = await crypto.subtle.importKey('raw', messageKey, { name: 'AES-GCM' }, false, ['encrypt']);
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+    const header = { pn: this.previousSendNum, n: this.sendMessageNum };
+    const dhPub = await exportPublicKey(this.DHs.publicKey);
+    return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv), header, dhPub };
+  }
+
+  async decrypt(encrypted, iv, header, dhPub) {
+    const remotePub = await importPublicKey(dhPub);
+    if (remotePub !== this.DHr) {
+      await this.dhRatchet(remotePub);
+    }
+    const skips = header.n - this.recvMessageNum;
+    for (let i = 0; i < skips; i++) {
+      const { newCk } = await this.kdf_ck(this.receivingChainKey);
+      this.receivingChainKey = newCk;
+    }
+    const { messageKey, newCk } = await this.kdf_ck(this.receivingChainKey);
+    this.receivingChainKey = newCk;
+    this.recvMessageNum = header.n;
+    const key = await crypto.subtle.importKey('raw', messageKey, { name: 'AES-GCM' }, false, ['decrypt']);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, key, base64ToArrayBuffer(encrypted));
+    return new TextDecoder().decode(plaintext);
+  }
 }

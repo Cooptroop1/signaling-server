@@ -6,21 +6,34 @@ let localStream = null;
 let voiceCallActive = false;
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map(); 
-let audioOutputMode = 'earpiece'; 
+let renegotiating = new Map();
+let audioOutputMode = 'earpiece';
 let totpEnabled = false;
 let totpSecret = '';
-let pendingTotpSecret = null; 
+let pendingTotpSecret = null;
 let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
-let ratchets = new Map(); // Per peer DoubleRatchet
-let clientPublicKeys = new Map(); // clientId => base64 public key
+let ratchets = new Map();
+let clientPublicKeys = new Map();
 let keyPair;
 (async () => {
   keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
 })();
+
+async function waitForPublicKey(targetId) {
+  const maxAttempts = 10;
+  let attempts = 0;
+  while (!clientPublicKeys.has(targetId) && attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    attempts++;
+  }
+  if (!clientPublicKeys.has(targetId)) {
+    throw new Error(`Public key for ${targetId} not received after waiting`);
+  }
+  return clientPublicKeys.get(targetId);
+}
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -37,7 +50,12 @@ async function sendMedia(file, type) {
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  if (file.size > 1 * 1024 * 1024) { // 1MB max for relay
+  if (!keyPair || !clientPublicKeys.size) {
+    showStatusMessage('Error: Encryption keys not initialized. Try reconnecting.');
+    document.getElementById(`${type}Button`)?.focus();
+    return;
+  }
+  if (file.size > 1 * 1024 * 1024) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 1MB limit.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
@@ -96,7 +114,7 @@ async function sendMedia(file, type) {
       reader.onload = () => resolve(reader.result);
       reader.readAsDataURL(file);
     });
-  } else { // type === 'file'
+  } else {
     base64 = await new Promise(resolve => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
@@ -115,7 +133,7 @@ async function sendMedia(file, type) {
     const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
     const signature = await signMessage(signingKey, encrypted);
     const encryptedBase64 = arrayBufferToBase64(encrypted);
-    const chunkSize = 500000; // ~0.5MB
+    const chunkSize = 500000;
     if (encryptedBase64.length > chunkSize) {
       const chunks = [];
       for (let i = 0; i < encryptedBase64.length; i += chunkSize) {
@@ -161,7 +179,7 @@ async function sendMedia(file, type) {
     audioElement.setAttribute('alt', 'Sent voice message');
     audioElement.addEventListener('click', () => createAudioModal(base64, `${type}Button`));
     messageDiv.appendChild(audioElement);
-  } else { // type === 'file'
+  } else {
     const link = document.createElement('a');
     link.href = base64;
     link.download = file.name;
@@ -331,18 +349,18 @@ async function startPeerConnection(targetId, isOfferer) {
 
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
-  dataChannel.onopen = () => {
+  dataChannel.onopen = async () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
-    (async () => {
-      const theirPub = clientPublicKeys.get(targetId);
-      if (!theirPub) {
-        console.error(`No public key for ${targetId}`);
-        return;
-      }
+    try {
+      const theirPub = await waitForPublicKey(targetId);
       const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
       const isSender = clientId > targetId;
       ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
-    })();
+    } catch (error) {
+      console.error(`Failed to initialize ratchet for ${targetId}:`, error);
+      showStatusMessage('Encryption setup failed. Try reconnecting.');
+      return;
+    }
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
@@ -602,11 +620,14 @@ async function sendMessage(content) {
       const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      dataChannels.forEach((dataChannel, targetId) => {
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(plaintext);
+      for (const targetId of dataChannels.keys()) {
+        const ratchet = ratchets.get(targetId);
+        if (ratchet) {
+          const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
+          const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
+          dataChannels.get(targetId).send(JSON.stringify(channelPayload));
         }
-      });
+      }
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -951,8 +972,8 @@ async function setAudioOutput(audioElement, targetId) {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
       if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker' 
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
+        const targetDevice = audioOutputMode === 'speaker'
+          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default')
           : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
         if (targetDevice) {
           await audioElement.setSinkId(targetDevice.deviceId);
@@ -1045,7 +1066,8 @@ function showTotpInputModal(codeParam) {
 }
 
 async function joinWithTotp(code, totpCode) {
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
+  const publicKey = await exportPublicKey(keyPair.publicKey);
+  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, publicKey, token }));
 }
 
 function isWebPSupported() {

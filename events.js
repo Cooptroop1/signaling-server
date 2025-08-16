@@ -1,3 +1,5 @@
+
+
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -13,9 +15,9 @@ function generateCode() {
   return result;
 }
 let code = generateCode();
-let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
+let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9); // Prefer cookie
 let username = '';
-window.isInitiator = false;
+let isInitiator = false;
 let isConnected = false;
 let maxClients = 2;
 let totalClients = 0;
@@ -32,62 +34,62 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true }; // Global features state
+let keyPair;
 let roomMaster;
-let signingKey;
+let signingKey; // New: Cached signing key for HMAC
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
-let connectedClients = new Set();
-let initiatorPublic;
-let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-function getCookie(name) {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop().split(';').shift();
-  return null;
-}
-function setCookie(name, value, days) {
-  let expires = '';
-  if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = '; expires=' + date.toUTCString();
+let connectedClients = new Set(); // New: Track connected client IDs for ratchet
+let clientPublicKeys = new Map(); // New: Initiator stores public keys of clients
+let initiatorPublic; // New: Non-initiators store initiator's public key
+// Declare UI variables globally
+let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
+if (typeof window !== 'undefined') {
+  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+  console.log('WebSocket created');
+  if (getCookie('clientId')) {
+    clientId = getCookie('clientId');
+  } else {
+    setCookie('clientId', clientId, 365);
   }
-  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
-}
-if (getCookie('clientId')) {
-  clientId = getCookie('clientId');
-} else {
-  setCookie('clientId', clientId, 365);
-}
-username = localStorage.getItem('username')?.trim() || '';
-globalMessageRate.startTime = performance.now();
-statusElement = document.getElementById('status');
-codeDisplayElement = document.getElementById('codeDisplay');
-copyCodeButton = document.getElementById('copyCodeButton');
-initialContainer = document.getElementById('initialContainer');
-usernameContainer = document.getElementById('usernameContainer');
-connectContainer = document.getElementById('connectContainer');
-chatContainer = document.getElementById('chatContainer');
-newSessionButton = document.getElementById('newSessionButton');
-maxClientsContainer = document.getElementById('maxClientsContainer');
-inputContainer = document.querySelector('.input-container');
-messages = document.getElementById('messages');
-cornerLogo = document.getElementById('cornerLogo');
-button2 = document.getElementById('button2');
-helpText = document.getElementById('helpText');
-helpModal = document.getElementById('helpModal');
-let cycleTimeout;
-function triggerCycle() {
-  if (cycleTimeout) clearTimeout(cycleTimeout);
-  cornerLogo.classList.add('wink');
-  cycleTimeout = setTimeout(() => {
-    cornerLogo.classList.remove('wink');
-  }, 500);
+  username = localStorage.getItem('username')?.trim() || '';
+  globalMessageRate.startTime = performance.now();
+  statusElement = document.getElementById('status');
+  codeDisplayElement = document.getElementById('codeDisplay');
+  copyCodeButton = document.getElementById('copyCodeButton');
+  initialContainer = document.getElementById('initialContainer');
+  usernameContainer = document.getElementById('usernameContainer');
+  connectContainer = document.getElementById('connectContainer');
+  chatContainer = document.getElementById('chatContainer');
+  newSessionButton = document.getElementById('newSessionButton');
+  maxClientsContainer = document.getElementById('maxClientsContainer');
+  inputContainer = document.querySelector('.input-container');
+  messages = document.getElementById('messages');
+  cornerLogo = document.getElementById('cornerLogo');
+  button2 = document.getElementById('button2');
+  helpText = document.getElementById('helpText');
+  helpModal = document.getElementById('helpModal');
+  (async () => {
+    keyPair = await window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-384' },
+      true,
+      ['deriveKey', 'deriveBits']
+    );
+  })();
+  let cycleTimeout;
+  function triggerCycle() {
+    if (cycleTimeout) clearTimeout(cycleTimeout);
+    cornerLogo.classList.add('wink');
+    cycleTimeout = setTimeout(() => {
+      cornerLogo.classList.remove('wink');
+    }, 500);
+    setTimeout(triggerCycle, 60000);
+  }
   setTimeout(triggerCycle, 60000);
 }
-setTimeout(triggerCycle, 60000);
+// Event handlers and listeners
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
   helpModal.focus();
@@ -105,7 +107,7 @@ helpModal.addEventListener('keydown', (event) => {
 const addUserText = document.getElementById('addUserText');
 const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', () => {
-  if (window.isInitiator) {
+  if (isInitiator) {
     addUserModal.classList.add('active');
     addUserModal.focus();
   }
@@ -122,16 +124,17 @@ addUserModal.addEventListener('keydown', (event) => {
 });
 let pendingCode = null;
 let pendingJoin = null;
-const maxReconnectAttempts = 5;
+const maxReconnectAttempts = 5; // Limit reconnect attempts
 let refreshFailures = 0;
-let refreshBackoff = 1000;
+let refreshBackoff = 1000; // Initial backoff 1s
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
-  reconnectAttempts = 0;
+  reconnectAttempts = 0; // Reset on successful connection
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
+    console.log('Detected code in URL, setting pendingCode for autoConnect after token');
     pendingCode = codeParam;
   } else {
     console.log('No valid code in URL, showing initial container');
@@ -184,6 +187,7 @@ socket.onmessage = async (event) => {
       token = message.accessToken;
       refreshToken = message.refreshToken;
       console.log('Received authentication tokens:', { accessToken: token, refreshToken });
+      // Start token refresh timer (5 minutes for 10-minute expiry)
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingCode) {
         autoConnect(pendingCode);
@@ -194,11 +198,12 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'token-refreshed') {
       token = message.accessToken;
-      refreshToken = message.refreshToken;
+      refreshToken = message.refreshToken; // Update with new rotated refresh token
       console.log('Received new tokens:', { accessToken: token, refreshToken });
       showStatusMessage('Authentication tokens refreshed.');
       refreshFailures = 0;
       refreshBackoff = 1000;
+      // Restart token refresh timer
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingJoin) {
         socket.send(JSON.stringify({ type: 'join', ...pendingJoin, token }));
@@ -211,6 +216,7 @@ socket.onmessage = async (event) => {
     if (message.type === 'error') {
       console.error('Server error:', message.message, 'Code:', message.code || 'N/A');
       if (message.message.includes('Invalid or expired token') || message.message.includes('Missing authentication token')) {
+        // Silently handle token refresh without showing message
         if (refreshToken && !refreshingToken) {
           refreshingToken = true;
           console.log('Attempting to refresh token');
@@ -230,15 +236,16 @@ socket.onmessage = async (event) => {
           refreshToken = '';
           refreshFailures = 0;
           refreshBackoff = 1000;
-          socket.close();
+          socket.close(); // Trigger reconnect
         } else {
+          // Exponential backoff for retry
           setTimeout(() => {
             if (refreshToken && !refreshingToken) {
               refreshingToken = true;
               socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
             }
           }, refreshBackoff);
-          refreshBackoff = Math.min(refreshBackoff * 2, 8000);
+          refreshBackoff = Math.min(refreshBackoff * 2, 8000); // Cap at 8s
         }
         showStatusMessage('Session expired. Reconnecting...');
       } else if (message.message.includes('Rate limit exceeded')) {
@@ -253,7 +260,7 @@ socket.onmessage = async (event) => {
         message.message.includes('Initiator offline') || 
         message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
-        showStatusMessage(`Failed to join chat: ${message.message}`);
+        showStatusMessage(`Failed to join join chat: ${message.message}`);
         socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
         initialContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
@@ -267,10 +274,11 @@ socket.onmessage = async (event) => {
         messages.classList.remove('waiting');
         codeSentToRandom = false;
         button2.disabled = false;
-        token = '';
-        refreshToken = '';
+        token = ''; // Clear token
+        refreshToken = ''; // Clear refresh token
       } else if (message.message.includes('Service has been disabled by admin.')) {
         showStatusMessage(message.message);
+        // Reset UI to initial state
         initialContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
         connectContainer.classList.add('hidden');
@@ -282,9 +290,6 @@ socket.onmessage = async (event) => {
         inputContainer.classList.add('hidden');
         messages.classList.remove('waiting');
         socket.close();
-      } else if (message.message.includes('Invalid TOTP code')) {
-        showStatusMessage(message.message);
-        showTotpInputModal(code);
       } else {
         showStatusMessage(message.message);
       }
@@ -308,16 +313,15 @@ socket.onmessage = async (event) => {
     if (message.type === 'init') {
       clientId = message.clientId;
       maxClients = Math.min(message.maxClients, 10);
-      window.isInitiator = message.isInitiator;
+      isInitiator = message.isInitiator;
       features = message.features || features;
       totalClients = 1;
-      console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${window.isInitiator}, features: ${JSON.stringify(features)}`);
+      console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
-      connectedClients.add(clientId);
-      clientPublicKeys.set(clientId, await exportPublicKey(keyPair.publicKey));
+      connectedClients.add(clientId); // Add self
       initializeMaxClientsUI();
       updateFeaturesUI();
-      if (window.isInitiator) {
+      if (isInitiator) {
         isConnected = true;
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
@@ -326,18 +330,20 @@ socket.onmessage = async (event) => {
           showTotpSecretModal(pendingTotpSecret.display);
           pendingTotpSecret = null;
         }
-        setInterval(window.triggerRatchet, 5 * 60 * 1000);
+        // New: Periodic ratchet timer (every 5 minutes)
+        setInterval(triggerRatchet, 5 * 60 * 1000);
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
       updateMaxClientsUI();
+      updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
-      window.isInitiator = message.newInitiator === clientId;
+      isInitiator = message.newInitiator === clientId;
       initializeMaxClientsUI();
       updateMaxClientsUI();
     }
@@ -348,27 +354,14 @@ socket.onmessage = async (event) => {
         usernames.set(message.clientId, message.username);
       }
       connectedClients.add(message.clientId);
-      clientPublicKeys.set(message.clientId, message.publicKey);
       updateMaxClientsUI();
-      if (window.isInitiator && message.clientId !== clientId) {
-        console.log(`Initiator starting peer connection with new client ${message.clientId}`);
+      updateDots();
+      if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
+        console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
-      }
-    }
-    if (message.type === 'group-public-keys') {
-      for (const [id, pk] of Object.entries(message.keys)) {
-        clientPublicKeys.set(id, pk);
-      }
-      console.log('Received group public keys');
-      return;
-    }
-    if (message.type === 'connect-to') {
-      const newId = message.newId;
-      if (!peerConnections.has(newId)) {
-        startPeerConnection(newId, true);
       }
     }
     if (message.type === 'client-disconnected') {
@@ -387,6 +380,7 @@ socket.onmessage = async (event) => {
         }
       }
       updateMaxClientsUI();
+      updateDots();
       if (totalClients <= 1) {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
@@ -396,6 +390,7 @@ socket.onmessage = async (event) => {
       maxClients = Math.min(message.maxClients, 10);
       console.log(`Max clients updated to ${maxClients} for code: ${code}`);
       updateMaxClientsUI();
+      updateDots();
     }
     if (message.type === 'offer' && message.clientId !== clientId) {
       console.log(`Received offer from ${message.clientId} for code: ${code}`);
@@ -409,9 +404,9 @@ socket.onmessage = async (event) => {
       console.log(`Received ICE candidate from ${message.clientId} for code: ${code}`);
       handleCandidate(message.candidate, message.clientId);
     }
-    if (message.type === 'public-key' && window.isInitiator) {
+    if (message.type === 'public-key' && isInitiator) {
       try {
-        clientPublicKeys.set(message.clientId, message.publicKey);
+        clientPublicKeys.set(message.clientId, message.publicKey); // Store joiner's public key
         const joinerPublic = await importPublicKey(message.publicKey);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, joinerPublic);
         const { encrypted, iv } = await encryptBytes(sharedKey, roomMaster);
@@ -426,7 +421,8 @@ socket.onmessage = async (event) => {
           clientId,
           token
         }));
-        await window.triggerRatchet();
+        // Trigger PFS ratchet after receiving and storing the public key
+        await triggerRatchet();
       } catch (error) {
         console.error('Error handling public-key:', error);
         showStatusMessage('Key exchange failed.');
@@ -434,7 +430,7 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'encrypted-room-key') {
       try {
-        initiatorPublic = message.publicKey;
+        initiatorPublic = message.publicKey; // Store initiator's public key
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
         const roomMasterBuffer = await decryptBytes(sharedKey, message.encryptedKey, message.iv);
@@ -463,7 +459,7 @@ socket.onmessage = async (event) => {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
       const encrypted = message.type === 'message' ? message.encryptedContent : message.encryptedData;
-      const valid = await verifyMessage(signingKey, message.signature, encrypted);
+      const valid = await verifyMessage(signingKey, message.signature, encrypted); // Verify signature before decrypt
       if (!valid) {
         console.error('Tampered message detected');
         showStatusMessage('Tampered message detected. Ignoring.');
@@ -531,6 +527,7 @@ socket.onmessage = async (event) => {
   }
 };
 
+// New: Function to refresh access token proactively
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
@@ -541,6 +538,36 @@ function refreshAccessToken() {
   }
 }
 
+// New: Function to trigger PFS key rotation (called by initiator on new join)
+async function triggerRatchet() {
+  if (!isInitiator) return;
+  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  let success = 0;
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) {
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      continue;
+    }
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      success++;
+    } catch (error) {
+      console.error(`Error sending new room key to ${cId}:`, error);
+    }
+  }
+  if (success > 0) {
+    roomMaster = newRoomMaster;
+    signingKey = await deriveSigningKey(roomMaster);
+    console.log('PFS ratchet complete, new roomMaster set.');
+  } else {
+    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+  }
+}
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');
@@ -553,7 +580,6 @@ document.getElementById('startChatToggleButton').onclick = () => {
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
 };
-
 document.getElementById('connectToggleButton').onclick = () => {
   console.log('Connect toggle clicked');
   initialContainer.classList.add('hidden');
@@ -566,7 +592,6 @@ document.getElementById('connectToggleButton').onclick = () => {
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
 };
-
 document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.add('active');
   document.getElementById('totpUsernameInput').value = username || '';
@@ -574,7 +599,6 @@ document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('customTotpSecretContainer').classList.add('hidden');
   document.querySelector('input[name="totpType"][value="server"]').checked = true;
 };
-
 document.getElementById('connect2FAChatButton').onclick = () => {
   initialContainer.classList.add('hidden');
   usernameContainer.classList.add('hidden');
@@ -585,6 +609,7 @@ document.getElementById('connect2FAChatButton').onclick = () => {
   statusElement.textContent = 'Enter a username and code to join a 2FA chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
+  // Override connectButton for 2FA prompt
   const connectButton = document.getElementById('connectButton');
   connectButton.onclick = () => {
     const usernameInput = document.getElementById('usernameConnectInput').value.trim();
@@ -605,27 +630,22 @@ document.getElementById('connect2FAChatButton').onclick = () => {
     showTotpInputModal(code);
   };
 };
-
 document.querySelectorAll('input[name="totpType"]').forEach(radio => {
   radio.addEventListener('change', () => {
     document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');
   });
 });
-
 document.getElementById('createTotpRoomButton').onclick = () => {
   const serverGenerated = document.querySelector('input[name="totpType"]:checked').value === 'server';
   startTotpRoom(serverGenerated);
 };
-
 document.getElementById('cancelTotpButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
-
 document.getElementById('closeTotpSecretButton').onclick = () => {
   document.getElementById('totpSecretModal').classList.remove('active');
 };
-
 document.getElementById('submitTotpCodeButton').onclick = () => {
   const totpCode = document.getElementById('totpCodeInput').value.trim();
   const codeParam = document.getElementById('totpInputModal').dataset.code;
@@ -636,13 +656,11 @@ document.getElementById('submitTotpCodeButton').onclick = () => {
   joinWithTotp(codeParam, totpCode);
   document.getElementById('totpInputModal').classList.remove('active');
 };
-
 document.getElementById('cancelTotpInputButton').onclick = () => {
   document.getElementById('totpInputModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
-
-document.getElementById('joinWithUsernameButton').onclick = async () => {
+document.getElementById('joinWithUsernameButton').onclick = () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
     showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
@@ -651,6 +669,7 @@ document.getElementById('joinWithUsernameButton').onclick = async () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
+  console.log('Username set in localStorage:', username);
   code = generateCode();
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -662,16 +681,15 @@ document.getElementById('joinWithUsernameButton').onclick = async () => {
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
   if (socket.readyState === WebSocket.OPEN && token) {
-    const publicKey = await exportPublicKey(keyPair.publicKey);
-    socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+    console.log('Sending join message for new chat');
+    socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
   } else {
     pendingJoin = { code, clientId, username };
     if (socket.readyState !== WebSocket.OPEN) {
-      socket.addEventListener('open', async () => {
+      socket.addEventListener('open', () => {
         console.log('WebSocket opened, sending join for new chat');
         if (token) {
-          const publicKey = await exportPublicKey(keyPair.publicKey);
-          socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
           pendingJoin = null;
         }
       }, { once: true });
@@ -679,8 +697,7 @@ document.getElementById('joinWithUsernameButton').onclick = async () => {
   }
   document.getElementById('messageInput')?.focus();
 };
-
-document.getElementById('connectButton').onclick = async () => {
+document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
   const inputCode = document.getElementById('codeInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -695,6 +712,7 @@ document.getElementById('connectButton').onclick = async () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
+  console.log('Username set in localStorage:', username);
   code = inputCode;
   codeDisplayElement.textContent = `Using code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -706,16 +724,15 @@ document.getElementById('connectButton').onclick = async () => {
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
   if (socket.readyState === WebSocket.OPEN && token) {
-    const publicKey = await exportPublicKey(keyPair.publicKey);
-    socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+    console.log('Sending join message for existing chat');
+    socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
   } else {
     pendingJoin = { code, clientId, username };
     if (socket.readyState !== WebSocket.OPEN) {
-      socket.addEventListener('open', async () => {
+      socket.addEventListener('open', () => {
         console.log('WebSocket opened, sending join for existing chat');
         if (token) {
-          const publicKey = await exportPublicKey(keyPair.publicKey);
-          socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
+          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
           pendingJoin = null;
         }
       }, { once: true });
@@ -723,7 +740,6 @@ document.getElementById('connectButton').onclick = async () => {
   }
   document.getElementById('messageInput')?.focus();
 };
-
 document.getElementById('backButton').onclick = () => {
   console.log('Back button clicked from usernameContainer');
   usernameContainer.classList.add('hidden');
@@ -736,7 +752,6 @@ document.getElementById('backButton').onclick = () => {
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
 };
-
 document.getElementById('backButtonConnect').onclick = () => {
   console.log('Back button clicked from connectContainer');
   connectContainer.classList.add('hidden');
@@ -749,7 +764,6 @@ document.getElementById('backButtonConnect').onclick = () => {
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
 };
-
 document.getElementById('sendButton').onclick = () => {
   const messageInput = document.getElementById('messageInput');
   const message = messageInput.value.trim();
@@ -757,7 +771,7 @@ document.getElementById('sendButton').onclick = () => {
     sendMessage(message);
   }
 };
-
+// Add Enter key listener for sending messages
 document.getElementById('messageInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -768,11 +782,9 @@ document.getElementById('messageInput').addEventListener('keydown', (event) => {
     }
   }
 });
-
 document.getElementById('imageButton').onclick = () => {
   document.getElementById('imageInput')?.click();
 };
-
 document.getElementById('imageInput').onchange = (event) => {
   const file = event.target.files[0];
   if (file) {
@@ -781,7 +793,6 @@ document.getElementById('imageInput').onchange = (event) => {
     event.target.value = '';
   }
 };
-
 document.getElementById('voiceButton').onclick = () => {
   if (!mediaRecorder || mediaRecorder.state !== 'recording') {
     startVoiceRecording();
@@ -789,49 +800,41 @@ document.getElementById('voiceButton').onclick = () => {
     stopVoiceRecording();
   }
 };
-
 document.getElementById('voiceCallButton').onclick = () => {
   toggleVoiceCall();
 };
-
 document.getElementById('audioOutputButton').onclick = () => {
   toggleAudioOutput();
 };
-
 document.getElementById('grokButton').onclick = () => {
   toggleGrokBot();
 };
-
 document.getElementById('saveGrokKey').onclick = () => {
   saveGrokKey();
 };
-
 document.getElementById('newSessionButton').onclick = () => {
   console.log('New session button clicked');
+  // Redirect to the domain root to refresh and start fresh
   window.location.href = 'https://anonomoose.com';
 };
-
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     document.getElementById('joinWithUsernameButton')?.click();
   }
 });
-
 document.getElementById('usernameConnectInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     document.getElementById('codeInput')?.focus();
   }
 });
-
 document.getElementById('codeInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     document.getElementById('connectButton')?.click();
   }
 });
-
 document.getElementById('copyCodeButton').onclick = () => {
   const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
   navigator.clipboard.writeText(codeText).then(() => {
@@ -845,9 +848,8 @@ document.getElementById('copyCodeButton').onclick = () => {
   });
   copyCodeButton?.focus();
 };
-
 document.getElementById('button1').onclick = () => {
-  if (window.isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
+  if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
     socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
     showStatusMessage(`Sent code ${code} to random board.`);
     codeSentToRandom = true;
@@ -857,20 +859,53 @@ document.getElementById('button1').onclick = () => {
   }
   document.getElementById('button1')?.focus();
 };
-
 document.getElementById('button2').onclick = () => {
   if (!button2.disabled) {
     window.location.href = 'https://anonomoose.com/random.html';
   }
   document.getElementById('button2')?.focus();
 };
-
 cornerLogo.addEventListener('click', () => {
   document.getElementById('messages').innerHTML = '';
   processedMessageIds.clear();
   showStatusMessage('Chat history cleared locally.');
 });
 
+// Function to update user dots
+function updateDots() {
+  const userDots = document.getElementById('userDots');
+  if (!userDots) return;
+  userDots.innerHTML = '';
+  const greenCount = Math.min(totalClients, maxClients);
+  const redCount = maxClients - greenCount;
+  for (let i = 0; i < greenCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot online';
+    userDots.appendChild(dot);
+  }
+  for (let i = 0; i < redCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot offline';
+    userDots.appendChild(dot);
+  }
+}
+
+// Cookie helpers
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+function setCookie(name, value, days) {
+  let expires = '';
+  if (days) {
+    const date = new Date();
+    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    expires = '; expires=' + date.toUTCString();
+  }
+  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
+}
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -878,24 +913,25 @@ document.addEventListener('DOMContentLoaded', () => {
     setupWaitingForJoin(codeParam);
   }
 });
-
 function setupWaitingForJoin(codeParam) {
   code = codeParam;
-  initialContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  usernameContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
+  initialContainer.style.display = 'none';
+  connectContainer.style.display = 'none';
+  usernameContainer.style.display = 'none';
+  chatContainer.style.display = 'flex';
+  codeDisplayElement.style.display = 'none';
+  copyCodeButton.style.display = 'none';
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
   if (!username || !validateUsername(username)) {
-    usernameContainer.classList.remove('hidden');
-    chatContainer.classList.add('hidden');
+    usernameContainer.style.display = 'block';
+    chatContainer.style.display = 'none';
     statusElement.textContent = 'Please enter a username to join the chat';
     document.getElementById('usernameInput').value = username || '';
     document.getElementById('usernameInput')?.focus();
-    document.getElementById('joinWithUsernameButton').onclick = () => {
+    const joinButton = document.getElementById('joinWithUsernameButton');
+    const originalOnclick = joinButton.onclick;
+    joinButton.onclick = () => {
       const usernameInput = document.getElementById('usernameInput').value.trim();
       if (!validateUsername(usernameInput)) {
         showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
@@ -904,11 +940,11 @@ function setupWaitingForJoin(codeParam) {
       }
       username = usernameInput;
       localStorage.setItem('username', username);
-      usernameContainer.classList.add('hidden');
-      chatContainer.classList.remove('hidden');
+      usernameContainer.style.display = 'none';
+      chatContainer.style.display = 'flex';
       codeDisplayElement.textContent = `Using code: ${code}`;
-      codeDisplayElement.classList.remove('hidden');
-      copyCodeButton.classList.remove('hidden');
+      codeDisplayElement.style.display = 'block';
+      copyCodeButton.style.display = 'block';
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN && token) {
@@ -926,11 +962,13 @@ function setupWaitingForJoin(codeParam) {
         }
       }
       document.getElementById('messageInput')?.focus();
+      // Restore original onclick if needed
+      joinButton.onclick = originalOnclick;
     };
   } else {
     codeDisplayElement.textContent = `Using code: ${code}`;
-    codeDisplayElement.classList.remove('hidden');
-    copyCodeButton.classList.remove('hidden');
+    codeDisplayElement.style.display = 'block';
+    copyCodeButton.style.display = 'block';
     if (socket.readyState === WebSocket.OPEN && token) {
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
     } else {

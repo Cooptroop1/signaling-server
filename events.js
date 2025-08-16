@@ -39,7 +39,6 @@ let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
 let connectedClients = new Set();
-let clientPublicKeys = new Map();
 let initiatorPublic;
 let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
 function getCookie(name) {

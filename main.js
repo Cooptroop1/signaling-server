@@ -1,4 +1,4 @@
-window.isInitiator = false; // Global for utils/init access
+window.isInitiator = false;
 
 let turnUsername = '';
 let turnCredential = '';
@@ -15,8 +15,8 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
-let ratchets = new Map();
-let clientPublicKeys = new Map();
+let ratchets = new Map(); // Per peer DoubleRatchet
+let clientPublicKeys = new Map(); // clientId => base64 public key
 let keyPair;
 (async () => {
   keyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
@@ -115,15 +115,15 @@ async function sendMedia(file, type) {
     const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
     const signature = await signMessage(signingKey, encrypted);
     sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
-  } else if (dataChannels.size > 0) {
-    dataChannels.forEach((dataChannel) => {
-      if (dataChannel.readyState === 'open') {
-        dataChannel.send(plaintext);
-      }
-    });
   } else {
-    showStatusMessage('Error: No connections.');
-    return;
+    for (const targetId of dataChannels.keys()) {
+      const ratchet = ratchets.get(targetId);
+      if (ratchet) {
+        const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
+        const channelPayload = { type: 'enc_msg', encrypted, iv, header, dhPub };
+        dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+      }
+    }
   }
   const messages = document.getElementById('messages');
   const messageDiv = document.createElement('div');
@@ -173,9 +173,11 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
   }
-  const peerConnection = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.relay.metered.ca:80" },
+  let iceServers = [
+    { urls: "stun:stun.relay.metered.ca:80" }
+  ];
+  if (turnUsername && turnCredential) {
+    iceServers.push(
       {
         urls: "turn:global.relay.metered.ca:80",
         username: turnUsername,
@@ -196,7 +198,12 @@ async function startPeerConnection(targetId, isOfferer) {
         username: turnUsername,
         credential: turnCredential
       }
-    ],
+    );
+  } else {
+    console.warn('TURN credentials missing, falling back to STUN-only.');
+  }
+  const peerConnection = new RTCPeerConnection({
+    iceServers,
     iceTransportPolicy: 'all'
   });
   peerConnections.set(targetId, peerConnection);
@@ -314,6 +321,12 @@ function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
+    (async () => {
+      const theirPub = clientPublicKeys.get(targetId);
+      const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
+      const isSender = clientId > targetId;
+      ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
+    })();
     isConnected = true;
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
@@ -366,6 +379,15 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
+    if (data.type === 'enc_msg') {
+      const ratchet = ratchets.get(targetId);
+      if (!ratchet) {
+        console.error(`No ratchet for sender ${targetId}`);
+        return;
+      }
+      const plaintext = await ratchet.decrypt(data.encrypted, data.iv, data.header, data.dhPub);
+      data = JSON.parse(plaintext);
+    }
     if (!data.messageId || !data.username || (!data.content && !data.data)) {
       console.log(`Invalid message format from ${targetId}:`, data);
       return;
@@ -413,13 +435,6 @@ function setupDataChannel(dataChannel, targetId) {
     }
     messages.prepend(messageDiv);
     messages.scrollTop = 0;
-    if (window.isInitiator) {
-      dataChannels.forEach((dc, id) => {
-        if (id !== targetId && dc.readyState === 'open') {
-          dc.send(event.data);
-        }
-      });
-    }
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
@@ -450,30 +465,33 @@ function setupDataChannel(dataChannel, targetId) {
 
 async function handleOffer(offer, targetId) {
   console.log(`Handling offer from ${targetId} for code: ${code}`);
-  if (!peerConnections.has(targetId)) {
-    console.log(`No peer connection for ${targetId}, starting new one and queuing offer`);
-    startPeerConnection(targetId, false);
-    candidatesQueues.get(targetId).push({ type: 'offer', offer });
-    return;
-  }
-  const peerConnection = peerConnections.get(targetId);
   if (offer.type !== 'offer') {
     console.error(`Invalid offer type from ${targetId}:`, offer.type);
     return;
   }
-  if (peerConnection.signalingState === 'have-local-offer') {
-    console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
-    await peerConnection.setLocalDescription({type: 'rollback'});
+  if (!peerConnections.has(targetId)) {
+    console.log(`No existing peer connection for ${targetId}, starting new one`);
+    startPeerConnection(targetId, false);
   }
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-  sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
-  const queue = candidatesQueues.get(targetId) || [];
-  queue.forEach(candidate => {
-    handleCandidate(candidate, targetId);
-  });
-  candidatesQueues.set(targetId, []);
+  const peerConnection = peerConnections.get(targetId);
+  try {
+    if (peerConnection.signalingState === 'have-local-offer') {
+      console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
+      await peerConnection.setLocalDescription({type: 'rollback'});
+    }
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
+    const queue = candidatesQueues.get(targetId) || [];
+    queue.forEach(candidate => {
+      handleCandidate(candidate, targetId);
+    });
+    candidatesQueues.set(targetId, []);
+  } catch (error) {
+    console.error(`Error handling offer from ${targetId}:`, error);
+    showStatusMessage('Failed to connect to peer.');
+  }
 }
 
 async function handleAnswer(answer, targetId) {
@@ -494,19 +512,24 @@ async function handleAnswer(answer, targetId) {
     candidatesQueues.get(targetId).push({ type: 'answer', answer });
     return;
   }
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-  const queue = candidatesQueues.get(targetId) || [];
-  queue.forEach(item => {
-    if (item.type === 'answer') {
-      peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
-        console.error(`Error applying queued answer from ${targetId}:`, error);
-        showStatusMessage('Error processing peer response.');
-      });
-    } else {
-      handleCandidate(item.candidate, targetId);
-    }
-  });
-  candidatesQueues.set(targetId, []);
+  try {
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    const queue = candidatesQueues.get(targetId) || [];
+    queue.forEach(item => {
+      if (item.type === 'answer') {
+        peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
+          console.error(`Error applying queued answer from ${targetId}:`, error);
+          showStatusMessage('Error processing peer response.');
+        });
+      } else {
+        handleCandidate(item.candidate, targetId);
+      }
+    });
+    candidatesQueues.set(targetId, []);
+  } catch (error) {
+    console.error(`Error handling answer from ${targetId}:`, error);
+    showStatusMessage('Error connecting to peer.');
+  }
 }
 
 function handleCandidate(candidate, targetId) {
@@ -996,6 +1019,13 @@ function showTotpSecretModal(secret) {
   qrCanvas.innerHTML = '';
   new QRCode(qrCanvas, generateTotpUri(code, secret));
   document.getElementById('totpSecretModal').classList.add('active');
+}
+
+function showTotpInputModal(codeParam) {
+  const totpInputModal = document.getElementById('totpInputModal');
+  totpInputModal.dataset.code = codeParam;
+  totpInputModal.classList.add('active');
+  document.getElementById('totpCodeInput')?.focus();
 }
 
 async function joinWithTotp(code, totpCode) {

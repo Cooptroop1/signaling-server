@@ -3,20 +3,22 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
-  let paddedBase64 = base64.trim().replace(/-/g, '+').replace(/_/g, '/');
-  while (paddedBase64.length % 4) paddedBase64 += '=';
-  let binary;
+  if (typeof base64 !== 'string') {
+    console.error('Invalid base64 input:', base64);
+    return new Uint8Array(0).buffer;
+  }
+  base64 = base64.replace(/&#x2F;/g, '/').replace(/&amp;/g, '&').replace(/%2F/g, '/').replace(/%2B/g, '+').replace(/%3D/g, '='); // Fix HTML/URL encoded
   try {
-    binary = atob(paddedBase64);
-  } catch (e) {
-    console.error('Invalid base64 string:', base64, e);
-    throw new Error('Invalid base64 encoding');
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  } catch (error) {
+    console.error('Failed to decode base64:', error, base64);
+    return new Uint8Array(0).buffer;
   }
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
 }
 
 async function exportPublicKey(key) {
@@ -107,18 +109,12 @@ async function deriveSharedKey(privateKey, publicKey) {
     privateKey,
     256
   );
-  return await window.crypto.subtle.importKey(
-    "raw",
-    sharedBits,
-    "AES-GCM",
-    false,
-    ["encrypt", "decrypt"]
-  );
+  return new Uint8Array(sharedBits);
 }
 
 async function encryptRaw(key, data) {
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(data);
+  const encoded = new TextEncoder().encode(data); // Encode string to bytes
   const encrypted = await window.crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
     key,
@@ -181,7 +177,7 @@ class DoubleRatchet {
   }
 
   async init() {
-    this.DHs = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
+    this.DHs = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
     this.DHr = await importPublicKey(this.remotePublicKeyBase64);
     this.rootKey = await this.hkdf(this.sharedSecret, null, 'root', 32);
     if (this.isSender) {
@@ -193,15 +189,15 @@ class DoubleRatchet {
   }
 
   async hkdf(input, salt, info, length) {
-    const key = await window.crypto.subtle.importKey('raw', input, { name: 'HKDF' }, false, ['deriveBits']);
-    const derived = await window.crypto.subtle.deriveBits({ name: 'HKDF', salt: salt || new Uint8Array(), info: new TextEncoder().encode(info), hash: 'SHA-256' }, key, length * 8);
+    const key = await crypto.subtle.importKey('raw', input, { name: 'HKDF' }, false, ['deriveBits']);
+    const derived = await crypto.subtle.deriveBits({ name: 'HKDF', salt: salt || new Uint8Array(), info: new TextEncoder().encode(info), hash: 'SHA-256' }, key, length * 8);
     return new Uint8Array(derived);
   }
 
   async kdf_ck(ck) {
-    const hmac = await window.crypto.subtle.importKey('raw', ck, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const messageKey = await window.crypto.subtle.sign({ name: 'HMAC' }, hmac, new Uint8Array([1]));
-    const newCk = await window.crypto.subtle.sign({ name: 'HMAC' }, hmac, new Uint8Array([2]));
+    const hmac = await crypto.subtle.importKey('raw', ck, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const messageKey = await crypto.subtle.sign({ name: 'HMAC' }, hmac, new Uint8Array([1]));
+    const newCk = await crypto.subtle.sign({ name: 'HMAC' }, hmac, new Uint8Array([2]));
     return { messageKey: new Uint8Array(messageKey), newCk: new Uint8Array(newCk) };
   }
 
@@ -212,7 +208,7 @@ class DoubleRatchet {
       this.recvMessageNum = 0;
       this.DHr = remotePub;
     }
-    const dhSecret = await window.crypto.subtle.deriveBits({ name: 'ECDH', public: this.DHr }, this.DHs.privateKey, 256);
+    const dhSecret = await crypto.subtle.deriveBits({ name: 'ECDH', public: this.DHr }, this.DHs.privateKey, 256);
     const rkCk = await this.hkdf(new Uint8Array(dhSecret), null, 'dh_ratchet', 64);
     this.rootKey = rkCk.slice(0, 32);
     if (remotePub) {
@@ -220,7 +216,7 @@ class DoubleRatchet {
     } else {
       this.sendingChainKey = rkCk.slice(32);
     }
-    this.DHs = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
+    this.DHs = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey']);
   }
 
   async encrypt(plaintext) {
@@ -231,8 +227,8 @@ class DoubleRatchet {
     this.sendingChainKey = newCk;
     this.sendMessageNum += 1;
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const key = await window.crypto.subtle.importKey('raw', messageKey, { name: 'AES-GCM' }, false, ['encrypt']);
-    const encrypted = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+    const key = await crypto.subtle.importKey('raw', messageKey, { name: 'AES-GCM' }, false, ['encrypt']);
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
     const header = { pn: this.previousSendNum, n: this.sendMessageNum };
     const dhPub = await exportPublicKey(this.DHs.publicKey);
     return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv), header, dhPub };
@@ -251,8 +247,8 @@ class DoubleRatchet {
     const { messageKey, newCk } = await this.kdf_ck(this.receivingChainKey);
     this.receivingChainKey = newCk;
     this.recvMessageNum = header.n;
-    const key = await window.crypto.subtle.importKey('raw', messageKey, { name: 'AES-GCM' }, false, ['decrypt']);
-    const plaintext = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, key, base64ToArrayBuffer(encrypted));
+    const key = await crypto.subtle.importKey('raw', messageKey, { name: 'AES-GCM' }, false, ['decrypt']);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(iv) }, key, base64ToArrayBuffer(encrypted));
     return new TextDecoder().decode(plaintext);
   }
 }

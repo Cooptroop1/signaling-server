@@ -143,6 +143,8 @@ async function sendMedia(file, type) {
           const channelPayload = { type: 'enc_msg', encrypted: encryptedBase64, iv: arrayBufferToBase64(iv), header, dhPub };
           dataChannels.get(targetId).send(JSON.stringify(channelPayload));
         }
+      } else {
+        console.warn(`No ratchet for ${targetId}, skipping media send`);
       }
     }
   }
@@ -327,7 +329,8 @@ function setupDataChannel(dataChannel, targetId) {
     (async () => {
       const theirPub = clientPublicKeys.get(targetId);
       if (!theirPub) {
-        console.error(`No public key for ${targetId}`);
+        console.error(`No public key for ${targetId}, falling back to relay mode for this peer`);
+        useRelay = true;
         return;
       }
       const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
@@ -624,29 +627,29 @@ async function sendMessage(content) {
       const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      dataChannels.forEach(async (dataChannel, targetId) => {
-        if (dataChannel.readyState === 'open') {
-          const ratchet = ratchets.get(targetId);
-          if (ratchet) {
-            const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
-            const encryptedBase64 = arrayBufferToBase64(encrypted);
-            const chunkSize = 500000; // ~0.5MB
-            if (encryptedBase64.length > chunkSize) {
-              const chunks = [];
-              for (let i = 0; i < encryptedBase64.length; i += chunkSize) {
-                chunks.push(encryptedBase64.slice(i, i + chunkSize));
-              }
-              chunks.forEach((chunk, index) => {
-                const channelPayload = { type: 'enc_chunk', chunk, index, total: chunks.length, messageId, iv: arrayBufferToBase64(iv), header, dhPub };
-                dataChannel.send(JSON.stringify(channelPayload));
-              });
-            } else {
-              const channelPayload = { type: 'enc_msg', encrypted: encryptedBase64, iv: arrayBufferToBase64(iv), header, dhPub };
-              dataChannel.send(JSON.stringify(channelPayload));
+      for (const targetId of dataChannels.keys()) {
+        const ratchet = ratchets.get(targetId);
+        if (ratchet) {
+          const { encrypted, iv, header, dhPub } = await ratchet.encrypt(plaintext);
+          const encryptedBase64 = arrayBufferToBase64(encrypted);
+          const chunkSize = 500000; // ~0.5MB
+          if (encryptedBase64.length > chunkSize) {
+            const chunks = [];
+            for (let i = 0; i < encryptedBase64.length; i += chunkSize) {
+              chunks.push(encryptedBase64.slice(i, i + chunkSize));
             }
+            chunks.forEach((chunk, index) => {
+              const channelPayload = { type: 'enc_chunk', chunk, index, total: chunks.length, messageId, iv: arrayBufferToBase64(iv), header, dhPub };
+              dataChannels.get(targetId).send(JSON.stringify(channelPayload));
+            });
+          } else {
+            const channelPayload = { type: 'enc_msg', encrypted: encryptedBase64, iv: arrayBufferToBase64(iv), header, dhPub };
+            dataChannels.get(targetId).send(JSON.stringify(channelPayload));
           }
+        } else {
+          console.warn(`No ratchet for ${targetId}, skipping message send`);
         }
-      });
+      }
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -845,7 +848,7 @@ async function autoConnect(codeParam) {
       statusElement.textContent = 'Please enter a username to join the chat';
       document.getElementById('usernameInput').value = username || '';
       document.getElementById('usernameInput')?.focus();
-      document.getElementById('joinWithUsernameButton').onclick = () => {
+      document.getElementById('joinWithUsernameButton').onclick = async () => {
         const usernameInput = document.getElementById('usernameInput').value.trim();
         if (!validateUsername(usernameInput)) {
           showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
@@ -861,6 +864,7 @@ async function autoConnect(codeParam) {
         copyCodeButton.classList.remove('hidden');
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
+        const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
         document.getElementById('messageInput')?.focus();
         updateFeaturesUI();
@@ -1052,7 +1056,8 @@ async function startTotpRoom(serverGenerated) {
   totpEnabled = true;
   code = generateCode();
   pendingTotpSecret = { display: totpSecret, send: secretToSend };
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+  const publicKey = await exportPublicKey(keyPair.publicKey);
+  socket.send(JSON.stringify({ type: 'join', code, clientId, username, publicKey, token }));
   document.getElementById('totpOptionsModal').classList.remove('active');
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');

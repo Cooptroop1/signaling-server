@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const validator = require('validator');
 const http = require('http');
 const https = require('https');
-const url = require('url'); // Added for parsing URL to ignore query params
+const url = require('url');
 const crypto = require('crypto');
 const otplib = require('otplib');
 const Redis = require('ioredis');
@@ -38,15 +38,12 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
 
 // Add HTTP request handler to serve static files with nonce injection
 server.on('request', (req, res) => {
-  // Redirect HTTP to HTTPS in production
   const proto = req.headers['x-forwarded-proto'];
   if (proto && proto !== 'https') {
     res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
     res.end();
     return;
   }
-
-  // Add HSTS header to all responses
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
   let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
@@ -59,9 +56,7 @@ server.on('request', (req, res) => {
     let contentType = 'text/plain';
     if (filePath.endsWith('.html')) {
       contentType = 'text/html';
-      // Generate a unique nonce for each request
       const nonce = crypto.randomBytes(16).toString('base64');
-      // Update CSP to use nonce and allow specific inline style hash
       let updatedCSP = "default-src 'self'; " +
         `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
@@ -69,13 +64,10 @@ server.on('request', (req, res) => {
         "media-src 'self' blob: data:; " +
         "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
         "object-src 'none'; base-uri 'self';";
-      // Replace the meta CSP in the HTML
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
-      // Add nonce to inline <script> and <style> tags
       data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
       data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
-      // Handle secure cookies for sessions (clientId)
       let clientIdFromCookie;
       const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
         const [name, value] = cookie.trim().split('=');
@@ -85,7 +77,6 @@ server.on('request', (req, res) => {
       clientIdFromCookie = cookies['clientId'];
       if (!clientIdFromCookie) {
         clientIdFromCookie = uuidv4();
-        // Set secure cookie for clientId
         res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
       }
     } else if (filePath.endsWith('.js')) {
@@ -98,8 +89,8 @@ server.on('request', (req, res) => {
 
 const wss = new WebSocket.Server({ server });
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const FEATURES_FILE = path.join('/data', 'features.json'); // Persistent disk
-const STATS_FILE = path.join('/data', 'stats.json'); // New: For aggregated stats
+const FEATURES_FILE = path.join('/data', 'features.json');
+const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
 const rateLimits = new Map();
 const allTimeUsers = new Set();
@@ -126,7 +117,6 @@ if (!JWT_SECRET) {
     console.log('Generated new JWT secret and saved to disk.');
   }
 }
-// Check for rotation on startup
 if (fs.existsSync(secretFile)) {
   const stats = fs.statSync(secretFile);
   const mtime = stats.mtime.getTime();
@@ -147,7 +137,7 @@ const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
 if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
 }
-const IP_SALT = process.env.IP_SALT || 'your-random-salt-here'; // Set in .env for security
+const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
   enableService: true,
   enableImages: true,
@@ -157,7 +147,6 @@ let features = {
   enableGrokBot: true
 };
 
-// Redis setup
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const redisOptions = {
   retryStrategy(times) {
@@ -167,7 +156,6 @@ const redisOptions = {
   reconnectOnError(err) {
     const targetError = 'READONLY';
     if (err.message.includes(targetError)) {
-      // Only reconnect when the error contains the error flag READONLY.
       return true;
     }
   }
@@ -177,7 +165,6 @@ const pub = new Redis(REDIS_URL, redisOptions);
 const sub = new Redis(REDIS_URL, redisOptions);
 const instanceId = uuidv4();
 
-// Add error handlers for Redis clients
 [redis, pub, sub].forEach(client => {
   client.on('error', (err) => {
     console.error('Redis Client Error:', err);
@@ -190,14 +177,11 @@ const instanceId = uuidv4();
   });
 });
 
-// Subscribe to channels
 sub.subscribe('signaling', `signal:${instanceId}`);
 
-// Local state
-const localClients = new Map(); // clientId => {ws, username, code}
-const localRooms = new Map(); // code => {totalClients: number, maxClients: number, initiator: string, myClients: Set<clientId>}
+const localClients = new Map(); 
+const localRooms = new Map(); 
 
-// Load features and other initial state
 (async () => {
   try {
     let featuresStr = await redis.get('features');
@@ -220,7 +204,6 @@ const localRooms = new Map(); // code => {totalClients: number, maxClients: numb
   }
 })();
 
-// Save features to file for backup
 function saveFeatures() {
   const cleanFeatures = {
     enableService: features.enableService,
@@ -234,32 +217,26 @@ function saveFeatures() {
   console.log('Saved features to disk:', cleanFeatures);
 }
 
-// New: Function to save aggregated stats to disk
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
 }
 
-// Validate base32 secret
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
 
-// Validate base64 string
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   return base64Regex.test(str) && str.length % 4 === 0;
 }
 
-// New: Function to validate incoming message structures
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
   }
-
-  // Common fields validation
   if (data.token && typeof data.token !== 'string') {
     return { valid: false, error: 'Invalid token: must be a string' };
   }
@@ -272,8 +249,6 @@ function validateMessage(data) {
   if (data.username && !validateUsername(data.username)) {
     return { valid: false, error: 'Invalid username: 1-16 alphanumeric characters' };
   }
-
-  // Type-specific validation
   switch (data.type) {
     case 'connect':
       if (!data.clientId || typeof data.clientId !== 'string') {
@@ -328,6 +303,9 @@ function validateMessage(data) {
       if (!data.username) {
         return { valid: false, error: 'join: username required' };
       }
+      if (data.publicKey && !isValidBase64(data.publicKey)) {
+        return { valid: false, error: 'join: invalid publicKey format' };
+      }
       if (data.totpCode && typeof data.totpCode !== 'string') {
         return { valid: false, error: 'join: totpCode must be a string if provided' };
       }
@@ -374,7 +352,6 @@ function validateMessage(data) {
       }
       break;
     case 'get-random-codes':
-      // No additional fields needed
       break;
     case 'relay-message':
     case 'relay-image':
@@ -412,7 +389,6 @@ function validateMessage(data) {
       break;
     case 'ping':
     case 'pong':
-      // No additional fields needed
       break;
     case 'set-totp':
       if (!data.code) {
@@ -425,11 +401,9 @@ function validateMessage(data) {
     default:
       return { valid: false, error: 'Unknown message type' };
   }
-
   return { valid: true };
 }
 
-// Load historical unique users from log on startup
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -440,7 +414,6 @@ if (fs.existsSync(LOG_FILE)) {
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
 
-// Auto-cleanup for random codes every hour
 setInterval(async () => {
   try {
     const codes = await redis.smembers('randomCodes');
@@ -455,16 +428,14 @@ setInterval(async () => {
   }
 }, 3600000);
 
-// Server-side ping to detect dead connections
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
     ws.isAlive = false;
     ws.ping();
   });
-}, 50000); // Changed to 50 seconds
+}, 50000);
 
-// Cleanup expired revoked tokens
 setInterval(async () => {
   try {
     const now = Date.now();
@@ -488,7 +459,7 @@ sub.on('message', (channel, event) => {
       if (data.type === 'join') {
         if (localRooms.has(data.code)) {
           localRooms.get(data.code).totalClients = data.totalClients;
-          localBroadcast(data.code, { type: 'join-notify', clientId: data.clientId, username: data.username, code: data.code, totalClients: data.totalClients });
+          localBroadcast(data.code, { type: 'join-notify', clientId: data.clientId, username: data.username, code: data.code, totalClients: data.totalClients, publicKey: data.publicKey });
         }
       } else if (data.type === 'disconnect') {
         if (localRooms.has(data.code)) {
@@ -572,7 +543,7 @@ wss.on('connection', (ws, req) => {
   ws.on('pong', () => {
     ws.isAlive = true;
   });
-  const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress; // Handle proxies
+  const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress;
   const hashedIp = hashIp(clientIp);
   (async () => {
     try {
@@ -703,10 +674,8 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
             return;
           }
-          // Revoke old refresh token
           const oldRefreshExpiry = decoded.exp * 1000 - Date.now();
           await redis.set(`revoked:${data.refreshToken}`, 1, 'PX', oldRefreshExpiry);
-          // Generate new access and refresh tokens (rotation)
           const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
           const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
           clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
@@ -725,10 +694,8 @@ wss.on('connection', (ws, req) => {
                 ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
                 return;
               }
-              // Revoke old
               const oldRefreshExpiry = decoded.exp * 1000 - Date.now();
               await redis.set(`revoked:${data.refreshToken}`, 1, 'PX', oldRefreshExpiry);
-              // Issue new with current secret
               const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
               const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
               clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
@@ -747,7 +714,7 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'public-key') {
         const targetInstance = await redis.hget(`client:${data.clientId}`, 'instance');
         if (targetInstance === instanceId) {
-          // Should be initiator, but forward local if needed
+          // Forward local if needed
         } else {
           pub.publish(`signal:${targetInstance}`, JSON.stringify(data));
         }
@@ -821,7 +788,6 @@ wss.on('connection', (ws, req) => {
         }
         const roomKey = `room:${code}`;
         let roomStr = await redis.get(roomKey);
-        let room;
         let isNewRoom = false;
         if (!roomStr) {
           isNewRoom = true;
@@ -842,7 +808,7 @@ wss.on('connection', (ws, req) => {
           const clientData = await redis.hgetall(`client:${clientId}`);
           if (members.includes(clientId)) {
             if (clientData.username === username) {
-              // Reconnect, update instance
+              // Reconnect
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
               await incrementFailure(clientIp);
@@ -891,13 +857,12 @@ wss.on('connection', (ws, req) => {
         localClients.get(clientId).username = username;
         localClients.get(clientId).code = code;
         if (!localRooms.has(code)) {
-          localRooms.set(code, { totalClients: 0, myClients: new Set(), initiator: room.initiator, maxClients: room.maxClients });
+          localRooms.set(code, { totalClients: 0, maxClients: room.maxClients, myClients: new Set(), initiator: room.initiator });
         }
         localRooms.get(code).myClients.add(clientId);
         const total = await redis.scard(clientsKey);
         localRooms.get(code).totalClients = total;
-        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total }));
-        // New: Remove from randomCodes if this join makes total >1 (i.e., code "chosen")
+        pub.publish('signaling', JSON.stringify({ type: 'join', code, clientId, username, totalClients: total, publicKey: data.publicKey }));
         if (total > 1 && await redis.sismember('randomCodes', code)) {
           await redis.srem('randomCodes', code);
         }
@@ -1028,7 +993,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
-        if (payload && payload.length > 9333333) { // ~7MB base64 for 5MB file
+        if (payload && payload.length > 9333333) {
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
           await incrementFailure(clientIp);
           return;
@@ -1077,7 +1042,6 @@ wss.on('connection', (ws, req) => {
             for (const key of roomKeys) {
               totalClients += await redis.scard(key.replace('room', 'room_clients'));
             }
-            // Compute aggregates
             const weekly = await computeAggregate(7);
             const monthly = await computeAggregate(30);
             const yearly = await computeAggregate(365);
@@ -1124,7 +1088,6 @@ wss.on('connection', (ws, req) => {
               ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
               pub.publish('signaling', JSON.stringify({ type: 'features-update', enableService: features.enableService, enableImages: features.enableImages, enableVoice: features.enableVoice, enableVoiceCalls: features.enableVoiceCalls, enableAudioToggle: features.enableAudioToggle, enableGrokBot: features.enableGrokBot }));
               if (data.feature === 'service' && !features.enableService) {
-                // Clear all rooms and clients
                 const roomKeys = await redis.keys('room:*');
                 for (const key of roomKeys) {
                   await redis.del(key);
@@ -1222,7 +1185,6 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// Function to restrict rate (local for client)
 function restrictRate(ws) {
   if (ws.isAdmin) return true;
   if (!ws.clientId) return true;
@@ -1275,13 +1237,12 @@ async function incrementFailure(ip) {
   const failureKey = `ipfailure:${hashedIp}`;
   const count = await redis.incr(failureKey);
   if (count === 1) {
-    await redis.expire(failureKey, 300); // 5 min window
+    await redis.expire(failureKey, 300);
   }
   if (count % 5 === 0) {
     console.warn(`High failure rate for hashed IP ${hashedIp}: ${count} failures`);
   }
   if (count >= 10) {
-    // Exponential ban durations: 5min, 30min, 1hr
     const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
     let banLevel = await redis.get(`banlevel:${hashedIp}`) || 0;
     banLevel = Math.min(parseInt(banLevel) + 1, 2);
@@ -1293,7 +1254,7 @@ async function incrementFailure(ip) {
     const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${banLevel}\n`;
     fs.appendFileSync(LOG_FILE, banLogEntry);
     console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${banLevel} (${duration / 60000} minutes)`);
-    await redis.del(failureKey); // Reset failure count after ban
+    await redis.del(failureKey);
   }
 }
 
@@ -1352,7 +1313,6 @@ function updateLogFile() {
       const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
       fs.appendFileSync(LOG_FILE, logEntry);
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
-      // Update aggregated stats
       if (!aggregatedStats.daily) aggregatedStats.daily = {};
       aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
       saveAggregatedStats();
@@ -1370,7 +1330,6 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
   }
 });
 
-// New: Compute aggregate for last N days
 async function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;

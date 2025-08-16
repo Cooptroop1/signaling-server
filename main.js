@@ -37,8 +37,8 @@ async function sendMedia(file, type) {
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  if (file.size > 5 * 1024 * 1024) {
-    showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
+  if (file.size > 1 * 1024 * 1024) { // 1MB max for relay
+    showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 1MB limit.`);
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
@@ -61,9 +61,9 @@ async function sendMedia(file, type) {
     const maxWidth = 640;
     const maxHeight = 360;
     let quality = 0.4;
-    if (file.size > 3 * 1024 * 1024) {
+    if (file.size > 0.75 * 1024 * 1024) {
       quality = 0.3;
-    } else if (file.size > 1 * 1024 * 1024) {
+    } else if (file.size > 0.5 * 1024 * 1024) {
       quality = 0.35;
     }
     const canvas = document.createElement('canvas');
@@ -114,7 +114,19 @@ async function sendMedia(file, type) {
     }
     const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
     const signature = await signMessage(signingKey, encrypted);
-    sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
+    const encryptedBase64 = arrayBufferToBase64(encrypted);
+    const chunkSize = 500000; // ~0.5MB
+    if (encryptedBase64.length > chunkSize) {
+      const chunks = [];
+      for (let i = 0; i < encryptedBase64.length; i += chunkSize) {
+        chunks.push(encryptedBase64.slice(i, i + chunkSize));
+      }
+      chunks.forEach((chunk, index) => {
+        sendRelayMessage('relay-chunk', { chunk, index, total: chunks.length, messageId, relayType: `relay-${type}`, iv, salt, signature });
+      });
+    } else {
+      sendRelayMessage(`relay-${type}`, { encryptedData: encryptedBase64, iv, salt, messageId, signature });
+    }
   } else {
     for (const targetId of dataChannels.keys()) {
       const ratchet = ratchets.get(targetId);
@@ -163,7 +175,7 @@ async function sendMedia(file, type) {
   document.getElementById(`${type}Button`)?.focus();
   messageCount++;
   if (window.isInitiator && messageCount % 100 === 0) {
-    triggerRatchet();
+    window.triggerRatchet();
   }
 }
 
@@ -200,7 +212,7 @@ async function startPeerConnection(targetId, isOfferer) {
       }
     );
   } else {
-    console.warn('TURN credentials missing, falling back to STUN-only.');
+    console.warn('TURN credentials missing, falling back to STUN-only. Set TURN_USERNAME and TURN_CREDENTIAL in env for better P2P.');
   }
   const peerConnection = new RTCPeerConnection({
     iceServers,
@@ -323,6 +335,10 @@ function setupDataChannel(dataChannel, targetId) {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
     (async () => {
       const theirPub = clientPublicKeys.get(targetId);
+      if (!theirPub) {
+        console.error(`No public key for ${targetId}`);
+        return;
+      }
       const shared = await deriveSharedKey(keyPair.privateKey, await importPublicKey(theirPub));
       const isSender = clientId > targetId;
       ratchets.set(targetId, new DoubleRatchet(shared, theirPub, isSender));
@@ -565,7 +581,7 @@ async function sendMessage(content) {
       return;
     }
     if (content === '/ratchet' && window.isInitiator) {
-      triggerRatchet();
+      window.triggerRatchet();
       const messageInput = document.getElementById('messageInput');
       messageInput.value = '';
       messageInput.style.height = '2.5rem';
@@ -576,19 +592,19 @@ async function sendMessage(content) {
     const sanitizedContent = sanitizeMessage(content);
     const timestamp = Date.now();
     const payload = { messageId, content: sanitizedContent, username, timestamp };
-    const jsonString = JSON.stringify(payload);
+    const plaintext = JSON.stringify(payload);
     if (useRelay) {
       if (!roomMaster) {
         showStatusMessage('Error: Encryption key not available for relay mode.');
         return;
       }
-      const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
+      const { encrypted, iv, salt } = await encrypt(plaintext, roomMaster);
       const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
       dataChannels.forEach((dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {
-          dataChannel.send(jsonString);
+          dataChannel.send(plaintext);
         }
       });
     }
@@ -609,7 +625,7 @@ async function sendMessage(content) {
     messageInput?.focus();
     messageCount++;
     if (window.isInitiator && messageCount % 100 === 0) {
-      triggerRatchet();
+      window.triggerRatchet();
     }
   } else {
     showStatusMessage('Error: No connections or username not set.');

@@ -70,17 +70,11 @@ if (typeof window !== 'undefined') {
   helpText = document.getElementById('helpText');
   helpModal = document.getElementById('helpModal');
   (async () => {
-    try {
-      keyPair = await window.crypto.subtle.generateKey(
-        { name: 'ECDH', namedCurve: 'P-384' },
-        true,
-        ['deriveKey', 'deriveBits']
-      );
-      console.log('ECDH key pair generated successfully');
-    } catch (error) {
-      console.error('Failed to generate ECDH key pair:', error);
-      showStatusMessage('Encryption setup failed. Please refresh the page.');
-    }
+    keyPair = await window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-384' },
+      true,
+      ['deriveKey', 'deriveBits']
+    );
   })();
   let cycleTimeout;
   function triggerCycle() {
@@ -92,45 +86,6 @@ if (typeof window !== 'undefined') {
     setTimeout(triggerCycle, 60000);
   }
   setTimeout(triggerCycle, 60000);
-}
-// Function to trigger PFS key rotation (called by initiator on new join)
-async function triggerRatchet() {
-  if (!isInitiator || connectedClients.size <= 1) return;
-  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-  let success = 0;
-  for (const cId of connectedClients) {
-    if (cId === clientId) continue;
-    const publicKey = clientPublicKeys.get(cId);
-    if (!publicKey) {
-      console.warn(`No public key for client ${cId}, skipping ratchet send`);
-      continue;
-    }
-    try {
-      const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
-      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
-      success++;
-    } catch (error) {
-      console.error(`Error sending new room key to ${cId}:`, error);
-    }
-  }
-  if (success > 0) {
-    roomMaster = newRoomMaster;
-    signingKey = await deriveSigningKey(roomMaster);
-    console.log('PFS ratchet complete, new roomMaster set.');
-  } else {
-    console.warn('PFS ratchet failed: No keys available to send to any clients.');
-  }
-}
-function refreshAccessToken() {
-  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
-    refreshingToken = true;
-    console.log('Proactively refreshing access token');
-    socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
-  } else {
-    console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
-  }
 }
 // Event handlers and listeners
 helpText.addEventListener('click', () => {
@@ -170,6 +125,15 @@ let pendingJoin = null;
 const maxReconnectAttempts = 5; // Limit reconnect attempts
 let refreshFailures = 0;
 let refreshBackoff = 1000; // Initial backoff 1s
+function refreshAccessToken() {
+  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
+    refreshingToken = true;
+    console.log('Proactively refreshing access token');
+    socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
+  } else {
+    console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
+  }
+}
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -383,7 +347,6 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
-      console.log('TURN credentials received:', { turnUsername, turnCredential });
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
@@ -570,6 +533,7 @@ socket.onmessage = async (event) => {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
 };
+
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');

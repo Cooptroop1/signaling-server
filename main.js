@@ -4,24 +4,26 @@ let localStream = null;
 let voiceCallActive = false;
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map(); 
-let audioOutputMode = 'earpiece'; 
+// New: Flag to prevent concurrent renegotiations
+let renegotiating = new Map(); // Per targetId
+// New: Track audio output mode
+let audioOutputMode = 'earpiece'; // Default to earpiece
+// New: TOTP state
 let totpEnabled = false;
 let totpSecret = '';
-let pendingTotpSecret = null; 
+let pendingTotpSecret = null; // New: For delaying set-totp until after init
 let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
+// New: Message counter for ratchet triggering
 let messageCount = 0;
-let ratchets = new Map(); // Per-targetId DoubleRatchet
-let roomMaster = null; // For relay mode only
-let signingKey = null; // For relay mode
 
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
     voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
   };
+  // Check if feature is enabled before proceeding
   if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} messages are disabled by admin.`);
     document.getElementById(`${type}Button`)?.focus();
@@ -37,6 +39,7 @@ async function sendMedia(file, type) {
     document.getElementById(`${type}Button`)?.focus();
     return;
   }
+  // Rate limiting
   const rateLimits = type === 'image' ? imageRateLimits : voiceRateLimits;
   const now = performance.now();
   const rateLimit = rateLimits.get(clientId) || { count: 0, startTime: now };
@@ -82,6 +85,7 @@ async function sendMedia(file, type) {
     canvas.width = width;
     canvas.height = height;
     ctx.drawImage(img, 0, 0, width, height);
+    // Check for WebP support and use it if available
     const format = isWebPSupported() ? 'image/webp' : 'image/jpeg';
     base64 = canvas.toDataURL(format, quality);
     URL.revokeObjectURL(img.src);
@@ -108,10 +112,10 @@ async function sendMedia(file, type) {
       return;
     }
     const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-    const signature = await signMessage(signingKey, encrypted);
+    const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
     sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
   } else if (dataChannels.size > 0) {
-    for (const [targetId, dataChannel] of dataChannels) {
+    for (const [targetId, dataChannel] of dataChannels.entries()) {
       if (dataChannel.readyState === 'open') {
         const ratchet = ratchets.get(targetId);
         if (!ratchet) {
@@ -163,8 +167,11 @@ async function sendMedia(file, type) {
   messages.scrollTop = 0;
   processedMessageIds.add(messageId);
   document.getElementById(`${type}Button`)?.focus();
+  // Increment message count and check for ratchet
   messageCount++;
-  // No need for manual ratchet trigger; double ratchet handles per-message
+  if (isInitiator && messageCount % 100 === 0) {
+    triggerRatchet();
+  }
 }
 
 async function startPeerConnection(targetId, isOfferer) {
@@ -306,7 +313,7 @@ async function startPeerConnection(targetId, isOfferer) {
         privacyStatus.classList.remove('hidden');
       }
     }
-  }, 10000);
+  }, 10000); // 10s timeout for fallback
   connectionTimeouts.set(targetId, timeout);
 }
 
@@ -356,6 +363,18 @@ function setupDataChannel(dataChannel, targetId) {
       showStatusMessage('Invalid message received.');
       return;
     }
+    if (data.type === 'voice-call-start') {
+      if (!voiceCallActive) {
+        startVoiceCall();
+      }
+      return;
+    }
+    if (data.type === 'voice-call-end') {
+      if (voiceCallActive) {
+        stopVoiceCall();
+      }
+      return;
+    }
     // If encrypted (has header), decrypt with ratchet
     if (data.header) {
       const ratchet = ratchets.get(targetId);
@@ -371,17 +390,11 @@ function setupDataChannel(dataChannel, targetId) {
         showStatusMessage('Failed to decrypt message.');
         return;
       }
-    }
-    if (data.type === 'voice-call-start') {
-      if (!voiceCallActive) {
-        startVoiceCall();
-      }
+    } else if (data.type === 'ratchet-pub') {
+      handleRatchetPub(targetId, data.pub);
       return;
-    }
-    if (data.type === 'voice-call-end') {
-      if (voiceCallActive) {
-        stopVoiceCall();
-      }
+    } else if (data.type === 'ratchet-pub-response') {
+      handleRatchetPub(targetId, data.pub, true);
       return;
     }
     if (!data.messageId || !data.username || (!data.content && !data.data)) {
@@ -432,7 +445,11 @@ function setupDataChannel(dataChannel, targetId) {
     messages.prepend(messageDiv);
     messages.scrollTop = 0;
     if (isInitiator) {
-      // Forward to other peers if needed, but in P2P, each sender sends to all, so no forward
+      dataChannels.forEach((dc, id) => {
+        if (id !== targetId && dc.readyState === 'open') {
+          dc.send(event.data); // Forward the original data (unencrypted in P2P)
+        }
+      });
     }
   };
   dataChannel.onerror = (error) => {
@@ -446,7 +463,6 @@ function setupDataChannel(dataChannel, targetId) {
     messageRateLimits.delete(targetId);
     imageRateLimits.delete(targetId);
     voiceRateLimits.delete(targetId);
-    ratchets.delete(targetId); // Clean ratchet
     if (remoteAudios.has(targetId)) {
       const audio = remoteAudios.get(targetId);
       audio.remove();
@@ -463,35 +479,94 @@ function setupDataChannel(dataChannel, targetId) {
   };
 }
 
-async function initRatchetForPeer(targetId, dataChannel) {
-  const ratchet = new DoubleRatchet(isInitiator, null); // Initial root key will be derived
-  await ratchet.init();
-  ratchets.set(targetId, ratchet);
-  // Send initial ratchet pub if initiator (Alice)
-  if (isInitiator) {
-    const pub = arrayBufferToBase64(await crypto.subtle.exportKey('raw', ratchet.ratchetKeyPair.publicKey));
-    dataChannel.send(JSON.stringify({ type: 'ratchet-pub', pub }));
+async function handleOffer(offer, targetId) {
+  console.log(`Handling offer from ${targetId} for code: ${code}`);
+  if (offer.type !== 'offer') {
+    console.error(`Invalid offer type from ${targetId}:`, offer.type);
+    return;
   }
-  // Note: Receiving handled in onmessage
+  if (!peerConnections.has(targetId)) {
+    console.log(`No existing peer connection for ${targetId}, starting new one`);
+    startPeerConnection(targetId, false);
+  }
+  const peerConnection = peerConnections.get(targetId);
+  try {
+    // Handle negotiation glare: rollback if have local offer pending
+    if (peerConnection.signalingState === 'have-local-offer') {
+      console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
+      await peerConnection.setLocalDescription({type: 'rollback'});
+    }
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
+    const queue = candidatesQueues.get(targetId) || [];
+    queue.forEach(candidate => {
+      handleCandidate(candidate, targetId);
+    });
+    candidatesQueues.set(targetId, []);
+  } catch (error) {
+    console.error(`Error handling offer from ${targetId}:`, error);
+    showStatusMessage('Failed to connect to peer.');
+  }
 }
 
-async function handleRatchetPub(targetId, pub, isResponse = false) {
-  const ratchet = ratchets.get(targetId);
-  if (!ratchet) return;
-  const remotePub = await importPublicKey(pub); // Use import from crypto.js
-  let initialShared;
-  if (isResponse) {
-    initialShared = await deriveSharedKey(ratchet.ratchetKeyPair.privateKey, remotePub);
-  } else {
-    // Send response
-    const myPub = arrayBufferToBase64(await crypto.subtle.exportKey('raw', ratchet.ratchetKeyPair.publicKey));
-    dataChannels.get(targetId).send(JSON.stringify({ type: 'ratchet-pub-response', pub: myPub }));
-    initialShared = await deriveSharedKey(ratchet.ratchetKeyPair.privateKey, remotePub);
+async function handleAnswer(answer, targetId) {
+  console.log(`Handling answer from ${targetId} for code: ${code}`);
+  if (!peerConnections.has(targetId)) {
+    console.log(`No peer connection for ${targetId}, starting new one and queuing answer`);
+    startPeerConnection(targetId, false);
+    candidatesQueues.get(targetId).push({ type: 'answer', answer });
+    return;
   }
-  ratchet.DHr = remotePub;
-  ratchet.DHs = initialShared;
-  await ratchet.init(); // Re-init with shared
-  console.log(`Ratchet initialized for ${targetId}`);
+  const peerConnection = peerConnections.get(targetId);
+  if (answer.type !== 'answer') {
+    console.error(`Invalid answer type from ${targetId}:`, answer.type);
+    return;
+  }
+  if (peerConnection.signalingState !== 'have-local-offer') {
+    console.log(`Queuing answer from ${targetId}`);
+    candidatesQueues.get(targetId).push({ type: 'answer', answer });
+    return;
+  }
+  try {
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    const queue = candidatesQueues.get(targetId) || [];
+    queue.forEach(item => {
+      if (item.type === 'answer') {
+        peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
+          console.error(`Error applying queued answer from ${targetId}:`, error);
+          showStatusMessage('Error processing peer response.');
+        });
+      } else {
+        handleCandidate(item.candidate, targetId);
+      }
+    });
+    candidatesQueues.set(targetId, []);
+  } catch (error) {
+    console.error(`Error handling answer from ${targetId}:`, error);
+    showStatusMessage('Error connecting to peer.');
+  }
+}
+
+function handleCandidate(candidate, targetId) {
+  console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
+  // Ignore invalid candidates where both sdpMid and sdpMLineIndex are null
+  if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
+    console.warn(`Ignoring invalid ICE candidate from ${targetId}: both sdpMid and sdpMLineIndex null`);
+    return;
+  }
+  const peerConnection = peerConnections.get(targetId);
+  if (peerConnection && peerConnection.remoteDescription) {
+    peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(error => {
+      console.error(`Error adding ICE candidate from ${targetId}:`, error);
+      showStatusMessage('Error establishing peer connection.');
+    });
+  } else {
+    const queue = candidatesQueues.get(targetId) || [];
+    queue.push({ type: 'candidate', candidate });
+    candidatesQueues.set(targetId, queue);
+  }
 }
 
 async function sendMessage(content) {
@@ -507,9 +582,10 @@ async function sendMessage(content) {
       messageInput?.focus();
       return;
     }
+    // New: Check for /ratchet command
     if (content === '/ratchet' && isInitiator) {
-      // Manual trigger not needed; per-message ratchet
-      showStatusMessage('Double ratchet is automatic per message.');
+      triggerRatchet();
+      showStatusMessage('Key ratchet triggered manually.');
       const messageInput = document.getElementById('messageInput');
       messageInput.value = '';
       messageInput.style.height = '2.5rem';
@@ -530,7 +606,7 @@ async function sendMessage(content) {
       const signature = await signMessage(signingKey, encrypted);
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      for (const [targetId, dataChannel] of dataChannels) {
+      for (const [targetId, dataChannel] of dataChannels.entries()) {
         if (dataChannel.readyState === 'open') {
           const ratchet = ratchets.get(targetId);
           if (!ratchet) {
@@ -557,11 +633,17 @@ async function sendMessage(content) {
     messageInput.value = '';
     messageInput.style.height = '2.5rem';
     messageInput?.focus();
+    // Increment message count and check for ratchet
+    messageCount++;
+    if (isInitiator && messageCount % 100 === 0) {
+      triggerRatchet();
+    }
   } else {
     showStatusMessage('Error: No connections or username not set.');
     document.getElementById('messageInput')?.focus();
   }
 }
+
 async function toggleVoiceCall() {
   if (!features.enableVoiceCalls) {
     showStatusMessage('Voice calls are disabled by admin.');
@@ -1091,4 +1173,50 @@ function isWebPSupported() {
     return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
   }
   return false;
+}
+async function initRatchetForPeer(targetId, dataChannel) {
+  // Initial root key derivation (e.g., from ECDH shared secret, but for simplicity, use random for initial)
+  const initialRootKey = crypto.getRandomValues(new Uint8Array(32)); // In real, derive from ECDH
+  const ratchet = new DoubleRatchet(isInitiator, initialRootKey);
+  await ratchet.init();
+  ratchets.set(targetId, ratchet);
+  // Send initial ratchet pub if initiator (Alice)
+  if (isInitiator) {
+    const pub = arrayBufferToBase64(await crypto.subtle.exportKey('raw', ratchet.ratchetKeyPair.publicKey));
+    dataChannel.send(JSON.stringify({ type: 'ratchet-pub', pub }));
+  }
+  // Note: Receiving handled in onmessage
+}
+
+async function handleRatchetPub(targetId, pub, isResponse = false) {
+  const ratchet = ratchets.get(targetId);
+  if (!ratchet) return;
+  const remotePub = await crypto.subtle.importKey(
+    'raw',
+    base64ToArrayBuffer(pub),
+    { name: 'ECDH', namedCurve: 'X25519' },
+    true,
+    []
+  );
+  let initialShared;
+  if (isResponse) {
+    initialShared = await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: remotePub },
+      ratchet.ratchetKeyPair.privateKey,
+      256
+    );
+  } else {
+    // Send response
+    const myPub = arrayBufferToBase64(await crypto.subtle.exportKey('raw', ratchet.ratchetKeyPair.publicKey));
+    dataChannels.get(targetId).send(JSON.stringify({ type: 'ratchet-pub-response', pub: myPub }));
+    initialShared = await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: remotePub },
+      ratchet.ratchetKeyPair.privateKey,
+      256
+    );
+  }
+  ratchet.DHr = remotePub;
+  ratchet.DHs = new Uint8Array(initialShared);
+  await ratchet.init(); // Re-init with shared
+  console.log(`Ratchet initialized for ${targetId}`);
 }

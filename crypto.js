@@ -154,3 +154,42 @@ async function deriveSigningKey(master) {
     ['sign', 'verify']
   );
 }
+
+// New: Derive a chain key for ratchet using HKDF with username as info
+async function deriveChainKey(master, username) {
+  const hkdfKey = await window.crypto.subtle.importKey(
+    'raw',
+    master,
+    { name: 'HKDF' },
+    false,
+    ['deriveKey']
+  );
+  return await window.crypto.subtle.deriveKey(
+    { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode(username), hash: 'SHA-256' },
+    hkdfKey,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+}
+
+// New: Derive message key and next chain key using HMAC ratchet step
+async function deriveMessageKeyAndNextChain(chainKey) {
+  const msgHmac = await signMessage(chainKey, '\x01'); // HMAC(chain, 0x01) for message key
+  const nextHmac = await signMessage(chainKey, '\x02'); // HMAC(chain, 0x02) for next chain
+  const msgKey = await window.crypto.subtle.importKey(
+    'raw',
+    base64ToArrayBuffer(msgHmac),
+    'AES-GCM',
+    false,
+    ['encrypt', 'decrypt']
+  );
+  const nextChainKey = await window.crypto.subtle.importKey(
+    'raw',
+    base64ToArrayBuffer(nextHmac),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  return { msgKey, nextChainKey };
+}

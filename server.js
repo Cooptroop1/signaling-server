@@ -779,6 +779,10 @@ wss.on('connection', (ws, req) => {
         }
       }
       if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') {
+        if (!features.enableRelay) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Relay mode is disabled by admin.', code: data.code }));
+          return;
+        }
         if (data.type === 'relay-image' && !features.enableImages) {
           ws.send(JSON.stringify({ type: 'error', message: 'Image messages are disabled.', code: data.code }));
           return;
@@ -1038,7 +1042,7 @@ function incrementFailure(ip) {
     const expiry = Date.now() + duration;
     ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
     const timestamp = new Date().toISOString();
-    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Duration: ${failure.banLevel}\n`;
+    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
     fs.appendFileSync(LOG_FILE, banLogEntry, (err) => {
       if (err) {
         console.error('Error appending ban log:', err);

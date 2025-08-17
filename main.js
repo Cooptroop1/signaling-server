@@ -1,3 +1,7 @@
+
+
+// main.js
+// Core logic: peer connections, message sending, handling offers, etc.
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -115,17 +119,11 @@ async function sendMedia(file, type) {
     const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
     sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
   } else if (dataChannels.size > 0) {
-    for (const [targetId, dataChannel] of dataChannels.entries()) {
+    dataChannels.forEach((dataChannel) => {
       if (dataChannel.readyState === 'open') {
-        const ratchet = ratchets.get(targetId);
-        if (!ratchet) {
-          showStatusMessage('Error: Ratchet not initialized for peer.');
-          continue;
-        }
-        const encryptedObj = await ratchet.encrypt(jsonString);
-        dataChannel.send(JSON.stringify(encryptedObj));
+        dataChannel.send(jsonString);
       }
-    }
+    });
   } else {
     showStatusMessage('Error: No connections.');
     return;
@@ -268,11 +266,13 @@ async function startPeerConnection(targetId, isOfferer) {
       const audio = document.createElement('audio');
       audio.srcObject = event.streams[0];
       audio.autoplay = true;
+      // Default to lower volume for earpiece simulation
       audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
       audio.play().catch(error => console.error('Error playing remote audio:', error));
       remoteAudios.set(targetId, audio);
       document.getElementById('remoteAudioContainer').appendChild(audio);
       document.getElementById('remoteAudioContainer').classList.remove('hidden');
+      // Attempt to set audio output to default (earpiece) if supported
       setAudioOutput(audio, targetId);
     }
   };
@@ -287,6 +287,7 @@ async function startPeerConnection(targetId, isOfferer) {
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
   };
+  // New: Listen for signaling state changes for debugging
   peerConnection.onsignalingstatechange = () => {
     console.log(`Signaling state for ${targetId}: ${peerConnection.signalingState}`);
   };
@@ -333,13 +334,12 @@ function setupDataChannel(dataChannel, targetId) {
     retryCounts.delete(targetId);
     updateMaxClientsUI();
     document.getElementById('messageInput')?.focus();
+    // Show audio output button only if features allow
     if (features.enableVoiceCalls && features.enableAudioToggle) {
       document.getElementById('audioOutputButton').classList.remove('hidden');
     } else {
       document.getElementById('audioOutputButton').classList.add('hidden');
     }
-    // Init double ratchet for this peer
-    initRatchetForPeer(targetId, dataChannel);
   };
   dataChannel.onmessage = async (event) => {
     const now = performance.now();
@@ -373,28 +373,6 @@ function setupDataChannel(dataChannel, targetId) {
       if (voiceCallActive) {
         stopVoiceCall();
       }
-      return;
-    }
-    // If encrypted (has header), decrypt with ratchet
-    if (data.header) {
-      const ratchet = ratchets.get(targetId);
-      if (!ratchet) {
-        console.error(`No ratchet for ${targetId}`);
-        return;
-      }
-      try {
-        const inner = await ratchet.decrypt(data.header, data.iv, data.encrypted);
-        data = JSON.parse(inner);
-      } catch (error) {
-        console.error(`Decryption failed from ${targetId}:`, error);
-        showStatusMessage('Failed to decrypt message.');
-        return;
-      }
-    } else if (data.type === 'ratchet-pub') {
-      handleRatchetPub(targetId, data.pub);
-      return;
-    } else if (data.type === 'ratchet-pub-response') {
-      handleRatchetPub(targetId, data.pub, true);
       return;
     }
     if (!data.messageId || !data.username || (!data.content && !data.data)) {
@@ -603,20 +581,14 @@ async function sendMessage(content) {
         return;
       }
       const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-      const signature = await signMessage(signingKey, encrypted);
+      const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
     } else {
-      for (const [targetId, dataChannel] of dataChannels.entries()) {
+      dataChannels.forEach((dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {
-          const ratchet = ratchets.get(targetId);
-          if (!ratchet) {
-            showStatusMessage('Error: Ratchet not initialized for peer.');
-            continue;
-          }
-          const encryptedObj = await ratchet.encrypt(jsonString);
-          dataChannel.send(JSON.stringify(encryptedObj));
+          dataChannel.send(jsonString);
         }
-      }
+      });
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -1173,50 +1145,4 @@ function isWebPSupported() {
     return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
   }
   return false;
-}
-async function initRatchetForPeer(targetId, dataChannel) {
-  // Initial root key derivation (e.g., from ECDH shared secret, but for simplicity, use random for initial)
-  const initialRootKey = crypto.getRandomValues(new Uint8Array(32)); // In real, derive from ECDH
-  const ratchet = new DoubleRatchet(isInitiator, initialRootKey);
-  await ratchet.init();
-  ratchets.set(targetId, ratchet);
-  // Send initial ratchet pub if initiator (Alice)
-  if (isInitiator) {
-    const pub = arrayBufferToBase64(await crypto.subtle.exportKey('raw', ratchet.ratchetKeyPair.publicKey));
-    dataChannel.send(JSON.stringify({ type: 'ratchet-pub', pub }));
-  }
-  // Note: Receiving handled in onmessage
-}
-
-async function handleRatchetPub(targetId, pub, isResponse = false) {
-  const ratchet = ratchets.get(targetId);
-  if (!ratchet) return;
-  const remotePub = await crypto.subtle.importKey(
-    'raw',
-    base64ToArrayBuffer(pub),
-    { name: 'ECDH', namedCurve: 'X25519' },
-    true,
-    []
-  );
-  let initialShared;
-  if (isResponse) {
-    initialShared = await crypto.subtle.deriveBits(
-      { name: 'ECDH', public: remotePub },
-      ratchet.ratchetKeyPair.privateKey,
-      256
-    );
-  } else {
-    // Send response
-    const myPub = arrayBufferToBase64(await crypto.subtle.exportKey('raw', ratchet.ratchetKeyPair.publicKey));
-    dataChannels.get(targetId).send(JSON.stringify({ type: 'ratchet-pub-response', pub: myPub }));
-    initialShared = await crypto.subtle.deriveBits(
-      { name: 'ECDH', public: remotePub },
-      ratchet.ratchetKeyPair.privateKey,
-      256
-    );
-  }
-  ratchet.DHr = remotePub;
-  ratchet.DHs = new Uint8Array(initialShared);
-  await ratchet.init(); // Re-init with shared
-  console.log(`Ratchet initialized for ${targetId}`);
 }

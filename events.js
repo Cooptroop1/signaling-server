@@ -220,8 +220,7 @@ socket.onmessage = async (event) => {
     if (!isInitiator) {
       initiatorPublic = msg.initiatorPublic;
     }
-    if (useRelay = msg.useRelay) {
-    }
+    useRelay = msg.useRelay;
     roomMaster = new Uint8Array(msg.roomMaster);
     signingKey = await deriveSigningKey(roomMaster);
     await resetChains();
@@ -306,91 +305,118 @@ socket.onclose = () => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('startChatToggleButton').onclick = () => {
-    if (!username || !validateUsername(username)) {
-      usernameContainer.classList.remove('hidden');
+  const startChatButton = document.getElementById('startChatToggleButton');
+  if (startChatButton) {
+    startChatButton.onclick = () => {
+      if (!username || !validateUsername(username)) {
+        usernameContainer.classList.remove('hidden');
+        initialContainer.classList.add('hidden');
+        statusElement.textContent = 'Please enter a username to start the chat';
+        document.getElementById('usernameInput').value = username || '';
+        document.getElementById('usernameInput')?.focus();
+        return;
+      }
+      if (socket.readyState === WebSocket.OPEN && token) {
+        socket.send(JSON.stringify({ type: 'init', clientId, username, token }));
+      } else {
+        pendingJoin = { clientId, username }; // For init, no code
+      }
+    };
+  }
+
+  const connectChatButton = document.getElementById('connectChatButton');
+  if (connectChatButton) {
+    connectChatButton.onclick = () => {
+      connectContainer.classList.remove('hidden');
       initialContainer.classList.add('hidden');
-      statusElement.textContent = 'Please enter a username to start the chat';
-      document.getElementById('usernameInput').value = username || '';
-      document.getElementById('usernameInput')?.focus();
-      return;
-    }
-    if (socket.readyState === WebSocket.OPEN && token) {
-      socket.send(JSON.stringify({ type: 'init', clientId, username, token }));
-    } else {
-      pendingJoin = { clientId, username }; // For init, no code
-    }
-  };
+      document.getElementById('codeInput')?.focus();
+    };
+  }
 
-  document.getElementById('connectChatButton').onclick = () => {
-    connectContainer.classList.remove('hidden');
-    initialContainer.classList.add('hidden');
-    document.getElementById('codeInput')?.focus();
-  };
+  const joinWithUsernameButton = document.getElementById('joinWithUsernameButton');
+  if (joinWithUsernameButton) {
+    joinWithUsernameButton.onclick = () => {
+      const usernameInput = document.getElementById('usernameInput').value.trim();
+      if (!validateUsername(usernameInput)) {
+        showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+        return;
+      }
+      username = usernameInput;
+      localStorage.setItem('username', username);
+      usernameContainer.classList.add('hidden');
+      initialContainer.classList.remove('hidden');
+      statusElement.textContent = 'Start a new chat or connect to an existing one';
+    };
+  }
 
-  document.getElementById('joinWithUsernameButton').onclick = () => {
-    const usernameInput = document.getElementById('usernameInput').value.trim();
-    if (!validateUsername(usernameInput)) {
-      showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-      return;
-    }
-    username = usernameInput;
-    localStorage.setItem('username', username);
-    usernameContainer.classList.add('hidden');
-    initialContainer.classList.remove('hidden');
-    statusElement.textContent = 'Start a new chat or connect to an existing one';
-  };
+  const connectButton = document.getElementById('connectButton');
+  if (connectButton) {
+    connectButton.onclick = () => {
+      const codeInput = document.getElementById('codeInput').value.trim();
+      if (!validateCode(codeInput)) {
+        showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx');
+        return;
+      }
+      code = codeInput;
+      if (socket.readyState === WebSocket.OPEN && token) {
+        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      } else {
+        pendingJoin = { code, clientId, username };
+      }
+      connectContainer.classList.add('hidden');
+      chatContainer.classList.remove('hidden');
+      messages.classList.add('waiting');
+      statusElement.textContent = 'Waiting for connection...';
+    };
+  }
 
-  document.getElementById('connectButton').onclick = () => {
-    const codeInput = document.getElementById('codeInput').value.trim();
-    if (!validateCode(codeInput)) {
-      showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx');
-      return;
-    }
-    code = codeInput;
-    if (socket.readyState === WebSocket.OPEN && token) {
-      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-    } else {
-      pendingJoin = { code, clientId, username };
-    }
-    connectContainer.classList.add('hidden');
-    chatContainer.classList.remove('hidden');
-    messages.classList.add('waiting');
-    statusElement.textContent = 'Waiting for connection...';
-  };
+  const copyCodeButtonEl = document.getElementById('copyCodeButton');
+  if (copyCodeButtonEl) {
+    copyCodeButtonEl.onclick = () => {
+      navigator.clipboard.writeText(code).then(() => {
+        showStatusMessage('Code copied to clipboard.');
+      });
+    };
+  }
 
-  document.getElementById('copyCodeButton').onclick = () => {
-    navigator.clipboard.writeText(code).then(() => {
-      showStatusMessage('Code copied to clipboard.');
+  const newSessionButtonEl = document.getElementById('newSessionButton');
+  if (newSessionButtonEl) {
+    newSessionButtonEl.onclick = () => {
+      location.reload();
+    };
+  }
+
+  const button1 = document.getElementById('button1');
+  if (button1) {
+    button1.onclick = () => {
+      if (isInitiator && code && token && totalClients < maxClients) {
+        socket.send(JSON.stringify({ type: 'send-to-random', code, clientId, token }));
+        showStatusMessage(`Sent code ${code} to random board.`);
+        codeSentToRandom = true;
+        button2.disabled = true;
+      } else {
+        showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
+      }
+      button1.focus();
+    };
+  }
+
+  if (button2) {
+    button2.onclick = () => {
+      if (!button2.disabled) {
+        window.location.href = 'https://anonomoose.com/random.html';
+      }
+      button2.focus();
+    };
+  }
+
+  if (cornerLogo) {
+    cornerLogo.addEventListener('click', () => {
+      document.getElementById('messages').innerHTML = '';
+      processedMessageIds.clear();
+      showStatusMessage('Chat history cleared locally.');
     });
-  };
-
-  document.getElementById('newSessionButton').onclick = () => {
-    location.reload();
-  };
-
-  document.getElementById('button1').onclick = () => {
-    if (isInitiator && code && token && totalClients < maxClients) {
-      socket.send(JSON.stringify({ type: 'send-to-random', code, clientId, token }));
-      showStatusMessage(`Sent code ${code} to random board.`);
-      codeSentToRandom = true;
-      button2.disabled = true;
-    } else {
-      showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
-    }
-    document.getElementById('button1')?.focus();
-  };
-  document.getElementById('button2').onclick = () => {
-    if (!button2.disabled) {
-      window.location.href = 'https://anonomoose.com/random.html';
-    }
-    document.getElementById('button2')?.focus();
-  };
-  cornerLogo.addEventListener('click', () => {
-    document.getElementById('messages').innerHTML = '';
-    processedMessageIds.clear();
-    showStatusMessage('Chat history cleared locally.');
-  });
+  }
 
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -451,41 +477,43 @@ function setupWaitingForJoin(codeParam) {
     document.getElementById('usernameInput').value = username || '';
     document.getElementById('usernameInput')?.focus();
     const joinButton = document.getElementById('joinWithUsernameButton');
-    const originalOnclick = joinButton.onclick;
-    joinButton.onclick = () => {
-      const usernameInput = document.getElementById('usernameInput').value.trim();
-      if (!validateUsername(usernameInput)) {
-        showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-        document.getElementById('usernameInput')?.focus();
-        return;
-      }
-      username = usernameInput;
-      localStorage.setItem('username', username);
-      usernameContainer.style.display = 'none';
-      chatContainer.style.display = 'flex';
-      codeDisplayElement.textContent = `Using code: ${code}`;
-      codeDisplayElement.style.display = 'block';
-      copyCodeButton.style.display = 'block';
-      messages.classList.add('waiting');
-      statusElement.textContent = 'Waiting for connection...';
-      if (socket.readyState === WebSocket.OPEN && token) {
-        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-      } else {
-        pendingJoin = { code, clientId, username };
-        if (socket.readyState !== WebSocket.OPEN) {
-          socket.addEventListener('open', () => {
-            console.log('WebSocket opened, sending join for existing chat');
-            if (token) {
-              socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-              pendingJoin = null;
-            }
-          }, { once: true });
+    if (joinButton) {
+      const originalOnclick = joinButton.onclick;
+      joinButton.onclick = () => {
+        const usernameInput = document.getElementById('usernameInput').value.trim();
+        if (!validateUsername(usernameInput)) {
+          showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+          document.getElementById('usernameInput')?.focus();
+          return;
         }
-      }
-      document.getElementById('messageInput')?.focus();
-      // Restore original onclick if needed
-      joinButton.onclick = originalOnclick;
-    };
+        username = usernameInput;
+        localStorage.setItem('username', username);
+        usernameContainer.style.display = 'none';
+        chatContainer.style.display = 'flex';
+        codeDisplayElement.textContent = `Using code: ${code}`;
+        codeDisplayElement.style.display = 'block';
+        copyCodeButton.style.display = 'block';
+        messages.classList.add('waiting');
+        statusElement.textContent = 'Waiting for connection...';
+        if (socket.readyState === WebSocket.OPEN && token) {
+          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+        } else {
+          pendingJoin = { code, clientId, username };
+          if (socket.readyState !== WebSocket.OPEN) {
+            socket.addEventListener('open', () => {
+              console.log('WebSocket opened, sending join for existing chat');
+              if (token) {
+                socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+                pendingJoin = null;
+              }
+            }, { once: true });
+          }
+        }
+        document.getElementById('messageInput')?.focus();
+        // Restore original onclick if needed
+        joinButton.onclick = originalOnclick;
+      };
+    }
   } else {
     codeDisplayElement.textContent = `Using code: ${code}`;
     codeDisplayElement.style.display = 'block';

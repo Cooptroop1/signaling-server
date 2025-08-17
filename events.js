@@ -32,7 +32,7 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true }; // Global features state
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableAudioToggle: true, enableGrokBot: true, enableP2P: true, enableRelay: true }; // Global features state
 let keyPair;
 let roomMaster;
 let signingKey; // New: Cached signing key for HMAC
@@ -140,8 +140,6 @@ socket.onopen = () => {
     usernameContainer.classList.add('hidden');
     connectContainer.classList.add('hidden');
     chatContainer.classList.add('hidden');
-    codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
   }
 };
 socket.onerror = (error) => {
@@ -258,7 +256,7 @@ socket.onmessage = async (event) => {
         message.message.includes('Initiator offline') || 
         message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
-        showStatusMessage(`Failed to join join chat: ${message.message}`);
+        showStatusMessage(`Failed to join chat: ${message.message}`);
         socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
         initialContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
@@ -334,6 +332,18 @@ socket.onmessage = async (event) => {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
+      // New: If relay mode and non-initiator, enable UI immediately
+      if (!isInitiator && !features.enableP2P && features.enableRelay) {
+        useRelay = true;
+        isConnected = true;
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
+        const privacyStatus = document.getElementById('privacyStatus');
+        if (privacyStatus) {
+          privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+          privacyStatus.classList.remove('hidden');
+        }
+      }
       updateMaxClientsUI();
       updateDots();
       turnUsername = message.turnUsername;
@@ -360,6 +370,18 @@ socket.onmessage = async (event) => {
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
+      }
+      // New: If relay mode, enable UI for messaging after join
+      if (!features.enableP2P && features.enableRelay) {
+        useRelay = true;
+        isConnected = true;
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
+        const privacyStatus = document.getElementById('privacyStatus');
+        if (privacyStatus) {
+          privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+          privacyStatus.classList.remove('hidden');
+        }
       }
     }
     if (message.type === 'client-disconnected') {
@@ -449,7 +471,7 @@ socket.onmessage = async (event) => {
         signingKey = await deriveSigningKey(roomMaster);
         console.log('New room master received and set for PFS.');
       } catch (error) {
-        console.error('Error handling new-room-key:', error);
+        console.error('PFS update error:', error.message); // New: Log specific error message for debugging
         showStatusMessage('Failed to update encryption key for PFS.');
       }
     }
@@ -667,7 +689,6 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
-  console.log('Username set in localStorage:', username);
   code = generateCode();
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -699,7 +720,7 @@ document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
   const inputCode = document.getElementById('codeInput').value.trim();
   if (!validateUsername(usernameInput)) {
-    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+    showStatusMessage('Invalid username: 1-16 alphanumeric chars.');
     document.getElementById('usernameConnectInput')?.focus();
     return;
   }
@@ -710,7 +731,6 @@ document.getElementById('connectButton').onclick = () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
-  console.log('Username set in localStorage:', username);
   code = inputCode;
   codeDisplayElement.textContent = `Using code: ${code}`;
   codeDisplayElement.classList.remove('hidden');

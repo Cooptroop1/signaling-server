@@ -71,7 +71,7 @@ if (typeof window !== 'undefined') {
   helpModal = document.getElementById('helpModal');
   (async () => {
     keyPair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'X25519' },
+      { name: 'ECDH', namedCurve: 'P-384' },
       true,
       ['deriveKey', 'deriveBits']
     );

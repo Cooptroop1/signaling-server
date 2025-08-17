@@ -34,8 +34,11 @@ function handleRequest(req, res) {
         `media-src 'self' blob: data:; ` +
         `connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; ` +
         `object-src 'none'; base-uri 'self';`;
-      data = data.toString().replace(/<script/g, `<script nonce="${nonce}"`);
-      data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
+      // Inject nonce into script and style tags
+      let htmlString = data.toString();
+      htmlString = htmlString.replace(/<script/g, `<script nonce="${nonce}"`);
+      htmlString = htmlString.replace(/<style/g, `<style nonce="${nonce}"`);
+      data = Buffer.from(htmlString);
       res.setHeader('Content-Security-Policy', updatedCSP);
 
       // Cookie handling for clientId

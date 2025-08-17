@@ -217,9 +217,10 @@ socket.onmessage = async (event) => {
     isInitiator = msg.isInitiator;
     maxClients = msg.maxClients;
     totalClients = msg.totalClients;
-    useRelay = msg.useRelay;
     if (!isInitiator) {
       initiatorPublic = msg.initiatorPublic;
+    }
+    if (useRelay = msg.useRelay) {
     }
     roomMaster = new Uint8Array(msg.roomMaster);
     signingKey = await deriveSigningKey(roomMaster);
@@ -304,90 +305,98 @@ socket.onclose = () => {
   }
 };
 
-document.getElementById('startChatButton').onclick = () => {
-  if (!username || !validateUsername(username)) {
-    usernameContainer.classList.remove('hidden');
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('startChatToggleButton').onclick = () => {
+    if (!username || !validateUsername(username)) {
+      usernameContainer.classList.remove('hidden');
+      initialContainer.classList.add('hidden');
+      statusElement.textContent = 'Please enter a username to start the chat';
+      document.getElementById('usernameInput').value = username || '';
+      document.getElementById('usernameInput')?.focus();
+      return;
+    }
+    if (socket.readyState === WebSocket.OPEN && token) {
+      socket.send(JSON.stringify({ type: 'init', clientId, username, token }));
+    } else {
+      pendingJoin = { clientId, username }; // For init, no code
+    }
+  };
+
+  document.getElementById('connectChatButton').onclick = () => {
+    connectContainer.classList.remove('hidden');
     initialContainer.classList.add('hidden');
-    statusElement.textContent = 'Please enter a username to start the chat';
-    document.getElementById('usernameInput').value = username || '';
-    document.getElementById('usernameInput')?.focus();
-    return;
-  }
-  if (socket.readyState === WebSocket.OPEN && token) {
-    socket.send(JSON.stringify({ type: 'init', clientId, username, token }));
-  } else {
-    pendingJoin = { clientId, username }; // For init, no code
-  }
-};
+    document.getElementById('codeInput')?.focus();
+  };
 
-document.getElementById('joinChatButton').onclick = () => {
-  connectContainer.classList.remove('hidden');
-  initialContainer.classList.add('hidden');
-  document.getElementById('codeInput')?.focus();
-};
+  document.getElementById('joinWithUsernameButton').onclick = () => {
+    const usernameInput = document.getElementById('usernameInput').value.trim();
+    if (!validateUsername(usernameInput)) {
+      showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+      return;
+    }
+    username = usernameInput;
+    localStorage.setItem('username', username);
+    usernameContainer.classList.add('hidden');
+    initialContainer.classList.remove('hidden');
+    statusElement.textContent = 'Start a new chat or connect to an existing one';
+  };
 
-document.getElementById('joinWithUsernameButton').onclick = () => {
-  const usernameInput = document.getElementById('usernameInput').value.trim();
-  if (!validateUsername(usernameInput)) {
-    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-    return;
-  }
-  username = usernameInput;
-  localStorage.setItem('username', username);
-  usernameContainer.classList.add('hidden');
-  initialContainer.classList.remove('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
-};
+  document.getElementById('connectButton').onclick = () => {
+    const codeInput = document.getElementById('codeInput').value.trim();
+    if (!validateCode(codeInput)) {
+      showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx');
+      return;
+    }
+    code = codeInput;
+    if (socket.readyState === WebSocket.OPEN && token) {
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+    } else {
+      pendingJoin = { code, clientId, username };
+    }
+    connectContainer.classList.add('hidden');
+    chatContainer.classList.remove('hidden');
+    messages.classList.add('waiting');
+    statusElement.textContent = 'Waiting for connection...';
+  };
 
-document.getElementById('connectButton').onclick = () => {
-  const codeInput = document.getElementById('codeInput').value.trim();
-  if (!validateCode(codeInput)) {
-    showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx');
-    return;
-  }
-  code = codeInput;
-  if (socket.readyState === WebSocket.OPEN && token) {
-    socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-  } else {
-    pendingJoin = { code, clientId, username };
-  }
-  connectContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  messages.classList.add('waiting');
-  statusElement.textContent = 'Waiting for connection...';
-};
+  document.getElementById('copyCodeButton').onclick = () => {
+    navigator.clipboard.writeText(code).then(() => {
+      showStatusMessage('Code copied to clipboard.');
+    });
+  };
 
-document.getElementById('copyCodeButton').onclick = () => {
-  navigator.clipboard.writeText(code).then(() => {
-    showStatusMessage('Code copied to clipboard.');
+  document.getElementById('newSessionButton').onclick = () => {
+    location.reload();
+  };
+
+  document.getElementById('button1').onclick = () => {
+    if (isInitiator && code && token && totalClients < maxClients) {
+      socket.send(JSON.stringify({ type: 'send-to-random', code, clientId, token }));
+      showStatusMessage(`Sent code ${code} to random board.`);
+      codeSentToRandom = true;
+      button2.disabled = true;
+    } else {
+      showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
+    }
+    document.getElementById('button1')?.focus();
+  };
+  document.getElementById('button2').onclick = () => {
+    if (!button2.disabled) {
+      window.location.href = 'https://anonomoose.com/random.html';
+    }
+    document.getElementById('button2')?.focus();
+  };
+  cornerLogo.addEventListener('click', () => {
+    document.getElementById('messages').innerHTML = '';
+    processedMessageIds.clear();
+    showStatusMessage('Chat history cleared locally.');
   });
-};
 
-document.getElementById('newSessionButton').onclick = () => {
-  location.reload();
-};
-
-document.getElementById('button1').onclick = () => {
-  if (isInitiator && code && token && totalClients < maxClients) {
-    socket.send(JSON.stringify({ type: 'send-to-random', code, clientId, token }));
-    showStatusMessage(`Sent code ${code} to random board.`);
-    codeSentToRandom = true;
-    button2.disabled = true;
-  } else {
-    showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
+  const urlParams = new URLSearchParams(window.location.search);
+  const codeParam = urlParams.get('code');
+  if (codeParam && validateCode(codeParam)) {
+    setupWaitingForJoin(codeParam);
   }
-  document.getElementById('button1')?.focus();
-};
-document.getElementById('button2').onclick = () => {
-  if (!button2.disabled) {
-    window.location.href = 'https://anonomoose.com/random.html';
-  }
-  document.getElementById('button2')?.focus();
-};
-cornerLogo.addEventListener('click', () => {
-  document.getElementById('messages').innerHTML = '';
-  processedMessageIds.clear();
-  showStatusMessage('Chat history cleared locally.');
 });
 
 // Function to update user dots
@@ -425,13 +434,6 @@ function setCookie(name, value, days) {
   }
   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
 }
-document.addEventListener('DOMContentLoaded', () => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const codeParam = urlParams.get('code');
-  if (codeParam && validateCode(codeParam)) {
-    setupWaitingForJoin(codeParam);
-  }
-});
 function setupWaitingForJoin(codeParam) {
   code = codeParam;
   initialContainer.style.display = 'none';

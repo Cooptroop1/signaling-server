@@ -4,6 +4,11 @@ const otplib = require('otplib');
 const crypto = require('crypto');
 const fs = require('fs');
 
+const config = require('./config');
+const validation = require('./validation');
+const statsLogger = require('./statsLogger');
+const featuresManager = require('./features');
+
 const rateLimits = new Map();
 const ipRateLimits = new Map();
 const ipDailyLimits = new Map();
@@ -420,7 +425,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
         }
         if (!await restrictIpRate(clientIp, 'join', redis)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.', code: data.code }));
-          await incrementFailure(ip, redis);
+          await incrementFailure(clientIp, redis);
           return;
         }
         if (!await restrictIpDaily(clientIp, 'join', redis)) {
@@ -518,7 +523,6 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
         }
         const clientsKey = `room_clients:${code}`;
         await redis.sadd(clientsKey, clientId);
-        await redis.hset(`client:${clientId}`, 'instance', instanceId, 'username', username, 'publicKey', publicKey || '');
         localClients.get(clientId).username = username;
         localClients.get(clientId).code = code;
         if (!localRooms.has(code)) {

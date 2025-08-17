@@ -361,6 +361,17 @@ socket.onmessage = async (event) => {
       if (voiceCallActive) {
         renegotiate(message.clientId);
       }
+      // For relay mode, enable UI if totalClients > 1
+      if (totalClients > 1) {
+        isConnected = true;
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
+        const privacyStatus = document.getElementById('privacyStatus');
+        if (privacyStatus) {
+          privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+          privacyStatus.classList.remove('hidden');
+        }
+      }
     }
     if (message.type === 'client-disconnected') {
       totalClients = message.totalClients;

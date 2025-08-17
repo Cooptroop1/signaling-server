@@ -53,15 +53,15 @@ server.on('request', (req, res) => {
       const nonce = crypto.randomBytes(16).toString('base64');
       // Update CSP to use nonce and allow specific inline style hash
       let updatedCSP = "default-src 'self'; " +
-      `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-      `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
-      "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-      "media-src 'self' blob: data:; " +
-      "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
-      "object-src 'none'; base-uri 'self';";
+        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
+        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "media-src 'self' blob: data:; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
+        "object-src 'none'; base-uri 'self';";
       // Replace the meta CSP in the HTML
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, 
-      `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       // Add nonce to inline <script> and <style> tags
       data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
       data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
@@ -149,7 +149,9 @@ let features = {
   enableVoice: true,
   enableVoiceCalls: true,
   enableAudioToggle: true,
-  enableGrokBot: true
+  enableGrokBot: true,
+  enableP2P: true, // New: Toggle for P2P mode
+  enableRelay: true // New: Toggle for relay fallback
 };
 
 // Load features from file if exists
@@ -1036,7 +1038,7 @@ function incrementFailure(ip) {
     const expiry = Date.now() + duration;
     ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
     const timestamp = new Date().toISOString();
-    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Duration: ${failure.banLevel}\n`;
     fs.appendFileSync(LOG_FILE, banLogEntry, (err) => {
       if (err) {
         console.error('Error appending ban log:', err);

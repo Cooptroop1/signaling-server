@@ -2,11 +2,7 @@ const jwt = require('jsonwebtoken');
 const validator = require('validator');
 const otplib = require('otplib');
 const crypto = require('crypto');
-const { v4: uuidv4 } = require('uuid');
-const config = require('./config');
-const validation = require('./validation');
-const statsLogger = require('./statsLogger');
-const featuresManager = require('./features');
+const fs = require('fs');
 
 const rateLimits = new Map();
 const ipRateLimits = new Map();
@@ -16,7 +12,15 @@ const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
 
-function localBroadcast(code, msg, localRooms, excludeClientId = null) {
+function pingClients(wss) {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}
+
+function localBroadcast(code, msg, localRooms, localClients, excludeClientId = null) {
   const room = localRooms.get(code);
   if (room) {
     room.myClients.forEach(clientId => {
@@ -27,6 +31,87 @@ function localBroadcast(code, msg, localRooms, excludeClientId = null) {
         }
       }
     });
+  }
+}
+
+function handlePubSub(channel, event, localRooms, localClients, wss, instanceId, features, pub) {
+  try {
+    const data = JSON.parse(event);
+    if (channel === 'signaling') {
+      if (data.type === 'join') {
+        if (localRooms.has(data.code)) {
+          localRooms.get(data.code).totalClients = data.totalClients;
+          localBroadcast(data.code, { type: 'join-notify', clientId: data.clientId, username: data.username, code: data.code, totalClients: data.totalClients, publicKey: data.publicKey }, localRooms, localClients);
+        }
+      } else if (data.type === 'disconnect') {
+        if (localRooms.has(data.code)) {
+          localRooms.get(data.code).totalClients = data.totalClients;
+          localBroadcast(data.code, { type: 'client-disconnected', clientId: data.clientId, totalClients: data.totalClients, isInitiator: data.isInitiator }, localRooms, localClients);
+        }
+      } else if (data.type === 'max-clients') {
+        if (localRooms.has(data.code)) {
+          localRooms.get(data.code).maxClients = data.maxClients;
+          localBroadcast(data.code, { type: 'max-clients', maxClients: data.maxClients, totalClients: data.totalClients }, localRooms, localClients);
+        }
+      } else if (data.type === 'totp-enabled') {
+        if (localRooms.has(data.code)) {
+          localBroadcast(data.code, { type: 'totp-enabled', code: data.code }, localRooms, localClients);
+        }
+      } else if (data.type === 'initiator-changed') {
+        if (localRooms.has(data.code)) {
+          localRooms.get(data.code).initiator = data.newInitiator;
+          localBroadcast(data.code, { type: 'initiator-changed', newInitiator: data.newInitiator, totalClients: data.totalClients }, localRooms, localClients);
+        }
+      } else if (data.type === 'features-update') {
+        features = {
+          enableService: data.enableService,
+          enableImages: data.enableImages,
+          enableVoice: data.enableVoice,
+          enableVoiceCalls: data.enableVoiceCalls,
+          enableAudioToggle: data.enableAudioToggle,
+          enableGrokBot: data.enableGrokBot
+        };
+        wss.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'features-update', ...features }));
+          }
+        });
+        if (!features.enableService) {
+          localRooms.clear();
+          localClients.clear();
+          wss.clients.forEach(ws => ws.close());
+        }
+      } else if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-chunk') {
+        if (localRooms.has(data.code)) {
+          localBroadcast(data.code, {
+            type: data.type.replace('relay-', ''),
+            messageId: data.messageId,
+            username: data.username,
+            encryptedContent: data.encryptedContent,
+            encryptedData: data.encryptedData,
+            iv: data.iv,
+            salt: data.salt,
+            signature: data.signature,
+            chunk: data.chunk,
+            index: data.index,
+            total: data.total,
+            relayType: data.relayType
+          }, localRooms, localClients, data.clientId);
+        }
+      } else if (data.type === 'request-public-key' || data.type === 'public-key-response') {
+        const targetWs = localClients.get(data.targetId)?.ws;
+        if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+          targetWs.send(JSON.stringify(data));
+        }
+      }
+    } else if (channel === `signal:${instanceId}`) {
+      const targetWs = localClients.get(data.targetId)?.ws;
+      if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+        targetWs.send(JSON.stringify({ ...data, clientId: data.clientId }));
+      }
+    }
+  } catch (error) {
+    console.error('Error handling pub/sub event:', error);
   }
 }
 
@@ -77,7 +162,7 @@ async function restrictIpDaily(ip, action, redis) {
   return true;
 }
 
-async function incrementFailure(ip, redis, LOG_FILE) {
+async function incrementFailure(ip, redis) {
   const hashedIp = statsLogger.hashIp(ip);
   const failureKey = `ipfailure:${hashedIp}`;
   const count = await redis.incr(failureKey);
@@ -97,13 +182,13 @@ async function incrementFailure(ip, redis, LOG_FILE) {
     await redis.set(`ban:${hashedIp}`, expiry);
     const timestamp = new Date().toISOString();
     const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${banLevel}\n`;
-    fs.appendFileSync(LOG_FILE, banLogEntry);
+    fs.appendFileSync(config.LOG_FILE, banLogEntry);
     console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${banLevel} (${duration / 60000} minutes)`);
     await redis.del(failureKey);
   }
 }
 
-function handleConnection(ws, req, features, localClients, localRooms, redis, pub, instanceId, validation, statsLogger, config) {
+function handleConnection(ws, req, features, localClients, localRooms, redis, pub, instanceId, validation, statsLogger, config, otplib) {
   const origin = req.headers.origin;
   if (!config.ALLOWED_ORIGINS.includes(origin)) {
     console.warn(`Rejected connection from invalid origin: ${origin}`);
@@ -142,14 +227,14 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
     } catch (err) {
       console.error('Invalid JSON in message:', err);
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format.' }));
-      await incrementFailure(clientIp, redis, config.LOG_FILE);
+      await incrementFailure(clientIp, redis);
       return;
     }
     try {
       const val = validation.validateMessage(data);
       if (!val.valid) {
         ws.send(JSON.stringify({ type: 'error', message: val.error }));
-        await incrementFailure(clientIp, redis, config.LOG_FILE);
+        await incrementFailure(clientIp, redis);
         return;
       }
       Object.keys(data).forEach(key => {
@@ -160,7 +245,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
       if (data.type === 'public-key' || data.type === 'public-key-response') {
         if (!validation.isValidBase64(data.publicKey)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format' }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(clientIp, redis);
           return;
         }
       }
@@ -335,12 +420,12 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
         }
         if (!await restrictIpRate(clientIp, 'join', redis)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.', code: data.code }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(ip, redis);
           return;
         }
         if (!await restrictIpDaily(clientIp, 'join', redis)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.', code: data.code }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(clientIp, redis);
           return;
         }
         code = data.code;
@@ -349,12 +434,12 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
         publicKey = data.publicKey;
         if (!validation.validateUsername(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username: 1-16 alphanumeric characters.', code: data.code }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(clientIp, redis);
           return;
         }
         if (!validation.validateCode(code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format: xxxx-xxxx-xxxx-xxxx.', code: data.code }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(clientIp, redis);
           return;
         }
         const totpKey = `totp:${code}`;
@@ -367,7 +452,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
           const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
           if (!isValid) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
             return;
           }
         }
@@ -387,7 +472,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
           const currentCount = await redis.scard(clientsKey);
           if (currentCount >= room.maxClients) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
             return;
           }
           const members = await redis.smembers(clientsKey);
@@ -397,7 +482,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
               // Reconnect, update instance
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
-              await incrementFailure(clientIp, redis, config.LOG_FILE);
+              await incrementFailure(clientIp, redis);
               return;
             }
           } else {
@@ -411,14 +496,14 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
             }
             if (usernameTaken) {
               ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
-              await incrementFailure(clientIp, redis, config.LOG_FILE);
+              await incrementFailure(clientIp, redis);
               return;
             }
           }
           const initiatorInstance = await redis.hget(`client:${room.initiator}`, 'instance');
           if (!initiatorInstance && room.initiator !== clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
             return;
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: config.TURN_USERNAME, turnCredential: config.TURN_CREDENTIAL, features }));
@@ -522,7 +607,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
       if (data.type === 'submit-random') {
         if (!await restrictIpRate(clientIp, 'submit-random', redis)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.', code: data.code }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(clientIp, redis);
           return;
         }
         const roomKey = `room:${data.code}`;
@@ -535,11 +620,11 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
               ws.send(JSON.stringify({ type: 'random-submitted', code: data.code }));
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board.', code: data.code }));
-              await incrementFailure(clientIp, redis, config.LOG_FILE);
+              await incrementFailure(clientIp, redis);
             }
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
           }
         } catch (err) {
           console.error('Error in submit-random:', err);
@@ -575,19 +660,19 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
         const payload = data.type === 'relay-message' ? data.encryptedContent : data.encryptedData;
         if (payload && payload.length > 9333333) {
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(clientIp, redis);
           return;
         }
         if (payload && !validation.isValidBase64(payload)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid base64 format in payload.', code: data.code }));
-          await incrementFailure(clientIp, redis, config.LOG_FILE);
+          await incrementFailure(clientIp, redis);
           return;
         }
         const roomKey = `room:${data.code}`;
         try {
           if (!await redis.exists(roomKey)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
             return;
           }
         } catch (err) {
@@ -600,7 +685,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
         try {
           if (!await redis.sismember(clientsKey, senderId)) {
             ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
             return;
           }
         } catch (err) {
@@ -616,12 +701,12 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
         try {
           if (!await redis.exists(roomKey)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
             return;
           }
           if (!await redis.sismember(`room_clients:${data.code}`, data.clientId)) {
             ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
-            await incrementFailure(clientIp, redis, config.LOG_FILE);
+            await incrementFailure(clientIp, redis);
             return;
           }
           pub.publish('signaling', JSON.stringify(data));
@@ -710,7 +795,7 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
     } catch (error) {
       console.error('Error processing message:', error);
       ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data ? data.code : 'unknown' }));
-      await incrementFailure(clientIp, redis, config.LOG_FILE);
+      await incrementFailure(clientIp, redis);
     }
   });
 
@@ -774,4 +859,4 @@ function handleConnection(ws, req, features, localClients, localRooms, redis, pu
   });
 }
 
-module.exports = { localBroadcast, restrictRate, restrictIpRate, restrictIpDaily, incrementFailure, handleConnection };
+module.exports = { pingClients, localBroadcast, handlePubSub, restrictRate, restrictIpRate, restrictIpDaily, incrementFailure, handleConnection };

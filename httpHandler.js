@@ -27,19 +27,18 @@ function handleRequest(req, res) {
     if (filePath.endsWith('.html')) {
       contentType = 'text/html';
       const nonce = crypto.randomBytes(16).toString('base64');
-      let updatedCSP = `default-src 'self'; ` +
+      let updatedCSP = "default-src 'self'; " +
         `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        `style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline' 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog=' 'sha256-E2oZTbkSZFNAieIligzDv/TFgADSZyPbO9tODj4+k/I='; ` +
-        `img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; ` +
-        `media-src 'self' blob: data:; ` +
-        `connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; ` +
-        `object-src 'none'; base-uri 'self';`;
-      // Inject nonce into script and style tags
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog=' 'sha256-E2oZTbkSZFNAieIligzDv/TFgADSZyPbO9tODj4+k/I='; ` +
+        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "media-src 'self' blob: data:; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
+        "object-src 'none'; base-uri 'self';";
       let htmlString = data.toString();
+      htmlString = htmlString.replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/i, `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       htmlString = htmlString.replace(/<script/g, `<script nonce="${nonce}"`);
       htmlString = htmlString.replace(/<style/g, `<style nonce="${nonce}"`);
       data = Buffer.from(htmlString);
-      res.setHeader('Content-Security-Policy', updatedCSP);
 
       // Cookie handling for clientId
       const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {

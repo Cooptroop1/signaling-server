@@ -1,12 +1,15 @@
-
 function arrayBufferToBase64(buffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  let base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const padding = (4 - base64.length % 4) % 4;
+  base64 += '='.repeat(padding); // Explicitly ensure padding
+  return base64;
 }
 
 function base64ToArrayBuffer(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
+  let binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;

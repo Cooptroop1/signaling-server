@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { v4: uuidv4 } = require('uuid');
 
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -11,7 +10,9 @@ const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
-if (!ADMIN_SECRET) throw new Error('ADMIN_SECRET environment variable is not set.');
+if (!ADMIN_SECRET) {
+  throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
+}
 
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
 
@@ -41,10 +42,14 @@ if (fs.existsSync(secretFile)) {
 }
 
 const TURN_USERNAME = process.env.TURN_USERNAME;
-if (!TURN_USERNAME) throw new Error('TURN_USERNAME environment variable is not set.');
+if (!TURN_USERNAME) {
+  throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
+}
 
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
-if (!TURN_CREDENTIAL) throw new Error('TURN_CREDENTIAL environment variable is not set.');
+if (!TURN_CREDENTIAL) {
+  throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
+}
 
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 
@@ -56,7 +61,9 @@ const redisOptions = {
   },
   reconnectOnError(err) {
     const targetError = 'READONLY';
-    if (err.message.includes(targetError)) return true;
+    if (err.message.includes(targetError)) {
+      return true;
+    }
   }
 };
 

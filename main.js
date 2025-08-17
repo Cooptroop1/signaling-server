@@ -182,6 +182,9 @@ async function startPeerConnection(targetId, isOfferer) {
       privacyStatus.classList.remove('hidden');
     }
     isConnected = true; // Allow messaging via relay
+    inputContainer.classList.remove('hidden'); // Ensure input bar shows in relay
+    messages.classList.remove('waiting'); // Remove waiting state
+    updateMaxClientsUI(); // Refresh UI
     return;
   }
   if (peerConnections.has(targetId)) {
@@ -325,6 +328,8 @@ async function startPeerConnection(targetId, isOfferer) {
           privacyStatus.classList.remove('hidden');
         }
         isConnected = true; // Allow relay-based messaging
+        inputContainer.classList.remove('hidden'); // Ensure input bar shows
+        messages.classList.remove('waiting'); // Remove waiting state
       } else {
         showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
         cleanupPeerConnection(targetId);
@@ -564,7 +569,7 @@ function handleCandidate(candidate, targetId) {
 }
 
 async function sendMessage(content) {
-  if (content && dataChannels.size > 0 && username) {
+  if (content && username) {
     if (grokBotActive && content.startsWith('/grok ')) {
       const query = content.slice(6).trim();
       if (query) {
@@ -599,12 +604,15 @@ async function sendMessage(content) {
       const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
       const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
-    } else {
+    } else if (dataChannels.size > 0) {
       dataChannels.forEach((dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {
           dataChannel.send(jsonString);
         }
       });
+    } else {
+      showStatusMessage('Error: No connections.');
+      return;
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -881,6 +889,9 @@ function updateFeaturesUI() {
   if (!features.enableP2P && !features.enableRelay) {
     showStatusMessage('Both P2P and relay disabled. Messaging unavailable.');
     inputContainer.classList.add('hidden');
+  } else if (!features.enableP2P && features.enableRelay && isConnected) {
+    inputContainer.classList.remove('hidden');
+    messages.classList.remove('waiting');
   }
 }
 

@@ -1,4 +1,3 @@
-
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -72,7 +71,7 @@ if (typeof window !== 'undefined') {
   helpModal = document.getElementById('helpModal');
   (async () => {
     keyPair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
+      { name: 'ECDH', namedCurve: 'X25519' },
       true,
       ['deriveKey', 'deriveBits']
     );
@@ -526,7 +525,6 @@ socket.onmessage = async (event) => {
   }
 };
 
-// New: Function to refresh access token proactively
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;

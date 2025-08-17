@@ -158,7 +158,11 @@ let features = {
 if (fs.existsSync(FEATURES_FILE)) {
   try {
     features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
-    console.log('Loaded features:', features);
+    // New: Ensure new features are added if missing in loaded file
+    if (features.enableP2P === undefined) features.enableP2P = true;
+    if (features.enableRelay === undefined) features.enableRelay = true;
+    console.log('Loaded features with defaults applied:', features);
+    saveFeatures(); // Save back to include new keys
   } catch (err) {
     console.error('Error loading features file:', err);
   }
@@ -869,7 +873,9 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'toggle-feature') {
         if (data.secret === ADMIN_SECRET) {
-          const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
+          let featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
+          if (data.feature === 'p2P') featureKey = 'enableP2P';
+          if (data.feature === 'relay') featureKey = 'enableRelay';
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
             saveFeatures();

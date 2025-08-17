@@ -1,5 +1,3 @@
-
-
 // main.js
 // Core logic: peer connections, message sending, handling offers, etc.
 let turnUsername = '';
@@ -174,6 +172,18 @@ async function sendMedia(file, type) {
 
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
+  // New: Skip P2P if disabled
+  if (!features.enableP2P) {
+    console.log('P2P disabled by admin, forcing relay mode');
+    useRelay = true;
+    const privacyStatus = document.getElementById('privacyStatus');
+    if (privacyStatus) {
+      privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+      privacyStatus.classList.remove('hidden');
+    }
+    isConnected = true; // Allow messaging via relay
+    return;
+  }
   if (peerConnections.has(targetId)) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
@@ -304,14 +314,20 @@ async function startPeerConnection(targetId, isOfferer) {
   }
   const timeout = setTimeout(() => {
     if (!dataChannels.get(targetId) || dataChannels.get(targetId).readyState !== 'open') {
-      console.log(`P2P failed with ${targetId}, falling back to relay`);
-      useRelay = true;
-      showStatusMessage('P2P connection failed, switching to server relay mode.');
-      cleanupPeerConnection(targetId);
-      const privacyStatus = document.getElementById('privacyStatus');
-      if (privacyStatus) {
-        privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
-        privacyStatus.classList.remove('hidden');
+      console.log(`P2P failed with ${targetId}, checking relay availability`);
+      // New: If relay disabled, error out instead of fallback
+      if (features.enableRelay) {
+        useRelay = true;
+        showStatusMessage('P2P connection failed, switching to server relay mode.');
+        const privacyStatus = document.getElementById('privacyStatus');
+        if (privacyStatus) {
+          privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+          privacyStatus.classList.remove('hidden');
+        }
+        isConnected = true; // Allow relay-based messaging
+      } else {
+        showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
+        cleanupPeerConnection(targetId);
       }
     }
   }, 10000); // 10s timeout for fallback
@@ -860,6 +876,11 @@ function updateFeaturesUI() {
   if (!features.enableService) {
     showStatusMessage('Service disabled by admin. Disconnecting...');
     socket.close();
+  }
+  // New: Handle P2P/Relay UI updates if needed (e.g., disable buttons if both off)
+  if (!features.enableP2P && !features.enableRelay) {
+    showStatusMessage('Both P2P and relay disabled. Messaging unavailable.');
+    inputContainer.classList.add('hidden');
   }
 }
 

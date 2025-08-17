@@ -39,7 +39,7 @@ async function loadFeatures(redis) {
   }
 }
 
-function saveFeatures(features, FEATURES_FILE) {
+function saveFeatures(features) {
   const cleanFeatures = {
     enableService: features.enableService,
     enableImages: features.enableImages,
@@ -48,7 +48,7 @@ function saveFeatures(features, FEATURES_FILE) {
     enableAudioToggle: features.enableAudioToggle,
     enableGrokBot: features.enableGrokBot
   };
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(cleanFeatures));
+  fs.writeFileSync(config.FEATURES_FILE, JSON.stringify(cleanFeatures));
   console.log('Saved features to disk:', cleanFeatures);
 }
 

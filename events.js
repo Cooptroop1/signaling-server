@@ -332,8 +332,8 @@ socket.onmessage = async (event) => {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
-      // New: If relay mode and non-initiator, enable UI immediately
-      if (!isInitiator && !features.enableP2P && features.enableRelay) {
+      // New: If relay mode and initiator, enable UI immediately (solo chat)
+      if (!features.enableP2P && features.enableRelay) {
         useRelay = true;
         isConnected = true;
         inputContainer.classList.remove('hidden');
@@ -372,7 +372,7 @@ socket.onmessage = async (event) => {
         renegotiate(message.clientId);
       }
       // New: If relay mode, enable UI for messaging after join
-      if (!features.enableP2P && features.enableRelay) {
+      if (!features.enableP2P && features.enableRelay && totalClients > 1) {
         useRelay = true;
         isConnected = true;
         inputContainer.classList.remove('hidden');

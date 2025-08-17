@@ -125,15 +125,6 @@ let pendingJoin = null;
 const maxReconnectAttempts = 5; // Limit reconnect attempts
 let refreshFailures = 0;
 let refreshBackoff = 1000; // Initial backoff 1s
-function refreshAccessToken() {
-  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
-    refreshingToken = true;
-    console.log('Proactively refreshing access token');
-    socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
-  } else {
-    console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
-  }
-}
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));

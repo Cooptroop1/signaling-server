@@ -318,7 +318,6 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
-        isConnected = true;
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         if (pendingTotpSecret) {
@@ -343,6 +342,8 @@ socket.onmessage = async (event) => {
           privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
           privacyStatus.classList.remove('hidden');
         }
+      } else {
+        isConnected = false; // Ensure not connected until P2P or relay confirmed
       }
       updateMaxClientsUI();
       updateDots();

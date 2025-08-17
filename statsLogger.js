@@ -1,8 +1,13 @@
 const fs = require('fs');
-const path = require('path');
+const crypto = require('crypto');
 const config = require('./config');
 
 let aggregatedStats = fs.existsSync(config.STATS_FILE) ? JSON.parse(fs.readFileSync(config.STATS_FILE, 'utf8')) : { daily: {} };
+
+function saveAggregatedStats() {
+  fs.writeFileSync(config.STATS_FILE, JSON.stringify(aggregatedStats));
+  console.log('Saved aggregated stats to disk');
+}
 
 function logStats(data, redis, LOG_FILE) {
   const timestamp = new Date().toISOString();
@@ -57,7 +62,7 @@ async function computeAggregate(days, redis) {
   return { users, connections };
 }
 
-function updateLogFile(redis, LOG_FILE, aggregatedStats, STATS_FILE) {
+function updateLogFile(redis, LOG_FILE, aggregatedStats) {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
   (async () => {
@@ -70,16 +75,15 @@ function updateLogFile(redis, LOG_FILE, aggregatedStats, STATS_FILE) {
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
       if (!aggregatedStats.daily) aggregatedStats.daily = {};
       aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
-      fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
-      console.log('Saved aggregated stats to disk');
+      saveAggregatedStats();
     } catch (err) {
       console.error('Error updating log file:', err);
     }
   })();
 }
 
-function hashIp(ip, IP_SALT) {
-  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+function hashIp(ip) {
+  return crypto.createHmac('sha256', config.IP_SALT).update(ip).digest('hex');
 }
 
 module.exports = { logStats, computeAggregate, updateLogFile, hashIp };

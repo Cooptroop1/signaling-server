@@ -525,6 +525,46 @@ socket.onmessage = async (event) => {
   }
 };
 
+function refreshAccessToken() {
+  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
+    refreshingToken = true;
+    console.log('Proactively refreshing access token');
+    socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
+  } else {
+    console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
+  }
+}
+
+// New: Function to trigger PFS key rotation (called by initiator on new join)
+async function triggerRatchet() {
+  if (!isInitiator || connectedClients.size <= 1) return;
+  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  let success = 0;
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) {
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      continue;
+    }
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      success++;
+    } catch (error) {
+      console.error(`Error sending new room key to ${cId}:`, error);
+    }
+  }
+  if (success > 0) {
+    roomMaster = newRoomMaster;
+    signingKey = await deriveSigningKey(roomMaster);
+    console.log('PFS ratchet complete, new roomMaster set.');
+  } else {
+    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+  }
+}
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');
@@ -566,7 +606,7 @@ document.getElementById('connect2FAChatButton').onclick = () => {
   statusElement.textContent = 'Enter a username and code to join a 2FA chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
-  // Override connectButton for 2FA
+  // Override connectButton for 2FA prompt
   const connectButton = document.getElementById('connectButton');
   connectButton.onclick = () => {
     const usernameInput = document.getElementById('usernameConnectInput').value.trim();

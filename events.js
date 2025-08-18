@@ -1,3 +1,4 @@
+
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -32,7 +33,7 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableAudioToggle: true, enableGrokBot: true, enableP2P: true, enableRelay: true }; // Global features state
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true }; // Global features state
 let keyPair;
 let roomMaster;
 let signingKey; // New: Cached signing key for HMAC
@@ -140,6 +141,8 @@ socket.onopen = () => {
     usernameContainer.classList.add('hidden');
     connectContainer.classList.add('hidden');
     chatContainer.classList.add('hidden');
+    codeDisplayElement.classList.add('hidden');
+    copyCodeButton.classList.add('hidden');
   }
 };
 socket.onerror = (error) => {
@@ -256,7 +259,7 @@ socket.onmessage = async (event) => {
         message.message.includes('Initiator offline') || 
         message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
-        showStatusMessage(`Failed to join chat: ${message.message}`);
+        showStatusMessage(`Failed to join join chat: ${message.message}`);
         socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
         initialContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
@@ -318,6 +321,7 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
+        isConnected = true;
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         if (pendingTotpSecret) {
@@ -327,18 +331,6 @@ socket.onmessage = async (event) => {
         }
         // New: Periodic ratchet timer (every 5 minutes)
         setInterval(triggerRatchet, 5 * 60 * 1000);
-        // New: Enable UI for initiator in relay mode after key setup
-        if (!features.enableP2P && features.enableRelay) {
-          useRelay = true;
-          isConnected = true;
-          inputContainer.classList.remove('hidden');
-          messages.classList.remove('waiting');
-          const privacyStatus = document.getElementById('privacyStatus');
-          if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
-            privacyStatus.classList.remove('hidden');
-          }
-        }
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
@@ -430,8 +422,6 @@ socket.onmessage = async (event) => {
         }));
         // Trigger PFS ratchet after receiving and storing the public key
         await triggerRatchet();
-        // New: Send 'relay-ready' to joiner after successful key send
-        socket.send(JSON.stringify({ type: 'relay-ready', targetId: message.clientId, code, clientId, token }));
       } catch (error) {
         console.error('Error handling public-key:', error);
         showStatusMessage('Key exchange failed.');
@@ -446,18 +436,6 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(roomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Room master successfully imported.');
-        // New: Enable UI for non-initiator in relay mode after successful key exchange
-        if (!features.enableP2P && features.enableRelay && totalClients > 1) {
-          useRelay = true;
-          isConnected = true;
-          inputContainer.classList.remove('hidden');
-          messages.classList.remove('waiting');
-          const privacyStatus = document.getElementById('privacyStatus');
-          if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
-            privacyStatus.classList.remove('hidden');
-          }
-        }
       } catch (error) {
         console.error('Error handling encrypted-room-key:', error);
         showStatusMessage('Failed to receive encryption key.');
@@ -471,37 +449,9 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(newRoomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('New room master received and set for PFS.');
-        // New: Enable UI for non-initiator in relay mode after successful PFS update
-        if (!features.enableP2P && features.enableRelay && totalClients > 1) {
-          useRelay = true;
-          isConnected = true;
-          inputContainer.classList.remove('hidden');
-          messages.classList.remove('waiting');
-          const privacyStatus = document.getElementById('privacyStatus');
-          if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
-            privacyStatus.classList.remove('hidden');
-          }
-        }
       } catch (error) {
-        console.error('PFS update error:', error.message); // New: Log specific error message for debugging
+        console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
-        // New: Fallback to generate a new key and retry
-        roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-        signingKey = await deriveSigningKey(roomMaster);
-        console.log('Generated fallback roomMaster due to PFS failure.');
-      }
-    }
-    // New: Handle 'relay-ready' from initiator to confirm key exchange and enable UI on joiner
-    if (message.type === 'relay-ready' && message.targetId === clientId && !features.enableP2P && features.enableRelay) {
-      useRelay = true;
-      isConnected = true;
-      inputContainer.classList.remove('hidden');
-      messages.classList.remove('waiting');
-      const privacyStatus = document.getElementById('privacyStatus');
-      if (privacyStatus) {
-        privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
-        privacyStatus.classList.remove('hidden');
       }
     }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
@@ -625,7 +575,6 @@ document.getElementById('startChatToggleButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Enter a username to start a chat';
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
@@ -638,7 +587,6 @@ document.getElementById('connectToggleButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Enter a username and code to join a chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
@@ -657,7 +605,6 @@ document.getElementById('connect2FAChatButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Enter a username and code to join a 2FA chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
@@ -721,6 +668,7 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
+  console.log('Username set in localStorage:', username);
   code = generateCode();
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -730,7 +678,6 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   initialContainer.classList.add('hidden');
   chatContainer.classList.remove('hidden');
   messages.classList.add('waiting');
-  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Waiting for connection...';
   if (socket.readyState === WebSocket.OPEN && token) {
     console.log('Sending join message for new chat');
@@ -753,7 +700,7 @@ document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
   const inputCode = document.getElementById('codeInput').value.trim();
   if (!validateUsername(usernameInput)) {
-    showStatusMessage('Invalid username: 1-16 alphanumeric chars.');
+    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
     document.getElementById('usernameConnectInput')?.focus();
     return;
   }
@@ -764,6 +711,7 @@ document.getElementById('connectButton').onclick = () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
+  console.log('Username set in localStorage:', username);
   code = inputCode;
   codeDisplayElement.textContent = `Using code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -773,7 +721,6 @@ document.getElementById('connectButton').onclick = () => {
   connectContainer.classList.add('hidden');
   chatContainer.classList.remove('hidden');
   messages.classList.add('waiting');
-  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Waiting for connection...';
   if (socket.readyState === WebSocket.OPEN && token) {
     console.log('Sending join message for existing chat');
@@ -800,7 +747,6 @@ document.getElementById('backButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
@@ -813,7 +759,6 @@ document.getElementById('backButtonConnect').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
@@ -975,7 +920,6 @@ function setupWaitingForJoin(codeParam) {
   chatContainer.style.display = 'flex';
   codeDisplayElement.style.display = 'none';
   copyCodeButton.style.display = 'none';
-  inputContainer.style.display = 'none';
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
   if (!username || !validateUsername(username)) {
@@ -1000,7 +944,6 @@ function setupWaitingForJoin(codeParam) {
       codeDisplayElement.textContent = `Using code: ${code}`;
       codeDisplayElement.style.display = 'block';
       copyCodeButton.style.display = 'block';
-      inputContainer.style.display = 'none';
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN && token) {
@@ -1025,7 +968,6 @@ function setupWaitingForJoin(codeParam) {
     codeDisplayElement.textContent = `Using code: ${code}`;
     codeDisplayElement.style.display = 'block';
     copyCodeButton.style.display = 'block';
-    inputContainer.style.display = 'none';
     if (socket.readyState === WebSocket.OPEN && token) {
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
     } else {

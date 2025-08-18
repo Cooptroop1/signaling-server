@@ -1,3 +1,4 @@
+
 // main.js
 // Core logic: peer connections, message sending, handling offers, etc.
 let turnUsername = '';
@@ -172,6 +173,21 @@ async function sendMedia(file, type) {
 
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
+  // New: Skip P2P if disabled
+  if (!features.enableP2P) {
+    console.log('P2P disabled by admin, forcing relay mode');
+    useRelay = true;
+    const privacyStatus = document.getElementById('privacyStatus');
+    if (privacyStatus) {
+      privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+      privacyStatus.classList.remove('hidden');
+    }
+    isConnected = true; // Allow messaging via relay
+    inputContainer.classList.remove('hidden'); // Ensure input bar shows in relay
+    messages.classList.remove('waiting'); // Remove waiting state
+    updateMaxClientsUI(); // Refresh UI
+    return;
+  }
   if (peerConnections.has(targetId)) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
@@ -302,14 +318,22 @@ async function startPeerConnection(targetId, isOfferer) {
   }
   const timeout = setTimeout(() => {
     if (!dataChannels.get(targetId) || dataChannels.get(targetId).readyState !== 'open') {
-      console.log(`P2P failed with ${targetId}, falling back to relay`);
-      useRelay = true;
-      showStatusMessage('P2P connection failed, switching to server relay mode.');
-      cleanupPeerConnection(targetId);
-      const privacyStatus = document.getElementById('privacyStatus');
-      if (privacyStatus) {
-        privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
-        privacyStatus.classList.remove('hidden');
+      console.log(`P2P failed with ${targetId}, checking relay availability`);
+      // New: If relay disabled, error out instead of fallback
+      if (features.enableRelay) {
+        useRelay = true;
+        showStatusMessage('P2P connection failed, switching to server relay mode.');
+        const privacyStatus = document.getElementById('privacyStatus');
+        if (privacyStatus) {
+          privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+          privacyStatus.classList.remove('hidden');
+        }
+        isConnected = true; // Allow relay-based messaging
+        inputContainer.classList.remove('hidden'); // Ensure input bar shows
+        messages.classList.remove('waiting'); // Remove waiting state
+      } else {
+        showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
+        cleanupPeerConnection(targetId);
       }
     }
   }, 10000); // 10s timeout for fallback
@@ -546,7 +570,7 @@ function handleCandidate(candidate, targetId) {
 }
 
 async function sendMessage(content) {
-  if (content && dataChannels.size > 0 && username) {
+  if (content && username) {
     if (grokBotActive && content.startsWith('/grok ')) {
       const query = content.slice(6).trim();
       if (query) {
@@ -581,12 +605,15 @@ async function sendMessage(content) {
       const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
       const signature = await signMessage(signingKey, encrypted); // Sign the encrypted payload
       sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
-    } else {
+    } else if (dataChannels.size > 0) {
       dataChannels.forEach((dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {
           dataChannel.send(jsonString);
         }
       });
+    } else {
+      showStatusMessage('Error: No connections.');
+      return;
     }
     const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
@@ -858,6 +885,14 @@ function updateFeaturesUI() {
   if (!features.enableService) {
     showStatusMessage('Service disabled by admin. Disconnecting...');
     socket.close();
+  }
+  // New: Handle P2P/Relay UI updates if needed (e.g., disable buttons if both off)
+  if (!features.enableP2P && !features.enableRelay) {
+    showStatusMessage('Both P2P and relay disabled. Messaging unavailable.');
+    inputContainer.classList.add('hidden');
+  } else if (!features.enableP2P && features.enableRelay && isConnected) {
+    inputContainer.classList.remove('hidden');
+    messages.classList.remove('waiting');
   }
 }
 

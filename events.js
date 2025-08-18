@@ -370,18 +370,6 @@ socket.onmessage = async (event) => {
       if (voiceCallActive) {
         renegotiate(message.clientId);
       }
-      // New: Enable UI for non-initiator in relay mode after join and key exchange
-      if (!features.enableP2P && features.enableRelay && totalClients > 1 && roomMaster) {
-        useRelay = true;
-        isConnected = true;
-        inputContainer.classList.remove('hidden');
-        messages.classList.remove('waiting');
-        const privacyStatus = document.getElementById('privacyStatus');
-        if (privacyStatus) {
-          privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
-          privacyStatus.classList.remove('hidden');
-        }
-      }
     }
     if (message.type === 'client-disconnected') {
       totalClients = message.totalClients;
@@ -483,7 +471,7 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(newRoomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('New room master received and set for PFS.');
-        // New: Ensure UI is enabled after successful PFS update in relay mode
+        // New: Enable UI for non-initiator in relay mode after successful PFS update
         if (!features.enableP2P && features.enableRelay && totalClients > 1) {
           useRelay = true;
           isConnected = true;

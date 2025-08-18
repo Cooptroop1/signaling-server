@@ -316,6 +316,9 @@ socket.onmessage = async (event) => {
       maxClients = Math.min(message.maxClients, 10);
       isInitiator = message.isInitiator;
       features = message.features || features;
+      if (!features.enableP2P) {
+        useRelay = true;
+      }
       totalClients = 1;
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
@@ -333,15 +336,7 @@ socket.onmessage = async (event) => {
         }
         // New: Periodic ratchet timer (every 5 minutes)
         setInterval(triggerRatchet, 5 * 60 * 1000);
-      } else {
-        const publicKey = await exportPublicKey(keyPair.publicKey);
-        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
-      }
-      if (!features.enableP2P) {
-        useRelay = true;
-        // For initiator, set connected immediately; for joiner, wait for room key
-        if (isInitiator) {
-          isConnected = true;
+        if (useRelay) {
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
             privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
@@ -350,6 +345,9 @@ socket.onmessage = async (event) => {
           inputContainer.classList.remove('hidden');
           messages.classList.remove('waiting');
         }
+      } else {
+        const publicKey = await exportPublicKey(keyPair.publicKey);
+        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
       updateMaxClientsUI();
       updateDots();

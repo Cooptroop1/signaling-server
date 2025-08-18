@@ -245,6 +245,9 @@ function validateMessage(data) {
       if (!data.iv || !isValidBase64(data.iv)) {
         return { valid: false, error: 'encrypted-room-key: invalid iv' };
       }
+      if (data.publicKey && !isValidBase64(data.publicKey)) {
+        return { valid: false, error: 'encrypted-room-key: invalid publicKey format' };
+      }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'encrypted-room-key: targetId required as string' };
       }
@@ -601,7 +604,7 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(data.code);
           const targetWs = room.clients.get(data.targetId)?.ws;
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, clientId: data.clientId, code: data.code }));
+            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
           }
         }
         return;
@@ -898,6 +901,8 @@ wss.on('connection', (ws, req) => {
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
         }
+      } else {
+        ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
       }
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));

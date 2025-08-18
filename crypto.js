@@ -5,16 +5,16 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   let base64 = btoa(binary);
-  // Ensure proper padding
+  // Ensure proper padding and sanitize
   const padding = (4 - base64.length % 4) % 4;
   base64 += '='.repeat(padding);
-  // Sanitize to remove any non-base64 characters
   base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+  console.log('Generated base64:', base64); // Debug log
   return base64;
 }
 
 function base64ToArrayBuffer(base64) {
-  // Remove any non-base64 characters and ensure padding
+  // Sanitize input and ensure padding
   base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
   const padding = (4 - base64.length % 4) % 4;
   base64 += '='.repeat(padding);
@@ -35,7 +35,9 @@ function base64ToArrayBuffer(base64) {
 async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
-    return arrayBufferToBase64(exported);
+    const base64 = arrayBufferToBase64(exported);
+    console.log('Exported public key:', base64); // Debug log
+    return base64;
   } catch (error) {
     console.error('exportPublicKey error:', error);
     throw error;
@@ -44,13 +46,15 @@ async function exportPublicKey(key) {
 
 async function importPublicKey(base64) {
   try {
-    return await window.crypto.subtle.importKey(
+    const key = await window.crypto.subtle.importKey(
       'raw',
       base64ToArrayBuffer(base64),
       { name: 'ECDH', namedCurve: 'P-384' },
       true,
       []
     );
+    console.log('Imported public key successfully');
+    return key;
   } catch (error) {
     console.error('importPublicKey error:', error, 'Input base64:', base64);
     throw error;
@@ -81,11 +85,13 @@ async function encrypt(text, master) {
       derivedKey,
       encoded
     );
-    return {
+    const result = {
       encrypted: arrayBufferToBase64(encrypted),
       iv: arrayBufferToBase64(iv),
       salt: arrayBufferToBase64(salt)
     };
+    console.log('Encryption result:', result); // Debug log
+    return result;
   } catch (error) {
     console.error('encrypt error:', error);
     throw error;
@@ -113,7 +119,9 @@ async function decrypt(encrypted, iv, salt, master) {
       derivedKey,
       base64ToArrayBuffer(encrypted)
     );
-    return new TextDecoder().decode(decoded);
+    const result = new TextDecoder().decode(decoded);
+    console.log('Decryption successful, result:', result); // Debug log
+    return result;
   } catch (error) {
     console.error('decrypt error:', error, 'Encrypted:', encrypted, 'IV:', iv, 'Salt:', salt);
     throw error;
@@ -128,10 +136,12 @@ async function encryptBytes(key, data) {
       key,
       data
     );
-    return {
+    const result = {
       encrypted: arrayBufferToBase64(encrypted),
       iv: arrayBufferToBase64(iv)
     };
+    console.log('encryptBytes result:', result); // Debug log
+    return result;
   } catch (error) {
     console.error('encryptBytes error:', error);
     throw error;
@@ -140,11 +150,13 @@ async function encryptBytes(key, data) {
 
 async function decryptBytes(key, encrypted, iv) {
   try {
-    return await window.crypto.subtle.decrypt(
+    const result = await window.crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
       key,
       base64ToArrayBuffer(encrypted)
     );
+    console.log('decryptBytes successful'); // Debug log
+    return result;
   } catch (error) {
     console.error('decryptBytes error:', error, 'Encrypted:', encrypted, 'IV:', iv);
     throw error;
@@ -158,13 +170,15 @@ async function deriveSharedKey(privateKey, publicKey) {
       privateKey,
       256
     );
-    return await window.crypto.subtle.importKey(
+    const key = await window.crypto.subtle.importKey(
       "raw",
       sharedBits,
       "AES-GCM",
       false,
       ["encrypt", "decrypt"]
     );
+    console.log('deriveSharedKey successful');
+    return key;
   } catch (error) {
     console.error('deriveSharedKey error:', error);
     throw error;
@@ -174,16 +188,18 @@ async function deriveSharedKey(privateKey, publicKey) {
 async function encryptRaw(key, data) {
   try {
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encoded = new TextEncoder().encode(data); // Encode string to bytes
+    const encoded = new TextEncoder().encode(data);
     const encrypted = await window.crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
       key,
       encoded
     );
-    return {
+    const result = {
       encrypted: arrayBufferToBase64(encrypted),
       iv: arrayBufferToBase64(iv)
     };
+    console.log('encryptRaw result:', result); // Debug log
+    return result;
   } catch (error) {
     console.error('encryptRaw error:', error);
     throw error;
@@ -193,11 +209,13 @@ async function encryptRaw(key, data) {
 async function signMessage(signingKey, data) {
   try {
     const encoded = new TextEncoder().encode(data);
-    return arrayBufferToBase64(await window.crypto.subtle.sign(
+    const signature = arrayBufferToBase64(await window.crypto.subtle.sign(
       { name: 'HMAC' },
       signingKey,
       encoded
     ));
+    console.log('signMessage successful, signature:', signature); // Debug log
+    return signature;
   } catch (error) {
     console.error('signMessage error:', error);
     throw error;
@@ -207,12 +225,14 @@ async function signMessage(signingKey, data) {
 async function verifyMessage(signingKey, signature, data) {
   try {
     const encoded = new TextEncoder().encode(data);
-    return await window.crypto.subtle.verify(
+    const result = await window.crypto.subtle.verify(
       { name: 'HMAC' },
       signingKey,
       base64ToArrayBuffer(signature),
       encoded
     );
+    console.log('verifyMessage result:', result); // Debug log
+    return result;
   } catch (error) {
     console.error('verifyMessage error:', error);
     return false;
@@ -228,13 +248,15 @@ async function deriveSigningKey(master) {
       false,
       ['deriveKey']
     );
-    return await window.crypto.subtle.deriveKey(
+    const key = await window.crypto.subtle.deriveKey(
       { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'HMAC', hash: 'SHA-256' },
       false,
       ['sign', 'verify']
     );
+    console.log('deriveSigningKey successful');
+    return key;
   } catch (error) {
     console.error('deriveSigningKey error:', error);
     throw error;

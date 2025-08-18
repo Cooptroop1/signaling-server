@@ -189,7 +189,7 @@ socket.onmessage = async (event) => {
         autoConnect(pendingCode);
         pendingCode = null;
       }
-      processSignulingQueue();
+      processSignalingQueue();
       return;
     }
     if (message.type === 'token-refreshed') {
@@ -623,7 +623,7 @@ document.getElementById('startChatToggleButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden'); // Ensure hidden until connected
+  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Enter a username to start a chat';
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
@@ -636,7 +636,7 @@ document.getElementById('connectToggleButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden'); // Ensure hidden until connected
+  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Enter a username and code to join a chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
@@ -655,7 +655,7 @@ document.getElementById('connect2FAChatButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  inputContainer.classList.add('hidden'); // Ensure hidden until connected
+  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Enter a username and code to join a 2FA chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
@@ -728,7 +728,7 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   initialContainer.classList.add('hidden');
   chatContainer.classList.remove('hidden');
   messages.classList.add('waiting');
-  inputContainer.classList.add('hidden'); // Keep hidden until connected
+  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Waiting for connection...';
   if (socket.readyState === WebSocket.OPEN && token) {
     console.log('Sending join message for new chat');
@@ -771,7 +771,7 @@ document.getElementById('connectButton').onclick = () => {
   connectContainer.classList.add('hidden');
   chatContainer.classList.remove('hidden');
   messages.classList.add('waiting');
-  inputContainer.classList.add('hidden'); // Keep hidden until connected
+  inputContainer.classList.add('hidden');
   statusElement.textContent = 'Waiting for connection...';
   if (socket.readyState === WebSocket.OPEN && token) {
     console.log('Sending join message for existing chat');
@@ -973,7 +973,7 @@ function setupWaitingForJoin(codeParam) {
   chatContainer.style.display = 'flex';
   codeDisplayElement.style.display = 'none';
   copyCodeButton.style.display = 'none';
-  inputContainer.style.display = 'none'; // Keep hidden until connected
+  inputContainer.style.display = 'none';
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
   if (!username || !validateUsername(username)) {
@@ -998,7 +998,7 @@ function setupWaitingForJoin(codeParam) {
       codeDisplayElement.textContent = `Using code: ${code}`;
       codeDisplayElement.style.display = 'block';
       copyCodeButton.style.display = 'block';
-      inputContainer.style.display = 'none'; // Keep hidden until connected
+      inputContainer.style.display = 'none';
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN && token) {
@@ -1023,7 +1023,7 @@ function setupWaitingForJoin(codeParam) {
     codeDisplayElement.textContent = `Using code: ${code}`;
     codeDisplayElement.style.display = 'block';
     copyCodeButton.style.display = 'block';
-    inputContainer.style.display = 'none'; // Keep hidden until connected
+    inputContainer.style.display = 'none';
     if (socket.readyState === WebSocket.OPEN && token) {
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
     } else {

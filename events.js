@@ -442,6 +442,8 @@ socket.onmessage = async (event) => {
         }));
         // Trigger PFS ratchet after receiving and storing the public key
         await triggerRatchet();
+        // New: Send 'relay-ready' to joiner after successful key send
+        socket.send(JSON.stringify({ type: 'relay-ready', targetId: message.clientId, code, clientId, token }));
       } catch (error) {
         console.error('Error handling public-key:', error);
         showStatusMessage('Key exchange failed.');
@@ -500,6 +502,18 @@ socket.onmessage = async (event) => {
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Generated fallback roomMaster due to PFS failure.');
+      }
+    }
+    // New: Handle 'relay-ready' from initiator to confirm key exchange and enable UI on joiner
+    if (message.type === 'relay-ready' && message.targetId === clientId && !features.enableP2P && features.enableRelay) {
+      useRelay = true;
+      isConnected = true;
+      inputContainer.classList.remove('hidden');
+      messages.classList.remove('waiting');
+      const privacyStatus = document.getElementById('privacyStatus');
+      if (privacyStatus) {
+        privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+        privacyStatus.classList.remove('hidden');
       }
     }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {

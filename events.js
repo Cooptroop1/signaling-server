@@ -1,4 +1,4 @@
-
+// events.js (updated)
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -153,6 +153,7 @@ socket.onerror = (error) => {
 socket.onclose = () => {
   console.log('WebSocket closed');
   showStatusMessage('Lost connection, reconnecting...');
+  stopKeepAlive();
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
     return;
@@ -186,6 +187,7 @@ socket.onmessage = async (event) => {
       token = message.accessToken;
       refreshToken = message.refreshToken;
       console.log('Received authentication tokens:', { accessToken: token, refreshToken });
+      startKeepAlive(); // Start keepalive after connected
       // Start token refresh timer (5 minutes for 10-minute expiry)
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingCode) {
@@ -259,7 +261,7 @@ socket.onmessage = async (event) => {
         message.message.includes('Initiator offline') || 
         message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
-        showStatusMessage(`Failed to join join chat: ${message.message}`);
+        showStatusMessage(`Failed to join chat: ${message.message}`);
         socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
         initialContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
@@ -334,6 +336,20 @@ socket.onmessage = async (event) => {
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
+      }
+      if (!features.enableP2P) {
+        useRelay = true;
+        // For initiator, set connected immediately; for joiner, wait for room key
+        if (isInitiator) {
+          isConnected = true;
+          const privacyStatus = document.getElementById('privacyStatus');
+          if (privacyStatus) {
+            privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+            privacyStatus.classList.remove('hidden');
+          }
+          inputContainer.classList.remove('hidden');
+          messages.classList.remove('waiting');
+        }
       }
       updateMaxClientsUI();
       updateDots();
@@ -436,6 +452,17 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(roomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Room master successfully imported.');
+        if (useRelay) {
+          isConnected = true;
+          const privacyStatus = document.getElementById('privacyStatus');
+          if (privacyStatus) {
+            privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+            privacyStatus.classList.remove('hidden');
+          }
+          inputContainer.classList.remove('hidden');
+          messages.classList.remove('waiting');
+          updateMaxClientsUI();
+        }
       } catch (error) {
         console.error('Error handling encrypted-room-key:', error);
         showStatusMessage('Failed to receive encryption key.');

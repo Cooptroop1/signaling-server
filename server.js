@@ -325,7 +325,7 @@ function validateMessage(data) {
         return { valid: false, error: `${data.type}: messageId required as string` };
       }
       if (!data.timestamp || typeof data.timestamp !== 'number') {
-        return { valid: false, error: `${data.type}: timestamp required as number` };
+        return { valid: false, error: `${data.type}: timestamp required as number' };
       }
       if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string')) {
         return { valid: false, error: 'relay-file: filename required as string' };

@@ -1,260 +1,276 @@
-// crypto.js
-(function () {
-  window.CryptoUtils = window.CryptoUtils || {};
 
-  window.CryptoUtils.generateKeyPair = async function () {
-    try {
-      const keyPair = await window.crypto.subtle.generateKey(
-        { name: 'ECDH', namedCurve: 'P-384' },
-        true,
-        ['deriveKey', 'deriveBits']
-      );
-      console.log('Generated key pair');
-      return keyPair;
-    } catch (error) {
-      console.error('Error generating key pair:', error);
-      throw error;
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  let base64 = btoa(binary);
+  const padding = (4 - base64.length % 4) % 4;
+  base64 += '='.repeat(padding);
+  base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+  console.log('Generated base64:', base64);
+  return base64;
+}
+
+function base64ToArrayBuffer(base64) {
+  base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
+  const padding = (4 - base64.length % 4) % 4;
+  base64 += '='.repeat(padding);
+  try {
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
-  };
+    return bytes.buffer;
+  } catch (error) {
+    console.error('base64ToArrayBuffer error:', error, 'Input:', base64);
+    throw new Error('Invalid base64 data');
+  }
+}
 
-  window.CryptoUtils.importPublicKey = async function (pem) {
-    try {
-      const binaryDerString = atob(pem);
-      const binaryDer = new Uint8Array(binaryDerString.length);
-      for (let i = 0; i < binaryDerString.length; i++) {
-        binaryDer[i] = binaryDerString.charCodeAt(i);
-      }
-      const publicKey = await window.crypto.subtle.importKey(
-        'raw',
-        binaryDer.buffer,
-        { name: 'ECDH', namedCurve: 'P-384' },
-        true,
-        []
-      );
-      console.log('Imported public key successfully');
-      return publicKey;
-    } catch (error) {
-      console.error('Error importing public key:', error);
-      throw error;
+async function exportPublicKey(key) {
+  try {
+    const exported = await window.crypto.subtle.exportKey('raw', key);
+    const base64 = arrayBufferToBase64(exported);
+    if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
+      throw new Error(`Invalid public key length: ${base64.length} chars`);
     }
-  };
+    console.log('Exported public key:', base64);
+    return base64;
+  } catch (error) {
+    console.error('exportPublicKey error:', error);
+    throw new Error('Failed to export public key');
+  }
+}
 
-  window.CryptoUtils.deriveSharedKey = async function (privateKey, publicKey) {
-    try {
-      const sharedKey = await window.crypto.subtle.deriveKey(
-        { name: 'ECDH', public: publicKey },
-        privateKey,
-        { name: 'AES-GCM', length: 256 },
-        true,
-        ['encrypt', 'decrypt']
-      );
-      console.log('deriveSharedKey successful');
-      return sharedKey;
-    } catch (error) {
-      console.error('Error deriving shared key:', error);
-      throw error;
+async function importPublicKey(base64) {
+  try {
+    let buffer = base64ToArrayBuffer(base64);
+    if (buffer.byteLength === 96) {
+      const newBuffer = new Uint8Array(97);
+      newBuffer[0] = 4;
+      newBuffer.set(new Uint8Array(buffer), 1);
+      buffer = newBuffer.buffer;
+      console.log('Prepended 0x04 to public key buffer for import');
+    } else if (buffer.byteLength !== 97) {
+      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
     }
-  };
+    const key = await window.crypto.subtle.importKey(
+      'raw',
+      buffer,
+      { name: 'ECDH', namedCurve: 'P-384' },
+      true,
+      []
+    );
+    console.log('Imported public key successfully');
+    return key;
+  } catch (error) {
+    console.error('importPublicKey error:', error, 'Input base64:', base64);
+    throw new Error('Failed to import public key');
+  }
+}
 
-  window.CryptoUtils.generateRoomKey = async function () {
-    try {
-      const roomKey = await window.crypto.subtle.generateKey(
-        { name: 'AES-GCM', length: 256 },
-        true,
-        ['encrypt', 'decrypt']
-      );
-      console.log('Generated room key');
-      return roomKey;
-    } catch (error) {
-      console.error('Error generating room key:', error);
-      throw error;
-    }
-  };
+async function encrypt(text, master) {
+  try {
+    const salt = window.crypto.getRandomValues(new Uint8Array(16));
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      master,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const derivedKey = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt, info: new Uint8Array(0), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(text);
+    const encrypted = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      derivedKey,
+      encoded
+    );
+    const result = {
+      encrypted: arrayBufferToBase64(encrypted),
+      iv: arrayBufferToBase64(iv),
+      salt: arrayBufferToBase64(salt)
+    };
+    console.log('Encryption result:', result);
+    return result;
+  } catch (error) {
+    console.error('encrypt error:', error);
+    throw new Error('Encryption failed');
+  }
+}
 
-  window.CryptoUtils.exportKey = async function (key) {
-    try {
-      const exported = await window.crypto.subtle.exportKey('raw', key);
-      const exportedKeyBuffer = new Uint8Array(exported);
-      const exportedKeyString = btoa(String.fromCharCode.apply(null, exportedKeyBuffer));
-      console.log('Exported key successfully');
-      return exportedKeyString;
-    } catch (error) {
-      console.error('Error exporting key:', error);
-      throw error;
-    }
-  };
+async function decrypt(encrypted, iv, salt, master) {
+  try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      master,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const derivedKey = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt: base64ToArrayBuffer(salt), info: new Uint8Array(0), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    const decoded = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+      derivedKey,
+      base64ToArrayBuffer(encrypted)
+    );
+    const result = new TextDecoder().decode(decoded);
+    console.log('Decryption successful, result:', result);
+    return result;
+  } catch (error) {
+    console.error('decrypt error:', error, 'Encrypted:', encrypted, 'IV:', iv, 'Salt:', salt);
+    throw new Error('Decryption failed');
+  }
+}
 
-  window.CryptoUtils.encryptBytes = async function (data, key, iv) {
-    try {
-      let dataBuffer;
-      if (typeof data === 'string') {
-        // Convert string to ArrayBuffer
-        dataBuffer = new TextEncoder().encode(data).buffer;
-      } else if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
-        // Use directly if already an ArrayBuffer or ArrayBufferView
-        dataBuffer = data instanceof ArrayBuffer ? data : data.buffer;
-      } else {
-        throw new TypeError('Data must be a string, ArrayBuffer, or ArrayBufferView');
-      }
+async function encryptBytes(key, data) {
+  try {
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      data
+    );
+    const result = {
+      encrypted: arrayBufferToBase64(encrypted),
+      iv: arrayBufferToBase64(iv)
+    };
+    console.log('encryptBytes result:', result);
+    return result;
+  } catch (error) {
+    console.error('encryptBytes error:', error);
+    throw new Error('Byte encryption failed');
+  }
+}
 
-      // Ensure IV is an ArrayBuffer or ArrayBufferView
-      let ivBuffer;
-      if (iv instanceof ArrayBuffer) {
-        ivBuffer = iv;
-      } else if (ArrayBuffer.isView(iv)) {
-        ivBuffer = iv.buffer;
-      } else if (typeof iv === 'string') {
-        // Convert base64 IV to ArrayBuffer
-        const binaryString = atob(iv);
-        ivBuffer = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          ivBuffer[i] = binaryString.charCodeAt(i);
-        }
-        ivBuffer = ivBuffer.buffer;
-      } else {
-        throw new TypeError('IV must be a string (base64), ArrayBuffer, or ArrayBufferView');
-      }
+async function decryptBytes(key, encrypted, iv) {
+  try {
+    const result = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+      key,
+      base64ToArrayBuffer(encrypted)
+    );
+    console.log('decryptBytes successful');
+    return result;
+  } catch (error) {
+    console.error('decryptBytes error:', error, 'Encrypted:', encrypted, 'IV:', iv);
+    throw new Error('Byte decryption failed');
+  }
+}
 
-      const encrypted = await window.crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv: ivBuffer },
-        key,
-        dataBuffer
-      );
-      console.log('Encrypted bytes successfully');
-      return new Uint8Array(encrypted);
-    } catch (error) {
-      console.error('encryptBytes error:', error);
-      throw new Error('Byte encryption failed');
-    }
-  };
+async function deriveSharedKey(privateKey, publicKey) {
+  try {
+    const sharedBits = await window.crypto.subtle.deriveBits(
+      { name: 'ECDH', public: publicKey },
+      privateKey,
+      256
+    );
+    const key = await window.crypto.subtle.importKey(
+      "raw",
+      sharedBits,
+      "AES-GCM",
+      false,
+      ["encrypt", "decrypt"]
+    );
+    console.log('deriveSharedKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveSharedKey error:', error);
+    throw new Error('Shared key derivation failed');
+  }
+}
 
-  window.CryptoUtils.decryptBytes = async function (encryptedData, key, iv) {
-    try {
-      let encryptedBuffer;
-      if (encryptedData instanceof ArrayBuffer) {
-        encryptedBuffer = encryptedData;
-      } else if (ArrayBuffer.isView(encryptedData)) {
-        encryptedBuffer = encryptedData.buffer;
-      } else if (typeof encryptedData === 'string') {
-        // Convert base64 encrypted data to ArrayBuffer
-        const binaryString = atob(encryptedData);
-        encryptedBuffer = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          encryptedBuffer[i] = binaryString.charCodeAt(i);
-        }
-        encryptedBuffer = encryptedBuffer.buffer;
-      } else {
-        throw new TypeError('Encrypted data must be a string (base64), ArrayBuffer, or ArrayBufferView');
-      }
+async function encryptRaw(key, data) {
+  try {
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(data);
+    const encrypted = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      encoded
+    );
+    const result = {
+      encrypted: arrayBufferToBase64(encrypted),
+      iv: arrayBufferToBase64(iv)
+    };
+    console.log('encryptRaw result:', result);
+    return result;
+  } catch (error) {
+    console.error('encryptRaw error:', error);
+    throw new Error('Raw encryption failed');
+  }
+}
 
-      let ivBuffer;
-      if (iv instanceof ArrayBuffer) {
-        ivBuffer = iv;
-      } else if (ArrayBuffer.isView(iv)) {
-        ivBuffer = iv.buffer;
-      } else if (typeof iv === 'string') {
-        // Convert base64 IV to ArrayBuffer
-        const binaryString = atob(iv);
-        ivBuffer = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          ivBuffer[i] = binaryString.charCodeAt(i);
-        }
-        ivBuffer = ivBuffer.buffer;
-      } else {
-        throw new TypeError('IV must be a string (base64), ArrayBuffer, or ArrayBufferView');
-      }
+async function signMessage(signingKey, data) {
+  try {
+    const encoded = new TextEncoder().encode(data);
+    const signature = arrayBufferToBase64(await window.crypto.subtle.sign(
+      { name: 'HMAC' },
+      signingKey,
+      encoded
+    ));
+    console.log('signMessage successful, signature:', signature);
+    return signature;
+  } catch (error) {
+    console.error('signMessage error:', error);
+    throw new Error('Message signing failed');
+  }
+}
 
-      const decrypted = await window.crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: ivBuffer },
-        key,
-        encryptedBuffer
-      );
-      console.log('Decrypted bytes successfully');
-      return new Uint8Array(decrypted);
-    } catch (error) {
-      console.error('decryptBytes error:', error);
-      throw new Error('Byte decryption failed');
-    }
-  };
+async function verifyMessage(signingKey, signature, data) {
+  try {
+    const encoded = new TextEncoder().encode(data);
+    const result = await window.crypto.subtle.verify(
+      { name: 'HMAC' },
+      signingKey,
+      base64ToArrayBuffer(signature),
+      encoded
+    );
+    console.log('verifyMessage result:', result);
+    return result;
+  } catch (error) {
+    console.error('verifyMessage error:', error);
+    return false;
+  }
+}
 
-  window.CryptoUtils.exportPublicKey = async function (keyPair) {
-    try {
-      const exported = await window.crypto.subtle.exportKey('raw', keyPair.publicKey);
-      const exportedKeyBuffer = new Uint8Array(exported);
-      const exportedKeyString = btoa(String.fromCharCode.apply(null, exportedKeyBuffer));
-      console.log('Exported public key successfully');
-      return exportedKeyString;
-    } catch (error) {
-      console.error('Error exporting public key:', error);
-      throw error;
-    }
-  };
-
-  window.CryptoUtils.generateIV = async function () {
-    try {
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      console.log('Generated IV successfully');
-      return iv;
-    } catch (error) {
-      console.error('Error generating IV:', error);
-      throw error;
-    }
-  };
-
-  window.CryptoUtils.generateSigningKey = async function () {
-    try {
-      const signingKey = await window.crypto.subtle.generateKey(
-        { name: 'HMAC', hash: 'SHA-256' },
-        true,
-        ['sign', 'verify']
-      );
-      console.log('Generated signing key successfully');
-      return signingKey;
-    } catch (error) {
-      console.error('Error generating signing key:', error);
-      throw error;
-    }
-  };
-
-  window.CryptoUtils.signMessage = async function (message, signingKey) {
-    try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(message);
-      const signature = await window.crypto.subtle.sign(
-        'HMAC',
-        signingKey,
-        data
-      );
-      const signatureArray = new Uint8Array(signature);
-      const signatureBase64 = btoa(String.fromCharCode.apply(null, signatureArray));
-      console.log('Signed message successfully');
-      return signatureBase64;
-    } catch (error) {
-      console.error('Error signing message:', error);
-      throw error;
-    }
-  };
-
-  window.CryptoUtils.verifySignature = async function (message, signatureBase64, signingKey) {
-    try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(message);
-      const signatureBinary = atob(signatureBase64);
-      const signatureArray = new Uint8Array(signatureBinary.length);
-      for (let i = 0; i < signatureBinary.length; i++) {
-        signatureArray[i] = signatureBinary.charCodeAt(i);
-      }
-      const isValid = await window.crypto.subtle.verify(
-        'HMAC',
-        signingKey,
-        signatureArray,
-        data
-      );
-      console.log('Signature verification result:', isValid);
-      return isValid;
-    } catch (error) {
-      console.error('Error verifying signature:', error);
-      throw error;
-    }
-  };
-})();
+async function deriveSigningKey(master) {
+  try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      master,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign', 'verify']
+    );
+    console.log('deriveSigningKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveSigningKey error:', error);
+    throw new Error('Signing key derivation failed');
+  }
+}

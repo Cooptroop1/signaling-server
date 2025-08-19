@@ -447,8 +447,18 @@ wss.on('connection', (ws, req) => {
         incrementFailure(clientIp);
         return;
       }
+      // Skip escaping for specific fields that should remain untouched
+      const skipEscapeFields = [
+        data.type === 'public-key' && 'publicKey',
+        data.type === 'encrypted-room-key' && 'publicKey',
+        data.type === 'encrypted-room-key' && 'encryptedKey',
+        data.type === 'encrypted-room-key' && 'iv',
+        data.type === 'new-room-key' && 'encrypted',
+        data.type === 'new-room-key' && 'iv',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'data'
+      ];
       Object.keys(data).forEach(key => {
-        if (typeof data[key] === 'string' && !(data.type === 'public-key' && key === 'publicKey') && !(data.type === 'encrypted-room-key' && key === 'publicKey')) {
+        if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
           data[key] = validator.escape(validator.trim(data[key]));
         }
       });

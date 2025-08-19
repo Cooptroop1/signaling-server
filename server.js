@@ -1,3 +1,4 @@
+// server.js
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -92,7 +93,7 @@ const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
-const processedMessageIds = new Map(); // New: Track processed message IDs per room
+const processedMessageIds = new Map();
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -304,18 +305,9 @@ function validateMessage(data) {
     case 'relay-image':
     case 'relay-voice':
     case 'relay-file':
-      const payloadField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
-      if (!data[payloadField] || !isValidBase64(data[payloadField])) {
-        return { valid: false, error: `${data.type}: invalid ${payloadField}` };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: `${data.type}: invalid iv` };
-      }
-      if (!data.salt || !isValidBase64(data.salt)) {
-        return { valid: false, error: `${data.type}: invalid salt` };
-      }
-      if (!data.signature || !isValidBase64(data.signature)) {
-        return { valid: false, error: `${data.type}: invalid signature` };
+      const payloadField = data.type === 'relay-message' ? 'content' : 'data'; // Plain for basic relay
+      if (!data[payloadField] || typeof data[payloadField] !== 'string') {
+        return { valid: false, error: `${data.type}: invalid ${payloadField} (must be string)` };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: `${data.type}: messageId required as string` };
@@ -389,7 +381,7 @@ setInterval(() => {
   processedMessageIds.forEach((messageSet, code) => {
     const now = Date.now();
     messageSet.forEach((timestamp, messageId) => {
-      if (now - timestamp > 300000) { // 5min expiry
+      if (now - timestamp > 300000) {
         messageSet.delete(messageId);
       }
     });
@@ -807,7 +799,6 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        // Check for duplicate messageId
         if (!processedMessageIds.has(data.code)) {
           processedMessageIds.set(data.code, new Map());
         }

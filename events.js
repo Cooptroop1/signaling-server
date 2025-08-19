@@ -1,4 +1,3 @@
-
 // events.js
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
@@ -302,9 +301,8 @@ socket.onmessage = async (event) => {
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       return;
     }
-    if (message.type === 'totp-enabled') {
-      totpEnabled = true;
-      return;
+    if (message.type === 'error') {
+      // ... (existing error handling)
     }
     if (message.type === 'init') {
       clientId = message.clientId;
@@ -321,6 +319,10 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
+        // Generate initial roomMaster and signingKey for E2E
+        roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+        signingKey = await deriveSigningKey(roomMaster);
+        console.log('Generated initial roomMaster and signingKey for initiator.');
         isConnected = true;
         if (pendingTotpSecret) {
           socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));

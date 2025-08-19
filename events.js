@@ -424,7 +424,7 @@ socket.onmessage = async (event) => {
       handleCandidate(message.candidate, message.clientId);
       return;
     }
-    if (message.type === 'public-key' && isInitiator && !useRelay) { // Skip in relay mode
+    if (message.type === 'public-key' && isInitiator && !useRelay) {
       try {
         clientPublicKeys.set(message.clientId, message.publicKey);
         const joinerPublic = await importPublicKey(message.publicKey);
@@ -448,7 +448,7 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'encrypted-room-key' && !useRelay) { // Skip in relay mode
+    if (message.type === 'encrypted-room-key' && !useRelay) {
       try {
         initiatorPublic = message.publicKey;
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
@@ -474,7 +474,7 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'new-room-key' && message.targetId === clientId && !useRelay) { // Skip in relay mode
+    if (message.type === 'new-room-key' && message.targetId === clientId && !useRelay) {
       try {
         const importedInitiatorPublic = await importPublicKey(initiatorPublic);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
@@ -491,14 +491,20 @@ socket.onmessage = async (event) => {
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
+      console.log('Received plain relay message:', message); // Debug
       const payload = {
         messageId: message.messageId,
         username: message.username,
         content: message.type === 'message' ? message.content : undefined,
         data: message.type !== 'message' ? message.data : undefined,
         filename: message.filename,
-        timestamp: message.timestamp
+        timestamp: Number(message.timestamp) || Date.now() // Ensure valid timestamp
       };
+      if (!payload.username || (!payload.content && !payload.data) || isNaN(payload.timestamp)) {
+        console.error('Invalid payload in relay message:', payload);
+        showStatusMessage('Invalid message received.');
+        return;
+      }
       const senderUsername = payload.username;
       const messages = document.getElementById('messages');
       const isSelf = senderUsername === username;

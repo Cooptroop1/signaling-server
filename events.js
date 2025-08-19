@@ -332,7 +332,7 @@ socket.onmessage = async (event) => {
         if (useRelay) {
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+            privacyStatus.textContent = 'Relay Mode';
             privacyStatus.classList.remove('hidden');
           }
           inputContainer.classList.remove('hidden');
@@ -455,7 +455,7 @@ socket.onmessage = async (event) => {
           isConnected = true;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+            privacyStatus.textContent = 'Relay Mode';
             privacyStatus.classList.remove('hidden');
           }
           inputContainer.classList.remove('hidden');
@@ -485,22 +485,15 @@ socket.onmessage = async (event) => {
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
-      const encrypted = message.type === 'message' ? message.encryptedContent : message.encryptedData;
-      const valid = await verifyMessage(signingKey, message.signature, encrypted);
-      if (!valid) {
-        console.error('Tampered message detected');
-        showStatusMessage('Tampered message detected. Ignoring.');
-        return;
-      }
-      let payload;
-      try {
-        const jsonString = await decrypt(encrypted, message.iv, message.salt, roomMaster);
-        payload = JSON.parse(jsonString);
-      } catch (error) {
-        console.error('Decryption failed:', error);
-        showStatusMessage('Failed to decrypt message.');
-        return;
-      }
+      // For basic relay, no decryption/verification
+      const payload = {
+        messageId: message.messageId,
+        username: message.username,
+        content: message.type === 'message' ? message.content : undefined,
+        data: message.type !== 'message' ? message.data : undefined,
+        filename: message.filename,
+        timestamp: message.timestamp
+      };
       const senderUsername = payload.username;
       const messages = document.getElementById('messages');
       const isSelf = senderUsername === username;
@@ -567,7 +560,7 @@ function refreshAccessToken() {
 }
 
 async function triggerRatchet() {
-  if (!isInitiator) return;
+  if (!isInitiator || connectedClients.size <= 1) return;
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
   let success = 0;
   for (const cId of connectedClients) {

@@ -14,6 +14,8 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
+const CHUNK_SIZE = 16384; // 16KB safe for data channel
+const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -101,7 +103,6 @@ async function sendMedia(file, type) {
   let payload = { messageId, type, username, timestamp };
   let dataToSend = base64;
   if (!useRelay) {
-    // E2E encrypt the data (base64 string for media/file)
     const messageKey = await deriveMessageKey(roomMaster);
     const { encrypted, iv } = await encryptRaw(messageKey, dataToSend);
     const toSign = dataToSend + timestamp;
@@ -117,11 +118,26 @@ async function sendMedia(file, type) {
   if (useRelay) {
     sendRelayMessage(`relay-${type}`, { data: base64, messageId, username, timestamp, filename: type === 'file' ? file.name : undefined });
   } else if (dataChannels.size > 0) {
-    dataChannels.forEach((dataChannel) => {
-      if (dataChannel.readyState === 'open') {
-        dataChannel.send(jsonString);
+    if (jsonString.length > CHUNK_SIZE) {
+      const chunkId = generateMessageId();
+      const chunks = [];
+      for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
+        chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
       }
-    });
+      dataChannels.forEach((dataChannel) => {
+        if (dataChannel.readyState === 'open') {
+          chunks.forEach((chunk, index) => {
+            dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
+          });
+        }
+      });
+    } else {
+      dataChannels.forEach((dataChannel) => {
+        if (dataChannel.readyState === 'open') {
+          dataChannel.send(jsonString);
+        }
+      });
+    }
   } else {
     showStatusMessage('Error: No connections.');
     return;
@@ -376,93 +392,31 @@ function setupDataChannel(dataChannel, targetId) {
       showStatusMessage('Invalid message received.');
       return;
     }
-    if (data.type === 'voice-call-start') {
-      if (!voiceCallActive) {
-        startVoiceCall();
+    if (data.chunk) {
+      // Handle chunked message
+      const { chunkId, index, total, data: chunkData } = data;
+      if (!chunkBuffers.has(chunkId)) {
+        chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
       }
-      return;
-    }
-    if (data.type === 'voice-call-end') {
-      if (voiceCallActive) {
-        stopVoiceCall();
-      }
-      return;
-    }
-    if (!data.messageId || !data.username || (!data.content && !data.data && !data.encryptedContent && !data.encryptedData)) {
-      console.log(`Invalid message format from ${targetId}:`, data);
-      return;
-    }
-    if (processedMessageIds.has(data.messageId)) {
-      console.log(`Duplicate message ${data.messageId} from ${targetId}`);
-      return;
-    }
-    processedMessageIds.add(data.messageId);
-    const senderUsername = usernames.get(targetId) || data.username;
-    const messages = document.getElementById('messages');
-    const isSelf = senderUsername === username;
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'timestamp';
-    timeSpan.textContent = new Date(data.timestamp).toLocaleTimeString();
-    messageDiv.appendChild(timeSpan);
-    messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-    let contentOrData = data.content || data.data;
-    if (data.encryptedContent || data.encryptedData) {
-      // Decrypt and verify for P2P E2E
-      try {
-        const messageKey = await deriveMessageKey(roomMaster);
-        const encrypted = data.encryptedContent || data.encryptedData;
-        const iv = data.iv;
-        contentOrData = await decryptRaw(messageKey, encrypted, iv);
-        const toVerify = contentOrData + data.timestamp;
-        const valid = await verifyMessage(signingKey, data.signature, toVerify);
-        if (!valid) {
-          console.warn(`Invalid signature for message from ${targetId}`);
-          showStatusMessage('Invalid message signature detected.');
+      const buffer = chunkBuffers.get(chunkId);
+      buffer.chunks[index] = chunkData;
+      buffer.received++;
+      if (buffer.received === total) {
+        const fullMessage = buffer.chunks.join('');
+        chunkBuffers.delete(chunkId);
+        // Process the reassembled message
+        try {
+          data = JSON.parse(fullMessage);
+        } catch (e) {
+          console.error(`Invalid reassembled message from ${targetId}:`, e);
           return;
         }
-      } catch (error) {
-        console.error(`Decryption/verification failed for message from ${targetId}:`, error);
-        showStatusMessage('Failed to decrypt/verify message.');
-        return;
+        await processReceivedMessage(data, targetId);
       }
+      return;
     }
-    if (data.type === 'image') {
-      const img = document.createElement('img');
-      img.src = contentOrData;
-      img.style.maxWidth = '100%';
-      img.style.borderRadius = '0.5rem';
-      img.style.cursor = 'pointer';
-      img.setAttribute('alt', 'Received image');
-      img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
-      messageDiv.appendChild(img);
-    } else if (data.type === 'voice') {
-      const audio = document.createElement('audio');
-      audio.src = contentOrData;
-      audio.controls = true;
-      audio.setAttribute('alt', 'Received voice message');
-      audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
-      messageDiv.appendChild(audio);
-    } else if (data.type === 'file') {
-      const link = document.createElement('a');
-      link.href = contentOrData;
-      link.download = data.filename || 'file';
-      link.textContent = `Download ${data.filename || 'file'}`;
-      link.setAttribute('alt', 'Received file');
-      messageDiv.appendChild(link);
-    } else {
-      messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
-    }
-    messages.prepend(messageDiv);
-    messages.scrollTop = 0;
-    if (isInitiator) {
-      dataChannels.forEach((dc, id) => {
-        if (id !== targetId && dc.readyState === 'open') {
-          dc.send(event.data);
-        }
-      });
-    }
+    // Non-chunked message
+    await processReceivedMessage(data, targetId);
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
@@ -489,6 +443,95 @@ function setupDataChannel(dataChannel, targetId) {
       document.getElementById('audioOutputButton').classList.add('hidden');
     }
   };
+}
+
+async function processReceivedMessage(data, targetId) {
+  if (data.type === 'voice-call-start') {
+    if (!voiceCallActive) {
+      startVoiceCall();
+    }
+    return;
+  }
+  if (data.type === 'voice-call-end') {
+    if (voiceCallActive) {
+      stopVoiceCall();
+    }
+    return;
+  }
+  if (!data.messageId || !data.username || (!data.content && !data.data && !data.encryptedContent && !data.encryptedData)) {
+    console.log(`Invalid message format from ${targetId}:`, data);
+    return;
+  }
+  if (processedMessageIds.has(data.messageId)) {
+    console.log(`Duplicate message ${data.messageId} from ${targetId}`);
+    return;
+  }
+  processedMessageIds.add(data.messageId);
+  const senderUsername = usernames.get(targetId) || data.username;
+  const messages = document.getElementById('messages');
+  const isSelf = senderUsername === username;
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'timestamp';
+  timeSpan.textContent = new Date(data.timestamp).toLocaleTimeString();
+  messageDiv.appendChild(timeSpan);
+  messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+  let contentOrData = data.content || data.data;
+  if (data.encryptedContent || data.encryptedData) {
+    try {
+      const messageKey = await deriveMessageKey(roomMaster);
+      const encrypted = data.encryptedContent || data.encryptedData;
+      const iv = data.iv;
+      contentOrData = await decryptRaw(messageKey, encrypted, iv);
+      const toVerify = contentOrData + data.timestamp;
+      const valid = await verifyMessage(signingKey, data.signature, toVerify);
+      if (!valid) {
+        console.warn(`Invalid signature for message from ${targetId}`);
+        showStatusMessage('Invalid message signature detected.');
+        return;
+      }
+    } catch (error) {
+      console.error(`Decryption/verification failed for message from ${targetId}:`, error);
+      showStatusMessage('Failed to decrypt/verify message.');
+      return;
+    }
+  }
+  if (data.type === 'image') {
+    const img = document.createElement('img');
+    img.src = contentOrData;
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '0.5rem';
+    img.style.cursor = 'pointer';
+    img.setAttribute('alt', 'Received image');
+    img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
+    messageDiv.appendChild(img);
+  } else if (data.type === 'voice') {
+    const audio = document.createElement('audio');
+    audio.src = contentOrData;
+    audio.controls = true;
+    audio.setAttribute('alt', 'Received voice message');
+    audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
+    messageDiv.appendChild(audio);
+  } else if (data.type === 'file') {
+    const link = document.createElement('a');
+    link.href = contentOrData;
+    link.download = data.filename || 'file';
+    link.textContent = `Download ${data.filename || 'file'}`;
+    link.setAttribute('alt', 'Received file');
+    messageDiv.appendChild(link);
+  } else {
+    messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
+  }
+  messages.prepend(messageDiv);
+  messages.scrollTop = 0;
+  if (isInitiator) {
+    dataChannels.forEach((dc, id) => {
+      if (id !== targetId && dc.readyState === 'open') {
+        dc.send(event.data);
+      }
+    });
+  }
 }
 
 async function handleOffer(offer, targetId) {
@@ -607,7 +650,6 @@ async function sendMessage(content) {
     let payload = { messageId, username, timestamp };
     let contentToSend = sanitizedContent;
     if (!useRelay) {
-      // E2E encrypt the content
       const messageKey = await deriveMessageKey(roomMaster);
       const { encrypted, iv } = await encryptRaw(messageKey, contentToSend);
       const toSign = contentToSend + timestamp;
@@ -621,11 +663,26 @@ async function sendMessage(content) {
     if (useRelay) {
       sendRelayMessage('relay-message', { content: sanitizedContent, messageId, username, timestamp });
     } else if (dataChannels.size > 0) {
-      dataChannels.forEach((dataChannel, targetId) => {
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(jsonString);
+      if (jsonString.length > CHUNK_SIZE) {
+        const chunkId = generateMessageId();
+        const chunks = [];
+        for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
+          chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
         }
-      });
+        dataChannels.forEach((dataChannel) => {
+          if (dataChannel.readyState === 'open') {
+            chunks.forEach((chunk, index) => {
+              dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
+            });
+          }
+        });
+      } else {
+        dataChannels.forEach((dataChannel) => {
+          if (dataChannel.readyState === 'open') {
+            dataChannel.send(jsonString);
+          }
+        });
+      }
     } else {
       showStatusMessage('Error: No connections.');
       return;

@@ -14,7 +14,12 @@ function generateCode() {
 }
 let code = generateCode();
 let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
-let username = '';
+if (getCookie('clientId')) {
+  clientId = getCookie('clientId');
+} else {
+  setCookie('clientId', clientId, 365);
+}
+username = localStorage.getItem('username')?.trim() || '';
 let isInitiator = false;
 let isConnected = false;
 let maxClients = 2;
@@ -42,50 +47,41 @@ let signalingQueue = new Map();
 let connectedClients = new Set();
 let clientPublicKeys = new Map();
 let initiatorPublic;
-let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
-if (typeof window !== 'undefined') {
-  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-  console.log('WebSocket created');
-  if (getCookie('clientId')) {
-    clientId = getCookie('clientId');
-  } else {
-    setCookie('clientId', clientId, 365);
-  }
-  username = localStorage.getItem('username')?.trim() || '';
-  globalMessageRate.startTime = performance.now();
-  statusElement = document.getElementById('status');
-  codeDisplayElement = document.getElementById('codeDisplay');
-  copyCodeButton = document.getElementById('copyCodeButton');
-  initialContainer = document.getElementById('initialContainer');
-  usernameContainer = document.getElementById('usernameContainer');
-  connectContainer = document.getElementById('connectContainer');
-  chatContainer = document.getElementById('chatContainer');
-  newSessionButton = document.getElementById('newSessionButton');
-  maxClientsContainer = document.getElementById('maxClientsContainer');
-  inputContainer = document.querySelector('.input-container');
-  messages = document.getElementById('messages');
-  cornerLogo = document.getElementById('cornerLogo');
-  button2 = document.getElementById('button2');
-  helpText = document.getElementById('helpText');
-  helpModal = document.getElementById('helpModal');
-  (async () => {
-    keyPair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
-      true,
-      ['deriveKey', 'deriveBits']
-    );
-  })();
-  let cycleTimeout;
-  function triggerCycle() {
-    if (cycleTimeout) clearTimeout(cycleTimeout);
-    cornerLogo.classList.add('wink');
-    cycleTimeout = setTimeout(() => {
-      cornerLogo.classList.remove('wink');
-    }, 500);
-    setTimeout(triggerCycle, 60000);
-  }
+let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+console.log('WebSocket created');
+globalMessageRate.startTime = performance.now();
+statusElement = document.getElementById('status');
+codeDisplayElement = document.getElementById('codeDisplay');
+copyCodeButton = document.getElementById('copyCodeButton');
+initialContainer = document.getElementById('initialContainer');
+usernameContainer = document.getElementById('usernameContainer');
+connectContainer = document.getElementById('connectContainer');
+chatContainer = document.getElementById('chatContainer');
+newSessionButton = document.getElementById('newSessionButton');
+maxClientsContainer = document.getElementById('maxClientsContainer');
+inputContainer = document.querySelector('.input-container');
+messages = document.getElementById('messages');
+cornerLogo = document.getElementById('cornerLogo');
+button2 = document.getElementById('button2');
+helpText = document.getElementById('helpText');
+helpModal = document.getElementById('helpModal');
+(async () => {
+  keyPair = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    true,
+    ['deriveKey', 'deriveBits']
+  );
+})();
+let cycleTimeout;
+function triggerCycle() {
+  if (cycleTimeout) clearTimeout(cycleTimeout);
+  cornerLogo.classList.add('wink');
+  cycleTimeout = setTimeout(() => {
+    cornerLogo.classList.remove('wink');
+  }, 500);
   setTimeout(triggerCycle, 60000);
 }
+setTimeout(triggerCycle, 60000);
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
   helpModal.focus();
@@ -315,7 +311,6 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
-        // Generate initial roomMaster and signingKey for E2E
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Generated initial roomMaster and signingKey for initiator.');
@@ -327,6 +322,8 @@ socket.onmessage = async (event) => {
         }
         setInterval(triggerRatchet, 5 * 60 * 1000);
         if (useRelay) {
+          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
+          relaySendIndex = 0;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
             privacyStatus.textContent = 'Relay Mode';
@@ -367,14 +364,17 @@ socket.onmessage = async (event) => {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
-      if (voiceCallActive) {
-        renegotiate(message.clientId);
-      }
       if (useRelay) {
+        const senderChainKey = await deriveChainKey(roomMaster, 'relay-send-' + message.clientId);
+        relayReceiveStates.set(message.clientId, { chainKey: senderChainKey, receiveIndex: 0 });
+        console.log(`Initialized receive ratchet for sender ${message.clientId}`);
         isConnected = true;
         inputContainer.classList.remove('hidden');
         messages.classList.remove('waiting');
         updateMaxClientsUI();
+      }
+      if (voiceCallActive) {
+        renegotiate(message.clientId);
       }
       return;
     }
@@ -384,6 +384,7 @@ socket.onmessage = async (event) => {
       usernames.delete(message.clientId);
       connectedClients.delete(message.clientId);
       clientPublicKeys.delete(message.clientId);
+      relayReceiveStates.delete(message.clientId);
       cleanupPeerConnection(message.clientId);
       if (remoteAudios.has(message.clientId)) {
         const audio = remoteAudios.get(message.clientId);
@@ -494,12 +495,17 @@ socket.onmessage = async (event) => {
       const payload = {
         messageId: message.messageId,
         username: message.username,
-        content: message.type === 'message' ? message.content : undefined,
-        data: message.type !== 'message' ? message.data : undefined,
+        content: message.content,
+        encryptedContent: message.encryptedContent,
+        data: message.data,
+        encryptedData: message.encryptedData,
         filename: message.filename,
-        timestamp: Number(message.timestamp) || Date.now() // Ensure valid timestamp
+        timestamp: Number(message.timestamp) || Date.now(), // Ensure valid timestamp
+        iv: message.iv,
+        index: message.index,
+        clientId: message.clientId
       };
-      if (!payload.username || (!payload.content && !payload.data) || isNaN(payload.timestamp)) {
+      if (!payload.username || (!payload.content && !payload.data && !payload.encryptedContent && !payload.encryptedData) || isNaN(payload.timestamp)) {
         console.error('Invalid payload in relay message:', payload);
         showStatusMessage('Invalid message received.');
         return;
@@ -508,37 +514,63 @@ socket.onmessage = async (event) => {
       const messages = document.getElementById('messages');
       const isSelf = senderUsername === username;
       const messageDiv = document.createElement('div');
-      messageDiv.className = 'message-bubble ' + (isSelf ? 'self' : 'other');
+      messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
       const timeSpan = document.createElement('span');
       timeSpan.className = 'timestamp';
       timeSpan.textContent = new Date(payload.timestamp).toLocaleTimeString();
       messageDiv.appendChild(timeSpan);
       messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+      let contentOrData = payload.content || payload.data;
+      if (payload.encryptedContent || payload.encryptedData) {
+        const senderId = payload.clientId;
+        if (!relayReceiveStates.has(senderId)) {
+          console.warn(`No receive state for sender ${senderId}, initializing`);
+          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-send-' + senderId), receiveIndex: 0 });
+        }
+        const state = relayReceiveStates.get(senderId);
+        const skip = payload.index - state.receiveIndex;
+        if (skip < 0) {
+          console.warn(`Replay message from ${senderId} with index ${payload.index}`);
+          return;
+        }
+        if (skip > 100) {
+          console.warn(`Too many skipped messages from ${senderId}, possible DoS`);
+          return;
+        }
+        for (let i = 0; i < skip; i++) {
+          await ratchetDeriveMK(state.chainKey); // derive and discard
+          state.chainKey = await ratchetAdvance(state.chainKey);
+        }
+        const mk = await ratchetDeriveMK(state.chainKey);
+        contentOrData = await decryptRaw(mk, payload.encryptedContent || payload.encryptedData, payload.iv);
+        state.chainKey = await ratchetAdvance(state.chainKey);
+        state.receiveIndex = payload.index + 1;
+      }
       if (message.type === 'image') {
         const img = document.createElement('img');
-        img.src = payload.data;
+        img.src = contentOrData;
         img.style.maxWidth = '100%';
         img.style.borderRadius = '0.5rem';
         img.style.cursor = 'pointer';
         img.setAttribute('alt', 'Received image');
-        img.addEventListener('click', () => createImageModal(payload.data, 'messageInput'));
+        img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(img);
       } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
-        audio.src = payload.data;
+        audio.src = contentOrData;
         audio.controls = true;
         audio.setAttribute('alt', 'Received voice message');
-        audio.addEventListener('click', () => createAudioModal(payload.data, 'messageInput'));
+        audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(audio);
       } else if (message.type === 'file') {
         const link = document.createElement('a');
-        link.href = payload.data;
+        link.href = contentOrData;
         link.download = payload.filename || 'file';
         link.textContent = `Download ${payload.filename || 'file'}`;
         link.setAttribute('alt', 'Received file');
         messageDiv.appendChild(link);
       } else {
-        messageDiv.appendChild(document.createTextNode(sanitizeMessage(payload.content)));
+        messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
       }
       messages.prepend(messageDiv);
       messages.scrollTop = 0;
@@ -593,6 +625,18 @@ async function triggerRatchet() {
   if (success > 0) {
     roomMaster = newRoomMaster;
     signingKey = await deriveSigningKey(roomMaster);
+    if (useRelay) {
+      relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
+      relaySendIndex = 0;
+      relayReceiveStates.clear();
+      connectedClients.forEach(id => {
+        if (id !== clientId) {
+          deriveChainKey(roomMaster, 'relay-send-' + id).then(key => {
+            relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
+          });
+        }
+      });
+    }
     console.log('PFS ratchet complete, new roomMaster set.');
   } else {
     console.warn('PFS ratchet failed: No keys available to send to any clients.');

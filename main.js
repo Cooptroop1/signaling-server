@@ -98,7 +98,21 @@ async function sendMedia(file, type) {
   }
   const messageId = generateMessageId();
   const timestamp = Date.now();
-  const payload = { messageId, type, data: base64, filename: type === 'file' ? file.name : undefined, username, timestamp };
+  let payload = { messageId, type, username, timestamp };
+  let dataToSend = base64;
+  if (!useRelay) {
+    // E2E encrypt the data (base64 string for media/file)
+    const messageKey = await deriveMessageKey(roomMaster);
+    const { encrypted, iv } = await encryptRaw(messageKey, dataToSend);
+    const toSign = dataToSend + timestamp;
+    payload.signature = await signMessage(signingKey, toSign);
+    payload.encryptedData = encrypted;
+    payload.iv = iv;
+    payload.filename = type === 'file' ? file.name : undefined;
+  } else {
+    payload.data = base64;
+    payload.filename = type === 'file' ? file.name : undefined;
+  }
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
     sendRelayMessage(`relay-${type}`, { data: base64, messageId, username, timestamp, filename: type === 'file' ? file.name : undefined });
@@ -374,7 +388,7 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
-    if (!data.messageId || !data.username || (!data.content && !data.data)) {
+    if (!data.messageId || !data.username || (!data.content && !data.data && !data.encryptedContent && !data.encryptedData)) {
       console.log(`Invalid message format from ${targetId}:`, data);
       return;
     }
@@ -393,31 +407,52 @@ function setupDataChannel(dataChannel, targetId) {
     timeSpan.textContent = new Date(data.timestamp).toLocaleTimeString();
     messageDiv.appendChild(timeSpan);
     messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+    let contentOrData = data.content || data.data;
+    if (data.encryptedContent || data.encryptedData) {
+      // Decrypt and verify for P2P E2E
+      try {
+        const messageKey = await deriveMessageKey(roomMaster);
+        const encrypted = data.encryptedContent || data.encryptedData;
+        const iv = data.iv;
+        contentOrData = await decryptRaw(messageKey, encrypted, iv);
+        const toVerify = contentOrData + data.timestamp;
+        const valid = await verifyMessage(signingKey, data.signature, toVerify);
+        if (!valid) {
+          console.warn(`Invalid signature for message from ${targetId}`);
+          showStatusMessage('Invalid message signature detected.');
+          return;
+        }
+      } catch (error) {
+        console.error(`Decryption/verification failed for message from ${targetId}:`, error);
+        showStatusMessage('Failed to decrypt/verify message.');
+        return;
+      }
+    }
     if (data.type === 'image') {
       const img = document.createElement('img');
-      img.src = data.data;
+      img.src = contentOrData;
       img.style.maxWidth = '100%';
       img.style.borderRadius = '0.5rem';
       img.style.cursor = 'pointer';
       img.setAttribute('alt', 'Received image');
-      img.addEventListener('click', () => createImageModal(data.data, 'messageInput'));
+      img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
       messageDiv.appendChild(img);
     } else if (data.type === 'voice') {
       const audio = document.createElement('audio');
-      audio.src = data.data;
+      audio.src = contentOrData;
       audio.controls = true;
       audio.setAttribute('alt', 'Received voice message');
-      audio.addEventListener('click', () => createAudioModal(data.data, 'messageInput'));
+      audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
       messageDiv.appendChild(audio);
     } else if (data.type === 'file') {
       const link = document.createElement('a');
-      link.href = data.data;
+      link.href = contentOrData;
       link.download = data.filename || 'file';
       link.textContent = `Download ${data.filename || 'file'}`;
       link.setAttribute('alt', 'Received file');
       messageDiv.appendChild(link);
     } else {
-      messageDiv.appendChild(document.createTextNode(sanitizeMessage(data.content)));
+      messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
     }
     messages.prepend(messageDiv);
     messages.scrollTop = 0;
@@ -569,7 +604,19 @@ async function sendMessage(content) {
     const messageId = generateMessageId();
     const sanitizedContent = sanitizeMessage(content);
     const timestamp = Date.now();
-    const payload = { messageId, content: sanitizedContent, username, timestamp };
+    let payload = { messageId, username, timestamp };
+    let contentToSend = sanitizedContent;
+    if (!useRelay) {
+      // E2E encrypt the content
+      const messageKey = await deriveMessageKey(roomMaster);
+      const { encrypted, iv } = await encryptRaw(messageKey, contentToSend);
+      const toSign = contentToSend + timestamp;
+      payload.signature = await signMessage(signingKey, toSign);
+      payload.encryptedContent = encrypted;
+      payload.iv = iv;
+    } else {
+      payload.content = sanitizedContent;
+    }
     const jsonString = JSON.stringify(payload);
     if (useRelay) {
       sendRelayMessage('relay-message', { content: sanitizedContent, messageId, username, timestamp });
@@ -1095,37 +1142,7 @@ function stopVoiceRecording() {
   }
 }
 
-async function triggerRatchet() {
-  if (!isInitiator || connectedClients.size <= 1) return;
-  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-  let success = 0;
-  for (const cId of connectedClients) {
-    if (cId === clientId) continue;
-    const publicKey = clientPublicKeys.get(cId);
-    if (!publicKey) {
-      console.warn(`No public key for client ${cId}, skipping ratchet send`);
-      continue;
-    }
-    try {
-      const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
-      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
-      success++;
-    } catch (error) {
-      console.error(`Error sending new room key to ${cId}:`, error);
-    }
-  }
-  if (success > 0) {
-    roomMaster = newRoomMaster;
-    signingKey = await deriveSigningKey(roomMaster);
-    console.log('PFS ratchet complete, new roomMaster set.');
-  } else {
-    console.warn('PFS ratchet failed: No keys available to send to any clients.');
-  }
-}
-
-function isWebPSupported() {
+async function isWebPSupported() {
   const elem = document.createElement('canvas');
   if (!!(elem.getContext && elem.getContext('2d'))) {
     return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;

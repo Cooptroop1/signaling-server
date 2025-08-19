@@ -1,4 +1,3 @@
-// events.js
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -301,9 +300,6 @@ socket.onmessage = async (event) => {
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       return;
     }
-    if (message.type === 'error') {
-      // ... (existing error handling)
-    }
     if (message.type === 'init') {
       clientId = message.clientId;
       maxClients = Math.min(message.maxClients, 10);
@@ -461,12 +457,12 @@ socket.onmessage = async (event) => {
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Room master successfully imported.');
         if (useRelay) {
-          isConnected = true;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
             privacyStatus.textContent = 'Relay Mode';
             privacyStatus.classList.remove('hidden');
           }
+          isConnected = true;
           inputContainer.classList.remove('hidden');
           messages.classList.remove('waiting');
           updateMaxClientsUI();
@@ -512,7 +508,7 @@ socket.onmessage = async (event) => {
       const messages = document.getElementById('messages');
       const isSelf = senderUsername === username;
       const messageDiv = document.createElement('div');
-      messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
+      messageDiv.className = 'message-bubble ' + (isSelf ? 'self' : 'other');
       const timeSpan = document.createElement('span');
       timeSpan.className = 'timestamp';
       timeSpan.textContent = new Date(payload.timestamp).toLocaleTimeString();

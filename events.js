@@ -321,8 +321,6 @@ socket.onmessage = async (event) => {
       updateFeaturesUI();
       if (isInitiator) {
         isConnected = true;
-        roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-        signingKey = await deriveSigningKey(roomMaster);
         if (pendingTotpSecret) {
           socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
           showTotpSecretModal(pendingTotpSecret.display);
@@ -335,8 +333,10 @@ socket.onmessage = async (event) => {
             privacyStatus.textContent = 'Relay Mode';
             privacyStatus.classList.remove('hidden');
           }
+          isConnected = true;
           inputContainer.classList.remove('hidden');
           messages.classList.remove('waiting');
+          updateMaxClientsUI();
         }
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
@@ -370,6 +370,12 @@ socket.onmessage = async (event) => {
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
+      }
+      if (useRelay) {
+        isConnected = true;
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
+        updateMaxClientsUI();
       }
       return;
     }
@@ -418,7 +424,7 @@ socket.onmessage = async (event) => {
       handleCandidate(message.candidate, message.clientId);
       return;
     }
-    if (message.type === 'public-key' && isInitiator) {
+    if (message.type === 'public-key' && isInitiator && !useRelay) { // Skip in relay mode
       try {
         clientPublicKeys.set(message.clientId, message.publicKey);
         const joinerPublic = await importPublicKey(message.publicKey);
@@ -442,7 +448,7 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'encrypted-room-key') {
+    if (message.type === 'encrypted-room-key' && !useRelay) { // Skip in relay mode
       try {
         initiatorPublic = message.publicKey;
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
@@ -468,7 +474,7 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'new-room-key' && message.targetId === clientId) {
+    if (message.type === 'new-room-key' && message.targetId === clientId && !useRelay) { // Skip in relay mode
       try {
         const importedInitiatorPublic = await importPublicKey(initiatorPublic);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
@@ -485,7 +491,6 @@ socket.onmessage = async (event) => {
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
-      // For basic relay, no decryption/verification
       const payload = {
         messageId: message.messageId,
         username: message.username,
@@ -504,7 +509,7 @@ socket.onmessage = async (event) => {
       timeSpan.textContent = new Date(payload.timestamp).toLocaleTimeString();
       messageDiv.appendChild(timeSpan);
       messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-      if (payload.type === 'image') {
+      if (message.type === 'image') {
         const img = document.createElement('img');
         img.src = payload.data;
         img.style.maxWidth = '100%';
@@ -513,14 +518,14 @@ socket.onmessage = async (event) => {
         img.setAttribute('alt', 'Received image');
         img.addEventListener('click', () => createImageModal(payload.data, 'messageInput'));
         messageDiv.appendChild(img);
-      } else if (payload.type === 'voice') {
+      } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
         audio.src = payload.data;
         audio.controls = true;
         audio.setAttribute('alt', 'Received voice message');
         audio.addEventListener('click', () => createAudioModal(payload.data, 'messageInput'));
         messageDiv.appendChild(audio);
-      } else if (payload.type === 'file') {
+      } else if (message.type === 'file') {
         const link = document.createElement('a');
         link.href = payload.data;
         link.download = payload.filename || 'file';

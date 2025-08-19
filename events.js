@@ -1,4 +1,4 @@
-// events.js (updated)
+// events.js
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -14,7 +14,7 @@ function generateCode() {
   return result;
 }
 let code = generateCode();
-let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9); // Prefer cookie
+let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
 let username = '';
 let isInitiator = false;
 let isConnected = false;
@@ -33,17 +33,16 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true }; // Global features state
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
 let keyPair;
 let roomMaster;
-let signingKey; // New: Cached signing key for HMAC
+let signingKey;
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
-let connectedClients = new Set(); // New: Track connected client IDs for ratchet
-let clientPublicKeys = new Map(); // New: Initiator stores public keys of clients
-let initiatorPublic; // New: Non-initiators store initiator's public key
-// Declare UI variables globally
+let connectedClients = new Set();
+let clientPublicKeys = new Map();
+let initiatorPublic;
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 if (typeof window !== 'undefined') {
   socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
@@ -88,7 +87,6 @@ if (typeof window !== 'undefined') {
   }
   setTimeout(triggerCycle, 60000);
 }
-// Event handlers and listeners
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
   helpModal.focus();
@@ -123,13 +121,13 @@ addUserModal.addEventListener('keydown', (event) => {
 });
 let pendingCode = null;
 let pendingJoin = null;
-const maxReconnectAttempts = 5; // Limit reconnect attempts
+const maxReconnectAttempts = 5;
 let refreshFailures = 0;
-let refreshBackoff = 1000; // Initial backoff 1s
+let refreshBackoff = 1000;
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
-  reconnectAttempts = 0; // Reset on successful connection
+  reconnectAttempts = 0;
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
@@ -187,8 +185,7 @@ socket.onmessage = async (event) => {
       token = message.accessToken;
       refreshToken = message.refreshToken;
       console.log('Received authentication tokens:', { accessToken: token, refreshToken });
-      startKeepAlive(); // Start keepalive after connected
-      // Start token refresh timer (5 minutes for 10-minute expiry)
+      startKeepAlive();
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingCode) {
         autoConnect(pendingCode);
@@ -199,12 +196,11 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'token-refreshed') {
       token = message.accessToken;
-      refreshToken = message.refreshToken; // Update with new rotated refresh token
+      refreshToken = message.refreshToken;
       console.log('Received new tokens:', { accessToken: token, refreshToken });
       showStatusMessage('Authentication tokens refreshed.');
       refreshFailures = 0;
       refreshBackoff = 1000;
-      // Restart token refresh timer
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingJoin) {
         socket.send(JSON.stringify({ type: 'join', ...pendingJoin, token }));
@@ -217,7 +213,6 @@ socket.onmessage = async (event) => {
     if (message.type === 'error') {
       console.error('Server error:', message.message, 'Code:', message.code || 'N/A');
       if (message.message.includes('Invalid or expired token') || message.message.includes('Missing authentication token')) {
-        // Silently handle token refresh without showing message
         if (refreshToken && !refreshingToken) {
           refreshingToken = true;
           console.log('Attempting to refresh token');
@@ -237,16 +232,15 @@ socket.onmessage = async (event) => {
           refreshToken = '';
           refreshFailures = 0;
           refreshBackoff = 1000;
-          socket.close(); // Trigger reconnect
+          socket.close();
         } else {
-          // Exponential backoff for retry
           setTimeout(() => {
             if (refreshToken && !refreshingToken) {
               refreshingToken = true;
               socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
             }
           }, refreshBackoff);
-          refreshBackoff = Math.min(refreshBackoff * 2, 8000); // Cap at 8s
+          refreshBackoff = Math.min(refreshBackoff * 2, 8000);
         }
         showStatusMessage('Session expired. Reconnecting...');
       } else if (message.message.includes('Rate limit exceeded')) {
@@ -275,11 +269,10 @@ socket.onmessage = async (event) => {
         messages.classList.remove('waiting');
         codeSentToRandom = false;
         button2.disabled = false;
-        token = ''; // Clear token
-        refreshToken = ''; // Clear refresh token
+        token = '';
+        refreshToken = '';
       } else if (message.message.includes('Service has been disabled by admin.')) {
         showStatusMessage(message.message);
-        // Reset UI to initial state
         initialContainer.classList.remove('hidden');
         usernameContainer.classList.add('hidden');
         connectContainer.classList.add('hidden');
@@ -310,6 +303,7 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'totp-enabled') {
       totpEnabled = true;
+      return;
     }
     if (message.type === 'init') {
       clientId = message.clientId;
@@ -322,7 +316,7 @@ socket.onmessage = async (event) => {
       totalClients = 1;
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
-      connectedClients.add(clientId); // Add self
+      connectedClients.add(clientId);
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
@@ -334,7 +328,6 @@ socket.onmessage = async (event) => {
           showTotpSecretModal(pendingTotpSecret.display);
           pendingTotpSecret = null;
         }
-        // New: Periodic ratchet timer (every 5 minutes)
         setInterval(triggerRatchet, 5 * 60 * 1000);
         if (useRelay) {
           const privacyStatus = document.getElementById('privacyStatus');
@@ -353,12 +346,14 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
+      return;
     }
     if (message.type === 'initiator-changed') {
       console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
       isInitiator = message.newInitiator === clientId;
       initializeMaxClientsUI();
       updateMaxClientsUI();
+      return;
     }
     if (message.type === 'join-notify' && message.code === code) {
       totalClients = message.totalClients;
@@ -376,6 +371,7 @@ socket.onmessage = async (event) => {
       if (voiceCallActive) {
         renegotiate(message.clientId);
       }
+      return;
     }
     if (message.type === 'client-disconnected') {
       totalClients = message.totalClients;
@@ -398,28 +394,33 @@ socket.onmessage = async (event) => {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
       }
+      return;
     }
     if (message.type === 'max-clients') {
       maxClients = Math.min(message.maxClients, 10);
       console.log(`Max clients updated to ${maxClients} for code: ${code}`);
       updateMaxClientsUI();
       updateDots();
+      return;
     }
     if (message.type === 'offer' && message.clientId !== clientId) {
       console.log(`Received offer from ${message.clientId} for code: ${code}`);
       handleOffer(message.offer, message.clientId);
+      return;
     }
     if (message.type === 'answer' && message.clientId !== clientId) {
       console.log(`Received answer from ${message.clientId} for code: ${code}`);
       handleAnswer(message.answer, message.clientId);
+      return;
     }
     if (message.type === 'candidate' && message.clientId !== clientId) {
       console.log(`Received ICE candidate from ${message.clientId} for code: ${code}`);
       handleCandidate(message.candidate, message.clientId);
+      return;
     }
     if (message.type === 'public-key' && isInitiator) {
       try {
-        clientPublicKeys.set(message.clientId, message.publicKey); // Store joiner's public key
+        clientPublicKeys.set(message.clientId, message.publicKey);
         const joinerPublic = await importPublicKey(message.publicKey);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, joinerPublic);
         const { encrypted, iv } = await encryptBytes(sharedKey, roomMaster);
@@ -434,16 +435,16 @@ socket.onmessage = async (event) => {
           clientId,
           token
         }));
-        // Trigger PFS ratchet after receiving and storing the public key
         await triggerRatchet();
       } catch (error) {
         console.error('Error handling public-key:', error);
         showStatusMessage('Key exchange failed.');
       }
+      return;
     }
     if (message.type === 'encrypted-room-key') {
       try {
-        initiatorPublic = message.publicKey; // Store initiator's public key
+        initiatorPublic = message.publicKey;
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
         const roomMasterBuffer = await decryptBytes(sharedKey, message.encryptedKey, message.iv);
@@ -465,6 +466,7 @@ socket.onmessage = async (event) => {
         console.error('Error handling encrypted-room-key:', error);
         showStatusMessage('Failed to receive encryption key.');
       }
+      return;
     }
     if (message.type === 'new-room-key' && message.targetId === clientId) {
       try {
@@ -478,12 +480,13 @@ socket.onmessage = async (event) => {
         console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
       }
+      return;
     }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
       const encrypted = message.type === 'message' ? message.encryptedContent : message.encryptedData;
-      const valid = await verifyMessage(signingKey, message.signature, encrypted); // Verify signature before decrypt
+      const valid = await verifyMessage(signingKey, message.signature, encrypted);
       if (!valid) {
         console.error('Tampered message detected');
         showStatusMessage('Tampered message detected. Ignoring.');
@@ -536,6 +539,7 @@ socket.onmessage = async (event) => {
       }
       messages.prepend(messageDiv);
       messages.scrollTop = 0;
+      return;
     }
     if (message.type === 'features-update') {
       features = message;
@@ -545,13 +549,13 @@ socket.onmessage = async (event) => {
         showStatusMessage(`Service disabled by admin. Disconnecting...`);
         socket.close();
       }
+      return;
     }
   } catch (error) {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
 };
 
-// New: Function to refresh access token proactively
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
@@ -562,7 +566,6 @@ function refreshAccessToken() {
   }
 }
 
-// New: Function to trigger PFS key rotation (called by initiator on new join)
 async function triggerRatchet() {
   if (!isInitiator) return;
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
@@ -633,7 +636,6 @@ document.getElementById('connect2FAChatButton').onclick = () => {
   statusElement.textContent = 'Enter a username and code to join a 2FA chat';
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
-  // Override connectButton for 2FA prompt
   const connectButton = document.getElementById('connectButton');
   connectButton.onclick = () => {
     const usernameInput = document.getElementById('usernameConnectInput').value.trim();
@@ -795,7 +797,6 @@ document.getElementById('sendButton').onclick = () => {
     sendMessage(message);
   }
 };
-// Add Enter key listener for sending messages
 document.getElementById('messageInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -838,7 +839,6 @@ document.getElementById('saveGrokKey').onclick = () => {
 };
 document.getElementById('newSessionButton').onclick = () => {
   console.log('New session button clicked');
-  // Redirect to the domain root to refresh and start fresh
   window.location.href = 'https://anonomoose.com';
 };
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
@@ -895,7 +895,6 @@ cornerLogo.addEventListener('click', () => {
   showStatusMessage('Chat history cleared locally.');
 });
 
-// Function to update user dots
 function updateDots() {
   const userDots = document.getElementById('userDots');
   if (!userDots) return;
@@ -914,13 +913,13 @@ function updateDots() {
   }
 }
 
-// Cookie helpers
 function getCookie(name) {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) return parts.pop().split(';').shift();
   return null;
 }
+
 function setCookie(name, value, days) {
   let expires = '';
   if (days) {
@@ -930,6 +929,7 @@ function setCookie(name, value, days) {
   }
   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
 }
+
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -937,6 +937,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupWaitingForJoin(codeParam);
   }
 });
+
 function setupWaitingForJoin(codeParam) {
   code = codeParam;
   initialContainer.style.display = 'none';
@@ -986,7 +987,6 @@ function setupWaitingForJoin(codeParam) {
         }
       }
       document.getElementById('messageInput')?.focus();
-      // Restore original onclick if needed
       joinButton.onclick = originalOnclick;
     };
   } else {

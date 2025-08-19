@@ -1,3 +1,4 @@
+// crypto.js
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -46,9 +47,20 @@ async function exportPublicKey(key) {
 
 async function importPublicKey(base64) {
   try {
+    let buffer = await base64ToArrayBuffer(base64);
+    // For P-384, raw export is X + Y (96 bytes) without 0x04; prepend 0x04 for import
+    if (buffer.byteLength === 96) {
+      const newBuffer = new Uint8Array(97);
+      newBuffer[0] = 4; // Uncompressed prefix
+      newBuffer.set(new Uint8Array(buffer), 1);
+      buffer = newBuffer.buffer;
+      console.log('Prepended 0x04 to public key buffer for import');
+    } else if (buffer.byteLength !== 97) {
+      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
+    }
     const key = await window.crypto.subtle.importKey(
       'raw',
-      base64ToArrayBuffer(base64),
+      buffer,
       { name: 'ECDH', namedCurve: 'P-384' },
       true,
       []

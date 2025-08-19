@@ -101,13 +101,8 @@ async function sendMedia(file, type) {
   const payload = { messageId, type, data: base64, filename: type === 'file' ? file.name : undefined, username, timestamp };
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
-    if (!roomMaster) {
-      showStatusMessage('Error: Encryption key not available for relay mode.');
-      return;
-    }
-    const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-    const signature = await signMessage(signingKey, encrypted);
-    sendRelayMessage(`relay-${type}`, { encryptedData: encrypted, iv, salt, messageId, signature });
+    // For basic relay, send plain without encryption
+    sendRelayMessage(`relay-${type}`, { data: base64, messageId, username, timestamp, filename: type === 'file' ? file.name : undefined });
   } else if (dataChannels.size > 0) {
     dataChannels.forEach((dataChannel) => {
       if (dataChannel.readyState === 'open') {
@@ -309,7 +304,7 @@ async function startPeerConnection(targetId, isOfferer) {
         showStatusMessage('P2P connection failed, switching to server relay mode.');
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
-          privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+          privacyStatus.textContent = 'Relay Mode';
           privacyStatus.classList.remove('hidden');
         }
         isConnected = true;
@@ -578,13 +573,8 @@ async function sendMessage(content) {
     const payload = { messageId, content: sanitizedContent, username, timestamp };
     const jsonString = JSON.stringify(payload);
     if (useRelay) {
-      if (!roomMaster) {
-        showStatusMessage('Error: Encryption key not available for relay mode.');
-        return;
-      }
-      const { encrypted, iv, salt } = await encrypt(jsonString, roomMaster);
-      const signature = await signMessage(signingKey, encrypted);
-      sendRelayMessage('relay-message', { encryptedContent: encrypted, iv, salt, messageId, signature });
+      // For basic relay, send plain without encryption
+      sendRelayMessage('relay-message', { content: sanitizedContent, messageId, username, timestamp });
     } else if (dataChannels.size > 0) {
       dataChannels.forEach((dataChannel, targetId) => {
         if (dataChannel.readyState === 'open') {

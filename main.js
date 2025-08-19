@@ -16,6 +16,9 @@ let messageCount = 0;
 const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
+let relaySendingChainKey;
+let relaySendIndex = 0;
+let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -111,12 +114,17 @@ async function sendMedia(file, type) {
     payload.iv = iv;
     payload.filename = type === 'file' ? file.name : undefined;
   } else {
-    payload.data = base64;
+    const mk = await ratchetDeriveMK(relaySendingChainKey);
+    const { encrypted, iv } = await encryptRaw(mk, dataToSend);
+    relaySendingChainKey = await ratchetAdvance(relaySendingChainKey);
+    payload.encryptedData = encrypted;
+    payload.iv = iv;
+    payload.index = relaySendIndex++;
     payload.filename = type === 'file' ? file.name : undefined;
   }
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
-    sendRelayMessage(`relay-${type}`, { data: base64, messageId, username, timestamp, filename: type === 'file' ? file.name : undefined });
+    sendRelayMessage(`relay-${type}`, payload);
   } else if (dataChannels.size > 0) {
     if (jsonString.length > CHUNK_SIZE) {
       const chunkId = generateMessageId();
@@ -144,7 +152,6 @@ async function sendMedia(file, type) {
     showStatusMessage('Error: No connections.');
     return;
   }
-  const messages = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-bubble self';
   const timeSpan = document.createElement('span');
@@ -482,16 +489,43 @@ async function processReceivedMessage(data, targetId) {
   let contentOrData = data.content || data.data;
   if (data.encryptedContent || data.encryptedData) {
     try {
-      const messageKey = await deriveMessageKey(roomMaster);
-      const encrypted = data.encryptedContent || data.encryptedData;
-      const iv = data.iv;
-      contentOrData = await decryptRaw(messageKey, encrypted, iv);
-      const toVerify = contentOrData + data.timestamp;
-      const valid = await verifyMessage(signingKey, data.signature, toVerify);
-      if (!valid) {
-        console.warn(`Invalid signature for message from ${targetId}`);
-        showStatusMessage('Invalid message signature detected.');
-        return;
+      let mk;
+      if (useRelay) {
+        const senderId = data.clientId;
+        if (!relayReceiveStates.has(senderId)) {
+          const senderChainKey = await deriveChainKey(roomMaster, 'relay-send-' + senderId);
+          relayReceiveStates.set(senderId, { chainKey: senderChainKey, receiveIndex: 0 });
+        }
+        const state = relayReceiveStates.get(senderId);
+        const skip = data.index - state.receiveIndex;
+        if (skip < 0) {
+          console.warn(`Replay message from ${senderId} with index ${data.index}`);
+          return;
+        }
+        if (skip > 100) {
+          console.warn(`Too many skipped messages from ${senderId}, possible DoS`);
+          return;
+        }
+        for (let i = 0; i < skip; i++) {
+          await ratchetDeriveMK(state.chainKey); // derive and discard
+          state.chainKey = await ratchetAdvance(state.chainKey);
+        }
+        mk = await ratchetDeriveMK(state.chainKey);
+        contentOrData = await decryptRaw(mk, data.encryptedContent || data.encryptedData, data.iv);
+        state.chainKey = await ratchetAdvance(state.chainKey);
+        state.receiveIndex = data.index + 1;
+      } else {
+        const messageKey = await deriveMessageKey(roomMaster);
+        const encrypted = data.encryptedContent || data.encryptedData;
+        const iv = data.iv;
+        contentOrData = await decryptRaw(messageKey, encrypted, iv);
+        const toVerify = contentOrData + data.timestamp;
+        const valid = await verifyMessage(signingKey, data.signature, toVerify);
+        if (!valid) {
+          console.warn(`Invalid signature for message from ${targetId}`);
+          showStatusMessage('Invalid message signature detected.');
+          return;
+        }
       }
     } catch (error) {
       console.error(`Decryption/verification failed for message from ${targetId}:`, error);
@@ -518,8 +552,8 @@ async function processReceivedMessage(data, targetId) {
   } else if (data.type === 'file') {
     const link = document.createElement('a');
     link.href = contentOrData;
-    link.download = data.filename;
-    link.textContent = `Download ${data.filename}`;
+    link.download = data.filename || 'file';
+    link.textContent = `Download ${data.filename || 'file'}`;
     link.setAttribute('alt', 'Received file');
     messageDiv.appendChild(link);
   } else {
@@ -663,11 +697,16 @@ async function sendMessage(content) {
       payload.encryptedContent = encrypted;
       payload.iv = iv;
     } else {
-      payload.content = sanitizedContent;
+      const mk = await ratchetDeriveMK(relaySendingChainKey);
+      const { encrypted, iv } = await encryptRaw(mk, contentToSend);
+      relaySendingChainKey = await ratchetAdvance(relaySendingChainKey);
+      payload.encryptedContent = encrypted;
+      payload.iv = iv;
+      payload.index = relaySendIndex++;
     }
     const jsonString = JSON.stringify(payload);
     if (useRelay) {
-      sendRelayMessage('relay-message', { content: sanitizedContent, messageId, username, timestamp });
+      sendRelayMessage('relay-message', payload);
     } else if (dataChannels.size > 0) {
       if (jsonString.length > CHUNK_SIZE) {
         const chunkId = generateMessageId();
@@ -695,7 +734,6 @@ async function sendMessage(content) {
       showStatusMessage('Error: No connections.');
       return;
     }
-    const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message-bubble self';
     const timeSpan = document.createElement('span');

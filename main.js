@@ -593,7 +593,9 @@ async function handleAnswer(answer, targetId) {
       if (item.type === 'answer') {
         peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
           console.error(`Error applying queued answer from ${targetId}:`, error);
-          showStatusMessage('Error processing peer response.');
+          if (error.name !== 'InvalidStateError') {
+            showStatusMessage('Error processing peer response.');
+          }
         });
       } else {
         handleCandidate(item.candidate, targetId);
@@ -602,7 +604,9 @@ async function handleAnswer(answer, targetId) {
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling answer from ${targetId}:`, error);
-    showStatusMessage('Error connecting to peer.');
+    if (error.name !== 'InvalidStateError') {
+      showStatusMessage('Error connecting to peer.');
+    }
   }
 }
 

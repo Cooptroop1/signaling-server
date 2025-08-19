@@ -180,6 +180,16 @@ function isValidBase64(str) {
   return isValid;
 }
 
+function validateUsername(username) {
+  const regex = /^[a-zA-Z0-9]{1,16}$/;
+  return username && regex.test(username);
+}
+
+function validateCode(code) {
+  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+  return code && regex.test(code);
+}
+
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -442,7 +452,10 @@ const shared = module.exports = {
   isValidBase32,
   isValidBase64,
   saveFeatures,
-  saveAggregatedStats
+  saveAggregatedStats,
+  previousSecretFile,
+  validateUsername,
+  validateCode
 };
 
 require('./server2')(shared);

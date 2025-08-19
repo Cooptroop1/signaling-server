@@ -1,3 +1,7 @@
+const fs = require('fs');
+const crypto = require('crypto');
+const validator = require('validator');
+
 module.exports = function(shared) {
   const {
     wss,

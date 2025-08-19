@@ -101,7 +101,7 @@ async function sendMedia(file, type) {
   const payload = { messageId, type, data: base64, filename: type === 'file' ? file.name : undefined, username, timestamp };
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
-    // For basic relay, send plain without encryption
+    // Basic plain relay
     sendRelayMessage(`relay-${type}`, { data: base64, messageId, username, timestamp, filename: type === 'file' ? file.name : undefined });
   } else if (dataChannels.size > 0) {
     dataChannels.forEach((dataChannel) => {
@@ -162,7 +162,7 @@ async function startPeerConnection(targetId, isOfferer) {
     useRelay = true;
     const privacyStatus = document.getElementById('privacyStatus');
     if (privacyStatus) {
-      privacyStatus.textContent = 'Relay Mode: E2E Encrypted';
+      privacyStatus.textContent = 'Relay Mode';
       privacyStatus.classList.remove('hidden');
     }
     isConnected = true;
@@ -573,7 +573,7 @@ async function sendMessage(content) {
     const payload = { messageId, content: sanitizedContent, username, timestamp };
     const jsonString = JSON.stringify(payload);
     if (useRelay) {
-      // For basic relay, send plain without encryption
+      // Basic plain relay
       sendRelayMessage('relay-message', { content: sanitizedContent, messageId, username, timestamp });
     } else if (dataChannels.size > 0) {
       dataChannels.forEach((dataChannel, targetId) => {

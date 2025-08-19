@@ -777,7 +777,7 @@ function stopVoiceCall() {
 
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
-  if (peerConnection && peerConnection.signalingState === 'stable') {
+  if (peerConnection) {
     if (!negotiationQueues.has(targetId)) {
       negotiationQueues.set(targetId, Promise.resolve());
     }
@@ -785,6 +785,10 @@ async function renegotiate(targetId) {
       if (renegotiating.get(targetId)) {
         console.log(`Renegotiation already in progress for ${targetId}, skipping.`);
         return;
+      }
+      if (peerConnection.signalingState !== 'stable') {
+        console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}. Queuing.`);
+        return renegotiate(targetId); // Recurse to queue again
       }
       renegotiating.set(targetId, true);
       try {
@@ -797,9 +801,11 @@ async function renegotiate(targetId) {
       } finally {
         renegotiating.set(targetId, false);
       }
+    }).catch(error => {
+      console.error(`Negotiation queue error for ${targetId}:`, error);
     }));
   } else {
-    console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}`);
+    console.log(`No peer connection for ${targetId}, cannot renegotiate.`);
   }
 }
 

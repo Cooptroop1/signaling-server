@@ -81,6 +81,7 @@ const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const FEATURES_FILE = path.join('/data', 'features.json');
 const STATS_FILE = path.join('/data', 'stats.json');
+const RATCHET_KEYS_FILE = path.join('/data', 'ratchet_keys.json'); // New file for chain keys
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -154,6 +155,7 @@ if (fs.existsSync(FEATURES_FILE)) {
 }
 
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+let ratchetKeys = fs.existsSync(RATCHET_KEYS_FILE) ? JSON.parse(fs.readFileSync(RATCHET_KEYS_FILE, 'utf8')) : {};
 
 function saveFeatures() {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
@@ -163,6 +165,11 @@ function saveFeatures() {
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
+}
+
+function saveRatchetKeys() {
+  fs.writeFileSync(RATCHET_KEYS_FILE, JSON.stringify(ratchetKeys));
+  console.log('Saved ratchet keys to disk');
 }
 
 function isValidBase32(str) {
@@ -323,6 +330,15 @@ function validateMessage(data) {
       if (!data.code) {
         return { valid: false, error: 'relay-message: code required' };
       }
+      if (data.encryptedContent && !isValidBase64(data.encryptedContent)) {
+        return { valid: false, error: 'relay-message: invalid encryptedContent format' };
+      }
+      if (data.iv && !isValidBase64(data.iv)) {
+        return { valid: false, error: 'relay-message: invalid iv format' };
+      }
+      if (data.index && typeof data.index !== 'number') {
+        return { valid: false, error: 'relay-message: index must be a number' };
+      }
       break;
     case 'relay-image':
     case 'relay-voice':
@@ -341,6 +357,15 @@ function validateMessage(data) {
       }
       if (!data.code) {
         return { valid: false, error: data.type + ': code required' };
+      }
+      if (data.encryptedData && !isValidBase64(data.encryptedData)) {
+        return { valid: false, error: data.type + ': invalid encryptedData format' };
+      }
+      if (data.iv && !isValidBase64(data.iv)) {
+        return { valid: false, error: data.type + ': invalid iv format' };
+      }
+      if (data.index && typeof data.index !== 'number') {
+        return { valid: false, error: data.type + ': index must be a number' };
       }
       break;
     case 'get-stats':
@@ -427,6 +452,7 @@ const shared = module.exports = {
   LOG_FILE,
   FEATURES_FILE,
   STATS_FILE,
+  RATCHET_KEYS_FILE, // Added to shared exports
   UPDATE_INTERVAL,
   randomCodes,
   rateLimits,
@@ -447,12 +473,14 @@ const shared = module.exports = {
   IP_SALT,
   features,
   aggregatedStats,
+  ratchetKeys, // Added to shared exports
   pingInterval,
   validateMessage,
   isValidBase32,
   isValidBase64,
   saveFeatures,
   saveAggregatedStats,
+  saveRatchetKeys, // Added to shared exports
   previousSecretFile,
   validateUsername,
   validateCode

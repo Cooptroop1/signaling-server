@@ -1,4 +1,4 @@
-// server.js
+// server.js 
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -1195,3 +1195,4 @@ function hashIp(ip) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

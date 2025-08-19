@@ -1,31 +1,3 @@
-const {
-  turnUsername,
-  turnCredential,
-  localStream,
-  voiceCallActive,
-  grokBotActive,
-  grokApiKey,
-  renegotiating,
-  audioOutputMode,
-  totpEnabled,
-  totpSecret,
-  pendingTotpSecret,
-  mediaRecorder,
-  voiceChunks,
-  voiceTimerInterval,
-  messageCount,
-  CHUNK_SIZE,
-  chunkBuffers,
-  negotiationQueues,
-  sendMedia,
-  startPeerConnection,
-  setupDataChannel,
-  processReceivedMessage,
-  handleOffer,
-  handleAnswer,
-  handleCandidate
-} = require('./main.js');
-
 async function sendMessage(content) {
   if (content && username) {
     if (grokBotActive && content.startsWith('/grok ')) {

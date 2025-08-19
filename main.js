@@ -16,6 +16,7 @@ let voiceTimerInterval = null;
 let messageCount = 0;
 const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
+const negotiationQueues = new Map(); // Queue pending negotiations per peer
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -776,20 +777,29 @@ function stopVoiceCall() {
 
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
-  if (peerConnection && peerConnection.signalingState === 'stable' && !renegotiating.get(targetId)) {
-    renegotiating.set(targetId, true);
-    try {
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
-    } catch (error) {
-      console.error(`Error renegotiating with ${targetId}:`, error);
-      showStatusMessage('Failed to renegotiate peer connection.');
-    } finally {
-      renegotiating.set(targetId, false);
+  if (peerConnection && peerConnection.signalingState === 'stable') {
+    if (!negotiationQueues.has(targetId)) {
+      negotiationQueues.set(targetId, Promise.resolve());
     }
-  } else if (renegotiating.get(targetId)) {
-    console.log(`Renegotiation already in progress for ${targetId}, skipping.`);
+    negotiationQueues.set(targetId, negotiationQueues.get(targetId).then(async () => {
+      if (renegotiating.get(targetId)) {
+        console.log(`Renegotiation already in progress for ${targetId}, skipping.`);
+        return;
+      }
+      renegotiating.set(targetId, true);
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
+      } catch (error) {
+        console.error(`Error renegotiating with ${targetId}:`, error);
+        showStatusMessage('Failed to renegotiate peer connection.');
+      } finally {
+        renegotiating.set(targetId, false);
+      }
+    }));
+  } else {
+    console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}`);
   }
 }
 

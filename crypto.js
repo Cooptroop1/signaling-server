@@ -1,4 +1,4 @@
-
+// crypto.js
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -218,6 +218,20 @@ async function encryptRaw(key, data) {
   }
 }
 
+async function decryptRaw(key, encrypted, iv) {
+  try {
+    const decoded = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+      key,
+      base64ToArrayBuffer(encrypted)
+    );
+    return new TextDecoder().decode(decoded);
+  } catch (error) {
+    console.error('decryptRaw error:', error, 'Encrypted:', encrypted, 'IV:', iv);
+    throw new Error('Raw decryption failed');
+  }
+}
+
 async function signMessage(signingKey, data) {
   try {
     const encoded = new TextEncoder().encode(data);
@@ -272,5 +286,29 @@ async function deriveSigningKey(master) {
   } catch (error) {
     console.error('deriveSigningKey error:', error);
     throw new Error('Signing key derivation failed');
+  }
+}
+
+async function deriveMessageKey(master) {
+  try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      master,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('message'), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    console.log('deriveMessageKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveMessageKey error:', error);
+    throw new Error('Message key derivation failed');
   }
 }

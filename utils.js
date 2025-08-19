@@ -1,4 +1,4 @@
-// utils.js (updated)
+// utils.js
 function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
@@ -10,7 +10,6 @@ function showStatusMessage(message, duration = 3000) {
   }
 }
 
-// Sanitize message content to prevent XSS
 function sanitizeMessage(content) {
   const div = document.createElement('div');
   div.textContent = content;
@@ -31,9 +30,7 @@ function validateCode(code) {
   return code && regex.test(code);
 }
 
-// Keepalive timer ID
-let keepAliveTimer = null; // Moved from events.js to utils.js
-// Keepalive function to prevent WebSocket timeout
+let keepAliveTimer = null;
 function startKeepAlive() {
   if (keepAliveTimer) clearInterval(keepAliveTimer);
   keepAliveTimer = setInterval(() => {
@@ -236,9 +233,8 @@ function createAudioModal(base64, focusId) {
   });
 }
 
-// New: TOTP Utilities (using otplib)
 function generateTotpSecret() {
-  return otplib.authenticator.generateSecret(32); // Changed to 32 characters
+  return otplib.authenticator.generateSecret(32);
 }
 
 function generateTotpUri(roomCode, secret) {

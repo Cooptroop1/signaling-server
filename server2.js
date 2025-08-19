@@ -13,6 +13,7 @@ module.exports = function(shared) {
     LOG_FILE,
     FEATURES_FILE,
     STATS_FILE,
+    RATCHET_KEYS_FILE,
     UPDATE_INTERVAL,
     randomCodes,
     rateLimits,
@@ -33,12 +34,14 @@ module.exports = function(shared) {
     IP_SALT,
     features,
     aggregatedStats,
+    ratchetKeys,
     pingInterval,
     validateMessage,
     isValidBase32,
     isValidBase64,
     saveFeatures,
-    saveAggregatedStats
+    saveAggregatedStats,
+    saveRatchetKeys
   } = shared;
 
   function restrictRate(ws) {
@@ -180,7 +183,7 @@ module.exports = function(shared) {
       if (err) {
         console.error('Error writing to log file:', err);
       } else {
-        console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
+        console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC Connections, and ${allTimeUserCount} all-time unique users for ${day}`);
       }
     });
     if (!aggregatedStats.daily) aggregatedStats.daily = {};
@@ -228,6 +231,51 @@ module.exports = function(shared) {
 
   function hashIp(ip) {
     return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+  }
+
+  // Double ratchet functions
+  function initializeRatchetKey(code, clientId) {
+    if (!ratchetKeys[code]) ratchetKeys[code] = {};
+    if (!ratchetKeys[code][clientId]) {
+      const chainKey = crypto.randomBytes(32).toString('base64');
+      ratchetKeys[code][clientId] = { chainKey, index: 0 };
+      saveRatchetKeys();
+      console.log(`Initialized ratchet key for client ${clientId} in room ${code}`);
+    }
+  }
+
+  function deriveMessageKey(chainKey, messageId) {
+    const hmac = crypto.createHmac('sha256', Buffer.from(chainKey, 'base64'));
+    hmac.update(messageId);
+    return hmac.digest();
+  }
+
+  function advanceChainKey(chainKey, messageId) {
+    const hmac = crypto.createHmac('sha256', Buffer.from(chainKey, 'base64'));
+    hmac.update(messageId + ':next');
+    return hmac.digest('base64');
+  }
+
+  function encryptRelayMessage(content, chainKey) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', chainKey, iv);
+    let encrypted = cipher.update(content, 'utf8', 'base64');
+    encrypted += cipher.final('base64');
+    const authTag = cipher.getAuthTag();
+    return { encrypted, iv: iv.toString('base64'), authTag: authTag.toString('base64') };
+  }
+
+  function decryptRelayMessage(encrypted, iv, authTag, chainKey) {
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-gcm', chainKey, Buffer.from(iv, 'base64'));
+      decipher.setAuthTag(Buffer.from(authTag, 'base64'));
+      let decrypted = decipher.update(encrypted, 'base64', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch (error) {
+      console.error('Decryption failed:', error);
+      throw new Error('Decryption failed');
+    }
   }
 
   fs.writeFileSync(LOG_FILE, '', (err) => {
@@ -283,7 +331,13 @@ module.exports = function(shared) {
           data.type === 'encrypted-room-key' && 'iv',
           data.type === 'new-room-key' && 'encrypted',
           data.type === 'new-room-key' && 'iv',
-          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'data'
+          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'data',
+          data.type === 'relay-message' && 'encryptedContent',
+          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'encryptedData',
+          data.type === 'relay-message' && 'iv',
+          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'iv',
+          data.type === 'relay-message' && 'authTag',
+          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'authTag'
         ];
         Object.keys(data).forEach(key => {
           if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -493,6 +547,7 @@ module.exports = function(shared) {
             rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
             ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
             logStats({ clientId, username, code, event: 'init', totalClients: 1 });
+            initializeRatchetKey(code, clientId); // Initialize chain key on join
           } else {
             const room = rooms.get(code);
             if (room.clients.size >= room.maxClients) {
@@ -530,6 +585,7 @@ module.exports = function(shared) {
             }
             ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
             logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
+            initializeRatchetKey(code, clientId); // Initialize chain key on join
             if (room.clients.size > 0) {
               room.clients.forEach((_, existingClientId) => {
                 if (existingClientId !== clientId) {
@@ -632,7 +688,9 @@ module.exports = function(shared) {
             ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
             return;
           }
-          const payload = data.type === 'relay-message' ? data.content : data.data;
+          const payloadField = data.type === 'relay-message' ? 'content' : 'data';
+          const encryptedField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
+          let payload = data[payloadField];
           if (payload && (typeof payload !== 'string' || (data.type !== 'relay-message' && !isValidBase64(payload)))) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
             incrementFailure(clientIp);
@@ -664,20 +722,51 @@ module.exports = function(shared) {
             return;
           }
           messageSet.set(data.messageId, Date.now());
+          // Double ratchet encryption
+          if (!ratchetKeys[data.code] || !ratchetKeys[data.code][senderId]) {
+            ws.send(JSON.stringify({ type: 'error', message: 'No ratchet key for client.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
+          const { chainKey, index } = ratchetKeys[data.code][senderId];
+          if (data.index !== index) {
+            ws.send(JSON.stringify({ type: 'error', message: `Invalid message index, expected ${index}.`, code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
+          const messageKey = deriveMessageKey(chainKey, data.messageId);
+          ratchetKeys[data.code][senderId].chainKey = advanceChainKey(chainKey, data.messageId);
+          ratchetKeys[data.code][senderId].index = index + 1;
+          saveRatchetKeys();
+          const { encrypted, iv, authTag } = encryptRelayMessage(payload, messageKey);
           room.clients.forEach((client, clientId) => {
             if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+              if (!ratchetKeys[data.code][clientId]) {
+                console.warn(`No ratchet key for client ${clientId} in room ${data.code}, skipping`);
+                return;
+              }
+              const recipientKey = deriveMessageKey(ratchetKeys[data.code][clientId].chainKey, data.messageId);
+              let decrypted;
+              try {
+                decrypted = decryptRelayMessage(encrypted, iv, authTag, recipientKey);
+              } catch (error) {
+                console.error(`Failed to decrypt for client ${clientId}:`, error);
+                return;
+              }
               client.ws.send(JSON.stringify({
                 type: data.type.replace('relay-', ''),
                 messageId: data.messageId,
                 username: data.username,
-                content: data.type === 'relay-message' ? data.content : undefined,
-                data: data.type !== 'relay-message' ? data.data : undefined,
+                [data.type === 'relay-message' ? 'content' : 'data']: decrypted,
                 filename: data.filename,
                 timestamp: data.timestamp
               }));
               console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
             }
           });
+          ratchetKeys[data.code][senderId].chainKey = advanceChainKey(ratchetKeys[data.code][senderId].chainKey, data.messageId);
+          ratchetKeys[data.code][senderId].index++;
+          saveRatchetKeys();
           console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} to ${room.clients.size - 1} clients`);
           return;
         }
@@ -742,6 +831,8 @@ module.exports = function(shared) {
                 randomCodes.clear();
                 totpSecrets.clear();
                 processedMessageIds.clear();
+                ratchetKeys = {};
+                saveRatchetKeys();
               }
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
@@ -782,6 +873,14 @@ module.exports = function(shared) {
             console.warn(`Failed to revoke tokens for client ${ws.clientId}: ${err.message}`);
           }
         }
+        // Clean up ratchet keys for client
+        if (ws.code && ratchetKeys[ws.code]) {
+          delete ratchetKeys[ws.code][ws.clientId];
+          if (Object.keys(ratchetKeys[ws.code]).length === 0) {
+            delete ratchetKeys[ws.code];
+          }
+          saveRatchetKeys();
+        }
       }
       if (ws.code && rooms.has(ws.code)) {
         const room = rooms.get(ws.code);
@@ -794,6 +893,10 @@ module.exports = function(shared) {
           randomCodes.delete(ws.code);
           totpSecrets.delete(ws.code);
           processedMessageIds.delete(ws.code);
+          if (ratchetKeys[ws.code]) {
+            delete ratchetKeys[ws.code];
+            saveRatchetKeys();
+          }
           broadcast(ws.code, {
             type: 'client-disconnected',
             clientId: ws.clientId,

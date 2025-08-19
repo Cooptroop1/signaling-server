@@ -274,13 +274,13 @@ function validateMessage(data) {
     case 'offer':
     case 'answer':
       if (!data.offer && !data.answer) {
-        return { valid: false, error: `${data.type}: offer or answer required` };
+        return { valid: false, error: data.type + ': offer or answer required' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: `${data.type}: targetId required as string` };
+        return { valid: false, error: data.type + ': targetId required as string' };
       }
       if (!data.code) {
-        return { valid: false, error: `${data.type}: code required` };
+        return { valid: false, error: data.type + ': code required' };
       }
       break;
     case 'candidate':
@@ -319,26 +319,26 @@ function validateMessage(data) {
     case 'relay-voice':
     case 'relay-file':
       if (!data.data || !isValidBase64(data.data)) {
-        return { valid: false, error: `${data.type}: invalid data (base64)` };
+        return { valid: false, error: data.type + ': invalid data (base64)' };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: `${data.type}: messageId required as string` };
+        return { valid: false, error: data.type + ': messageId required as string' };
       }
       if (!data.timestamp || typeof data.timestamp !== 'number') {
-        return { valid: false, error: `${data.type}: timestamp required as number' };
+        return { valid: false, error: data.type + ': timestamp required as number' };
       }
       if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string')) {
         return { valid: false, error: 'relay-file: filename required as string' };
       }
       if (!data.code) {
-        return { valid: false, error: `${data.type}: code required` };
+        return { valid: false, error: data.type + ': code required' };
       }
       break;
     case 'get-stats':
     case 'get-features':
     case 'toggle-feature':
       if (!data.secret || typeof data.secret !== 'string') {
-        return { valid: false, error: `${data.type}: secret required as string` };
+        return { valid: false, error: data.type + ': secret required as string' };
       }
       if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
         return { valid: false, error: 'toggle-feature: feature required as string' };

@@ -1,5 +1,3 @@
-
-// main.js
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -520,8 +518,8 @@ async function processReceivedMessage(data, targetId) {
   } else if (data.type === 'file') {
     const link = document.createElement('a');
     link.href = contentOrData;
-    link.download = data.filename || 'file';
-    link.textContent = `Download ${data.filename || 'file'}`;
+    link.download = data.filename;
+    link.textContent = `Download ${data.filename}`;
     link.setAttribute('alt', 'Received file');
     messageDiv.appendChild(link);
   } else {

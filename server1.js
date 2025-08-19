@@ -311,8 +311,8 @@ function validateMessage(data) {
     case 'get-random-codes':
       break;
     case 'relay-message':
-      if (!data.content || typeof data.content !== 'string') {
-        return { valid: false, error: 'relay-message: content required as string' };
+      if ((!data.content && !data.encryptedContent) || typeof data.content !== 'string' && typeof data.encryptedContent !== 'string') {
+        return { valid: false, error: 'relay-message: content or encryptedContent required as string' };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: 'relay-message: messageId required as string' };
@@ -323,12 +323,23 @@ function validateMessage(data) {
       if (!data.code) {
         return { valid: false, error: 'relay-message: code required' };
       }
+      if (data.encryptedContent) {
+        if (!isValidBase64(data.encryptedContent)) {
+          return { valid: false, error: 'relay-message: invalid encryptedContent format' };
+        }
+        if (!data.iv || !isValidBase64(data.iv)) {
+          return { valid: false, error: 'relay-message: invalid iv format' };
+        }
+        if (data.index === undefined || typeof data.index !== 'number') {
+          return { valid: false, error: 'relay-message: index required as number for encrypted' };
+        }
+      }
       break;
     case 'relay-image':
     case 'relay-voice':
     case 'relay-file':
-      if (!data.data || !isValidBase64(data.data)) {
-        return { valid: false, error: data.type + ': invalid data (base64)' };
+      if ((!data.data && !data.encryptedData) || !isValidBase64(data.data) && !isValidBase64(data.encryptedData)) {
+        return { valid: false, error: data.type + ': data or encryptedData required as base64' };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: data.type + ': messageId required as string' };
@@ -341,6 +352,14 @@ function validateMessage(data) {
       }
       if (!data.code) {
         return { valid: false, error: data.type + ': code required' };
+      }
+      if (data.encryptedData) {
+        if (!data.iv || !isValidBase64(data.iv)) {
+          return { valid: false, error: data.type + ': invalid iv format' };
+        }
+        if (data.index === undefined || typeof data.index !== 'number') {
+          return { valid: false, error: data.type + ': index required as number for encrypted' };
+        }
       }
       break;
     case 'get-stats':
@@ -463,4 +482,3 @@ require('./server2')(shared);
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-</div>

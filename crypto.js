@@ -1,4 +1,3 @@
-// crypto.js
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -6,16 +5,14 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   let base64 = btoa(binary);
-  // Ensure proper padding and sanitize
   const padding = (4 - base64.length % 4) % 4;
   base64 += '='.repeat(padding);
   base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  console.log('Generated base64:', base64); // Debug log
+  console.log('Generated base64:', base64);
   return base64;
 }
 
 function base64ToArrayBuffer(base64) {
-  // Sanitize input and ensure padding
   base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
   const padding = (4 - base64.length % 4) % 4;
   base64 += '='.repeat(padding);
@@ -29,7 +26,7 @@ function base64ToArrayBuffer(base64) {
     return bytes.buffer;
   } catch (error) {
     console.error('base64ToArrayBuffer error:', error, 'Input:', base64);
-    throw error;
+    throw new Error('Invalid base64 data');
   }
 }
 
@@ -37,21 +34,23 @@ async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
     const base64 = arrayBufferToBase64(exported);
-    console.log('Exported public key:', base64); // Debug log
+    if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
+      throw new Error(`Invalid public key length: ${base64.length} chars`);
+    }
+    console.log('Exported public key:', base64);
     return base64;
   } catch (error) {
     console.error('exportPublicKey error:', error);
-    throw error;
+    throw new Error('Failed to export public key');
   }
 }
 
 async function importPublicKey(base64) {
   try {
-    let buffer = await base64ToArrayBuffer(base64);
-    // For P-384, raw export is X + Y (96 bytes) without 0x04; prepend 0x04 for import
+    let buffer = base64ToArrayBuffer(base64);
     if (buffer.byteLength === 96) {
       const newBuffer = new Uint8Array(97);
-      newBuffer[0] = 4; // Uncompressed prefix
+      newBuffer[0] = 4;
       newBuffer.set(new Uint8Array(buffer), 1);
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
@@ -69,7 +68,7 @@ async function importPublicKey(base64) {
     return key;
   } catch (error) {
     console.error('importPublicKey error:', error, 'Input base64:', base64);
-    throw error;
+    throw new Error('Failed to import public key');
   }
 }
 
@@ -102,11 +101,11 @@ async function encrypt(text, master) {
       iv: arrayBufferToBase64(iv),
       salt: arrayBufferToBase64(salt)
     };
-    console.log('Encryption result:', result); // Debug log
+    console.log('Encryption result:', result);
     return result;
   } catch (error) {
     console.error('encrypt error:', error);
-    throw error;
+    throw new Error('Encryption failed');
   }
 }
 
@@ -132,11 +131,11 @@ async function decrypt(encrypted, iv, salt, master) {
       base64ToArrayBuffer(encrypted)
     );
     const result = new TextDecoder().decode(decoded);
-    console.log('Decryption successful, result:', result); // Debug log
+    console.log('Decryption successful, result:', result);
     return result;
   } catch (error) {
     console.error('decrypt error:', error, 'Encrypted:', encrypted, 'IV:', iv, 'Salt:', salt);
-    throw error;
+    throw new Error('Decryption failed');
   }
 }
 
@@ -152,11 +151,11 @@ async function encryptBytes(key, data) {
       encrypted: arrayBufferToBase64(encrypted),
       iv: arrayBufferToBase64(iv)
     };
-    console.log('encryptBytes result:', result); // Debug log
+    console.log('encryptBytes result:', result);
     return result;
   } catch (error) {
     console.error('encryptBytes error:', error);
-    throw error;
+    throw new Error('Byte encryption failed');
   }
 }
 
@@ -167,11 +166,11 @@ async function decryptBytes(key, encrypted, iv) {
       key,
       base64ToArrayBuffer(encrypted)
     );
-    console.log('decryptBytes successful'); // Debug log
+    console.log('decryptBytes successful');
     return result;
   } catch (error) {
     console.error('decryptBytes error:', error, 'Encrypted:', encrypted, 'IV:', iv);
-    throw error;
+    throw new Error('Byte decryption failed');
   }
 }
 
@@ -193,7 +192,7 @@ async function deriveSharedKey(privateKey, publicKey) {
     return key;
   } catch (error) {
     console.error('deriveSharedKey error:', error);
-    throw error;
+    throw new Error('Shared key derivation failed');
   }
 }
 
@@ -210,11 +209,11 @@ async function encryptRaw(key, data) {
       encrypted: arrayBufferToBase64(encrypted),
       iv: arrayBufferToBase64(iv)
     };
-    console.log('encryptRaw result:', result); // Debug log
+    console.log('encryptRaw result:', result);
     return result;
   } catch (error) {
     console.error('encryptRaw error:', error);
-    throw error;
+    throw new Error('Raw encryption failed');
   }
 }
 
@@ -226,11 +225,11 @@ async function signMessage(signingKey, data) {
       signingKey,
       encoded
     ));
-    console.log('signMessage successful, signature:', signature); // Debug log
+    console.log('signMessage successful, signature:', signature);
     return signature;
   } catch (error) {
     console.error('signMessage error:', error);
-    throw error;
+    throw new Error('Message signing failed');
   }
 }
 
@@ -243,7 +242,7 @@ async function verifyMessage(signingKey, signature, data) {
       base64ToArrayBuffer(signature),
       encoded
     );
-    console.log('verifyMessage result:', result); // Debug log
+    console.log('verifyMessage result:', result);
     return result;
   } catch (error) {
     console.error('verifyMessage error:', error);
@@ -271,6 +270,6 @@ async function deriveSigningKey(master) {
     return key;
   } catch (error) {
     console.error('deriveSigningKey error:', error);
-    throw error;
+    throw new Error('Signing key derivation failed');
   }
 }

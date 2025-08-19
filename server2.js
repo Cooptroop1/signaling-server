@@ -1,6 +1,8 @@
 const fs = require('fs');
 const crypto = require('crypto');
 const validator = require('validator');
+const jwt = require('jsonwebtoken');
+const otplib = require('otplib');
 
 module.exports = function(shared) {
   const {
@@ -260,8 +262,9 @@ module.exports = function(shared) {
         ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
         return;
       }
+      let data;
       try {
-        const data = JSON.parse(message);
+        data = JSON.parse(message);
         const loggedData = { ...data };
         if (loggedData.secret) {
           loggedData.secret = '[REDACTED]';
@@ -758,7 +761,7 @@ module.exports = function(shared) {
         }
       } catch (error) {
         console.error('Error processing message:', error);
-        ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
+        ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data?.code }));
         incrementFailure(clientIp);
       }
     });

@@ -8,7 +8,7 @@ function arrayBufferToBase64(buffer) {
   const padding = (4 - base64.length % 4) % 4;
   base64 += '='.repeat(padding);
   base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  console.log('Generated base64:', base64);
+  console.log('Generated base64:', base64.substring(0, 20) + '...'); // Minor logging: truncated for brevity
   return base64;
 }
 
@@ -25,7 +25,7 @@ function base64ToArrayBuffer(base64) {
     }
     return bytes.buffer;
   } catch (error) {
-    console.error('base64ToArrayBuffer error:', error, 'Input:', base64);
+    console.error('base64ToArrayBuffer error:', error, 'Input:', base64.substring(0, 20) + '...'); // Minor logging
     throw new Error('Invalid base64 data');
   }
 }
@@ -37,7 +37,7 @@ async function exportPublicKey(key) {
     if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
       throw new Error(`Invalid public key length: ${base64.length} chars`);
     }
-    console.log('Exported public key:', base64);
+    console.log('Exported public key:', base64.substring(0, 20) + '...'); // Minor logging
     return base64;
   } catch (error) {
     console.error('exportPublicKey error:', error);
@@ -67,7 +67,7 @@ async function importPublicKey(base64) {
     console.log('Imported public key successfully');
     return key;
   } catch (error) {
-    console.error('importPublicKey error:', error, 'Input base64:', base64);
+    console.error('importPublicKey error:', error, 'Input base64:', base64.substring(0, 20) + '...'); // Minor logging
     throw new Error('Failed to import public key');
   }
 }

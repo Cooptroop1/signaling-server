@@ -38,7 +38,7 @@ function startKeepAlive() {
       socket.send(JSON.stringify({ type: 'ping', clientId, token }));
       log('info', 'Sent keepalive ping');
     }
-  }, 50000);  // Adjusted to 50 seconds
+  }, 50000); // Adjusted to 50 seconds
 }
 
 function stopKeepAlive() {

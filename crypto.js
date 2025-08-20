@@ -315,10 +315,9 @@ async function deriveMessageKey(master) {
 // Ratchet functions
 async function deriveChainKey(rootKey, info) {
   try {
-    const keyData = rootKey instanceof Uint8Array ? rootKey.buffer : rootKey;
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      keyData,
+      rootKey.buffer,
       { name: 'HKDF' },
       false,
       ['deriveBits']

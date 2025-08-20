@@ -121,6 +121,7 @@ async function sendMedia(file, type) {
     payload.iv = iv;
     payload.index = relaySendIndex++;
     payload.filename = type === 'file' ? file.name : undefined;
+    saveRelayStates();
   }
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
@@ -452,6 +453,7 @@ function setupDataChannel(dataChannel, targetId) {
       messages.classList.add('waiting');
       document.getElementById('audioOutputButton').classList.add('hidden');
     }
+    saveRelayStates();
   };
 }
 
@@ -494,6 +496,7 @@ async function processReceivedMessage(data, targetId) {
       if (useRelay) {
         const senderId = targetId;
         if (!relayReceiveStates.has(senderId)) {
+          console.warn(`No receive state for sender ${senderId}, initializing`);
           relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-recv-' + senderId), receiveIndex: 0 });
         }
         const state = relayReceiveStates.get(senderId);
@@ -514,6 +517,7 @@ async function processReceivedMessage(data, targetId) {
         contentOrData = await decryptRaw(mk, data.encryptedContent || data.encryptedData, data.iv);
         state.chainKey = await ratchetAdvance(state.chainKey);
         state.receiveIndex = data.index + 1;
+        saveRelayStates();
       } else {
         const messageKey = await deriveMessageKey(roomMaster);
         const encrypted = data.encryptedContent || data.encryptedData;
@@ -703,6 +707,7 @@ async function sendMessage(content) {
       payload.encryptedContent = encrypted;
       payload.iv = iv;
       payload.index = relaySendIndex++;
+      saveRelayStates();
     }
     const jsonString = JSON.stringify(payload);
     if (useRelay) {

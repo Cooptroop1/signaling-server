@@ -313,24 +313,22 @@ async function deriveMessageKey(master) {
 }
 
 // Ratchet functions
-async function deriveChainKey(master, info) {
+async function deriveChainKey(rootKey, info) {
   try {
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      master,
+      rootKey,
       { name: 'HKDF' },
       false,
-      ['deriveKey']
+      ['deriveBits']
     );
-    const key = await window.crypto.subtle.deriveKey(
+    const chainKeyBits = await window.crypto.subtle.deriveBits(
       { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode(info), hash: 'SHA-256' },
       hkdfKey,
-      { name: 'HKDF', length: 256 },
-      true,
-      ['deriveKey']
+      256
     );
     console.log('deriveChainKey successful for info:', info);
-    return key;
+    return new Uint8Array(chainKeyBits);
   } catch (error) {
     console.error('deriveChainKey error:', error);
     throw new Error('Chain key derivation failed');
@@ -339,9 +337,16 @@ async function deriveChainKey(master, info) {
 
 async function ratchetDeriveMK(chainKey) {
   try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      chainKey,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
     const mk = await window.crypto.subtle.deriveKey(
       { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('message_key'), hash: 'SHA-256' },
-      chainKey,
+      hkdfKey,
       { name: 'AES-GCM', length: 256 },
       false,
       ['encrypt', 'decrypt']
@@ -356,15 +361,20 @@ async function ratchetDeriveMK(chainKey) {
 
 async function ratchetAdvance(chainKey) {
   try {
-    const newChainKey = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('chain_key'), hash: 'SHA-256' },
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
       chainKey,
-      { name: 'HKDF', length: 256 },
-      true,
-      ['deriveKey']
+      { name: 'HKDF' },
+      false,
+      ['deriveBits']
+    );
+    const newChainKeyBits = await window.crypto.subtle.deriveBits(
+      { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('chain_key'), hash: 'SHA-256' },
+      hkdfKey,
+      256
     );
     console.log('ratchetAdvance successful');
-    return newChainKey;
+    return new Uint8Array(newChainKeyBits);
   } catch (error) {
     console.error('ratchetAdvance error:', error);
     throw new Error('Advance chain failed');

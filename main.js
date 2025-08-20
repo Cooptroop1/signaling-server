@@ -152,6 +152,7 @@ async function sendMedia(file, type) {
     showStatusMessage('Error: No connections.');
     return;
   }
+  const messages = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-bubble self';
   const timeSpan = document.createElement('span');
@@ -491,10 +492,9 @@ async function processReceivedMessage(data, targetId) {
     try {
       let mk;
       if (useRelay) {
-        const senderId = data.clientId;
+        const senderId = targetId;
         if (!relayReceiveStates.has(senderId)) {
-          const senderChainKey = await deriveChainKey(roomMaster, 'relay-send-' + senderId);
-          relayReceiveStates.set(senderId, { chainKey: senderChainKey, receiveIndex: 0 });
+          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-recv-' + senderId), receiveIndex: 0 });
         }
         const state = relayReceiveStates.get(senderId);
         const skip = data.index - state.receiveIndex;
@@ -734,6 +734,7 @@ async function sendMessage(content) {
       showStatusMessage('Error: No connections.');
       return;
     }
+    const messages = document.getElementById('messages');
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message-bubble self';
     const timeSpan = document.createElement('span');

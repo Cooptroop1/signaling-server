@@ -480,6 +480,7 @@ function setupDataChannel(dataChannel, targetId) {
       messages.classList.add('waiting');
       document.getElementById('audioOutputButton').classList.add('hidden');
     }
+    saveRelayStates();
   };
 }
 

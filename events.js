@@ -310,10 +310,21 @@ socket.onmessage = async (event) => {
       connectedClients.add(clientId);
       initializeMaxClientsUI();
       updateFeaturesUI();
-      if (roomMaster) {
+      if (isInitiator) {
+        roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+        signingKey = await deriveSigningKey(roomMaster);
+        console.log('Generated initial roomMaster and signingKey for initiator.');
+        isConnected = true;
+        if (pendingTotpSecret) {
+          socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
+          showTotpSecretModal(pendingTotpSecret.display);
+          pendingTotpSecret = null;
+        }
+        setInterval(triggerRatchet, 5 * 60 * 1000);
         if (useRelay) {
           relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
           relaySendIndex = 0;
+          relayReceiveStates.clear();
           connectedClients.forEach(id => {
             if (id !== clientId) {
               deriveChainKey(roomMaster, 'relay-recv-' + id).then(key => {
@@ -331,21 +342,20 @@ socket.onmessage = async (event) => {
           messages.classList.remove('waiting');
           updateMaxClientsUI();
         }
-      }
-      if (isInitiator) {
-        roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-        signingKey = await deriveSigningKey(roomMaster);
-        console.log('Generated initial roomMaster and signingKey for initiator.');
-        isConnected = true;
-        if (pendingTotpSecret) {
-          socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
-          showTotpSecretModal(pendingTotpSecret.display);
-          pendingTotpSecret = null;
-        }
-        setInterval(triggerRatchet, 5 * 60 * 1000);
+      } else {
+        const publicKey = await exportPublicKey(keyPair.publicKey);
+        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
         if (useRelay) {
           relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
           relaySendIndex = 0;
+          relayReceiveStates.clear();
+          connectedClients.forEach(id => {
+            if (id !== clientId) {
+              deriveChainKey(roomMaster, 'relay-recv-' + id).then(key => {
+                relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
+              });
+            }
+          });
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
             privacyStatus.textContent = 'Relay Mode';
@@ -356,9 +366,6 @@ socket.onmessage = async (event) => {
           messages.classList.remove('waiting');
           updateMaxClientsUI();
         }
-      } else {
-        const publicKey = await exportPublicKey(keyPair.publicKey);
-        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
       }
       updateMaxClientsUI();
       updateDots();
@@ -423,6 +430,7 @@ socket.onmessage = async (event) => {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
       }
+      saveRelayStates();
       return;
     }
     if (message.type === 'max-clients') {
@@ -483,6 +491,7 @@ socket.onmessage = async (event) => {
         if (useRelay) {
           relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
           relaySendIndex = 0;
+          relayReceiveStates.clear();
           connectedClients.forEach(id => {
             if (id !== clientId) {
               deriveChainKey(roomMaster, 'relay-recv-' + id).then(key => {
@@ -589,6 +598,7 @@ socket.onmessage = async (event) => {
         contentOrData = await decryptRaw(mk, payload.encryptedContent || payload.encryptedData, payload.iv);
         state.chainKey = await ratchetAdvance(state.chainKey);
         state.receiveIndex = payload.index + 1;
+        saveRelayStates();
       }
       if (message.type === 'image') {
         const img = document.createElement('img');
@@ -680,6 +690,7 @@ async function triggerRatchet() {
           });
         }
       });
+      saveRelayStates();
     }
     console.log('PFS ratchet complete, new roomMaster set.');
   } else {
@@ -1022,6 +1033,7 @@ function setCookie(name, value, days) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  loadRelayStates();
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {

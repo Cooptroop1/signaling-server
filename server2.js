@@ -287,9 +287,7 @@ module.exports = function(shared) {
           data.type === 'relay-message' && 'encryptedContent',
           (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'encryptedData',
           data.type === 'relay-message' && 'iv',
-          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'iv',
-          data.type === 'relay-message' && 'authTag',
-          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'authTag'
+          (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'iv'
         ];
         Object.keys(data).forEach(key => {
           if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -638,7 +636,7 @@ module.exports = function(shared) {
             ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
             return;
           }
-          const payload = data.content || data.data || data.encryptedContent || data.encryptedData;
+          const payload = data.content || data.data;
           if (payload && (typeof payload !== 'string' || (data.type !== 'relay-message' && !isValidBase64(payload)))) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
             incrementFailure(clientIp);
@@ -677,13 +675,10 @@ module.exports = function(shared) {
                 messageId: data.messageId,
                 username: data.username,
                 content: data.content,
-                encryptedContent: data.encryptedContent,
                 data: data.data,
-                encryptedData: data.encryptedData,
                 filename: data.filename,
                 timestamp: data.timestamp,
-                iv: data.iv,
-                index: data.index
+                clientId: senderId
               }));
               console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
             }

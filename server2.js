@@ -636,7 +636,9 @@ module.exports = function(shared) {
             ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
             return;
           }
-          const payload = data.content || data.data;
+          const payloadField = data.type === 'relay-message' ? 'content' : 'data';
+          const encryptedField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
+          let payload = data[payloadField] || data[encryptedField];
           if (payload && (typeof payload !== 'string' || (data.type !== 'relay-message' && !isValidBase64(payload)))) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
             incrementFailure(clientIp);
@@ -675,9 +677,13 @@ module.exports = function(shared) {
                 messageId: data.messageId,
                 username: data.username,
                 content: data.content,
+                encryptedContent: data.encryptedContent,
                 data: data.data,
+                encryptedData: data.encryptedData,
                 filename: data.filename,
                 timestamp: data.timestamp,
+                iv: data.iv,
+                index: data.index,
                 clientId: senderId
               }));
               console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);

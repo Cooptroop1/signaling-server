@@ -524,7 +524,7 @@ async function processReceivedMessage(data, targetId) {
         const senderId = targetId;
         if (!relayReceiveStates.has(senderId)) {
           console.warn(`No receive state for sender ${senderId}, initializing`);
-          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-recv-' + senderId), receiveIndex: 0 });
+          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-' + senderId), receiveIndex: 0 });
         }
         const state = relayReceiveStates.get(senderId);
         const skip = data.index - state.receiveIndex;
@@ -563,6 +563,9 @@ async function processReceivedMessage(data, targetId) {
       showStatusMessage('Failed to decrypt/verify message.');
       return;
     }
+  } else if (data.content || data.data) {
+    contentOrData = data.content || data.data;
+    console.warn('Received plain message in relay mode, displaying as is for legacy support');
   }
   if (data.type === 'image') {
     const img = document.createElement('img');

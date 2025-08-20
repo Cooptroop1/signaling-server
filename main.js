@@ -20,6 +20,33 @@ let relaySendingChainKey;
 let relaySendIndex = 0;
 let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
 
+function loadRelayStates() {
+  const saved = localStorage.getItem('relayStates');
+  if (saved) {
+    const { sendingChainKey, sendIndex, receiveStates } = JSON.parse(saved);
+    relaySendingChainKey = base64ToArrayBuffer(sendingChainKey);
+    relaySendIndex = sendIndex;
+    for (const [id, state] of Object.entries(receiveStates)) {
+      relayReceiveStates.set(id, { chainKey: base64ToArrayBuffer(state.chainKey), receiveIndex: state.receiveIndex });
+    }
+    console.log('Loaded relay ratchet states from localStorage');
+  }
+}
+
+function saveRelayStates() {
+  const receiveStates = {};
+  relayReceiveStates.forEach((state, id) => {
+    receiveStates[id] = { chainKey: arrayBufferToBase64(state.chainKey), receiveIndex: state.receiveIndex };
+  });
+  const states = {
+    sendingChainKey: arrayBufferToBase64(relaySendingChainKey),
+    sendIndex: relaySendIndex,
+    receiveStates
+  };
+  localStorage.setItem('relayStates', JSON.stringify(states));
+  console.log('Saved relay ratchet states to localStorage');
+}
+
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
@@ -453,7 +480,6 @@ function setupDataChannel(dataChannel, targetId) {
       messages.classList.add('waiting');
       document.getElementById('audioOutputButton').classList.add('hidden');
     }
-    saveRelayStates();
   };
 }
 

@@ -268,7 +268,7 @@ async function deriveSigningKey(master) {
   try {
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      master,
+      master.buffer,
       { name: 'HKDF' },
       false,
       ['deriveKey']
@@ -292,7 +292,7 @@ async function deriveMessageKey(master) {
   try {
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      master,
+      master.buffer,
       { name: 'HKDF' },
       false,
       ['deriveKey']
@@ -315,9 +315,10 @@ async function deriveMessageKey(master) {
 // Ratchet functions
 async function deriveChainKey(rootKey, info) {
   try {
+    const keyData = rootKey instanceof Uint8Array ? rootKey.buffer : rootKey;
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      rootKey,
+      keyData,
       { name: 'HKDF' },
       false,
       ['deriveBits']
@@ -339,7 +340,7 @@ async function ratchetDeriveMK(chainKey) {
   try {
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      chainKey,
+      chainKey.buffer,
       { name: 'HKDF' },
       false,
       ['deriveKey']
@@ -363,7 +364,7 @@ async function ratchetAdvance(chainKey) {
   try {
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      chainKey,
+      chainKey.buffer,
       { name: 'HKDF' },
       false,
       ['deriveBits']

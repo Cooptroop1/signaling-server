@@ -534,6 +534,7 @@ socket.onmessage = async (event) => {
               });
             }
           });
+          saveRelayStates();
         }
       } catch (error) {
         console.error('Error handling new-room-key:', error);

@@ -1,26 +1,4 @@
 // events.js
-let turnUsername = '';
-let turnCredential = '';
-let localStream = null;
-let voiceCallActive = false;
-let grokBotActive = false;
-let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map();
-let audioOutputMode = 'earpiece';
-let totpEnabled = false;
-let totpSecret = '';
-let pendingTotpSecret = null;
-let mediaRecorder = null;
-let voiceChunks = [];
-let voiceTimerInterval = null;
-let messageCount = 0;
-const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
-const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
-const negotiationQueues = new Map(); // Queue pending negotiations per peer
-let relaySendingChainKey;
-let relaySendIndex = 0;
-let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
-
 function loadRelayStates() {
   const saved = localStorage.getItem('relayStates');
   if (saved) {
@@ -1695,8 +1673,9 @@ function setupWaitingForJoin(codeParam) {
     statusElement.textContent = 'Please enter a username to join the chat';
     document.getElementById('usernameInput').value = username || '';
     document.getElementById('usernameInput')?.focus();
-    const connectButton = document.getElementById('connectButton');
-    connectButton.onclick = () => {
+    const joinButton = document.getElementById('joinWithUsernameButton');
+    const originalOnclick = joinButton.onclick;
+    joinButton.onclick = () => {
       const usernameInput = document.getElementById('usernameInput').value.trim();
       if (!validateUsername(usernameInput)) {
         showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
@@ -1727,6 +1706,7 @@ function setupWaitingForJoin(codeParam) {
         }
       }
       document.getElementById('messageInput')?.focus();
+      joinButton.onclick = originalOnclick;
     };
   } else {
     codeDisplayElement.textContent = `Using code: ${code}`;

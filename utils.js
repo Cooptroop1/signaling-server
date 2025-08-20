@@ -88,13 +88,14 @@ function cleanupPeerConnection(targetId) {
 }
 
 function initializeMaxClientsUI() {
-  log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
+  log('info', `initializeMaxClientsUI called, isInitiator: ${typeof isInitiator !== 'undefined' ? isInitiator : 'undefined (defaulting to false)'}`);
+  const effectiveInitiator = typeof isInitiator !== 'undefined' ? isInitiator : false;
   const addUserText = document.getElementById('addUserText');
   const addUserModal = document.getElementById('addUserModal');
   const addUserRadios = document.getElementById('addUserRadios');
   if (addUserText && addUserModal && addUserRadios) {
-    addUserText.classList.toggle('hidden', !isInitiator);
-    if (isInitiator) {
+    addUserText.classList.toggle('hidden', !effectiveInitiator);
+    if (effectiveInitiator) {
       log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
       addUserRadios.innerHTML = '';
       for (let n = 2; n <= 10; n++) {
@@ -102,9 +103,9 @@ function initializeMaxClientsUI() {
         button.textContent = n;
         button.setAttribute('aria-label', `Set maximum users to ${n}`);
         button.className = n === maxClients ? 'active' : '';
-        button.disabled = !isInitiator;
+        button.disabled = !effectiveInitiator;
         button.addEventListener('click', () => {
-          if (isInitiator) {
+          if (effectiveInitiator) {
             log('info', `Button clicked for maxClients: ${n}`);
             setMaxClients(n);
             document.querySelectorAll('#addUserRadios button').forEach(btn => btn.classList.remove('active'));

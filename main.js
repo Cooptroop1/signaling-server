@@ -1,4 +1,3 @@
-
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -239,7 +238,7 @@ async function startPeerConnection(targetId, isOfferer) {
     updateMaxClientsUI();
     return;
   }
-  if (peerConnections.has(targetId)) {
+  if (peerConnections.has(targetId) ) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
   }
@@ -481,6 +480,7 @@ function setupDataChannel(dataChannel, targetId) {
       messages.classList.add('waiting');
       document.getElementById('audioOutputButton').classList.add('hidden');
     }
+    saveRelayStates();
   };
 }
 
@@ -524,7 +524,7 @@ async function processReceivedMessage(data, targetId) {
         const senderId = targetId;
         if (!relayReceiveStates.has(senderId)) {
           console.warn(`No receive state for sender ${senderId}, initializing`);
-          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-recv-' + senderId), receiveIndex: 0 });
+          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-chain-' + senderId), receiveIndex: 0 });
         }
         const state = relayReceiveStates.get(senderId);
         const skip = data.index - state.receiveIndex;
@@ -563,6 +563,9 @@ async function processReceivedMessage(data, targetId) {
       showStatusMessage('Failed to decrypt/verify message.');
       return;
     }
+  } else if (data.content || data.data) {
+    contentOrData = data.content || data.data;
+    console.warn('Received plain message in relay mode, displaying as is for legacy support');
   }
   if (data.type === 'image') {
     const img = document.createElement('img');
@@ -1299,4 +1302,48 @@ async function isWebPSupported() {
     return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
   }
   return false;
+}
+
+async function triggerRatchet() {
+  if (!isInitiator || connectedClients.size <= 1) return;
+  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  let success = 0;
+  const newEphemPair = await window.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveKey', 'deriveBits']);
+  const newEphemPub = await exportPublicKey(newEphemPair.publicKey);
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const peerPub = clientPublicKeys.get(cId);
+    if (!peerPub) {
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      continue;
+    }
+    try {
+      const importedPeerPub = await importPublicKey(peerPub);
+      const shared = await deriveSharedKey(newEphemPair.privateKey, importedPeerPub);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, ephemPub: newEphemPub, targetId: cId, code, clientId, token }));
+      success++;
+    } catch (error) {
+      console.error(`Error sending new room key to ${cId}:`, error);
+    }
+  }
+  if (success > 0) {
+    roomMaster = newRoomMaster;
+    signingKey = await deriveSigningKey(roomMaster);
+    if (useRelay) {
+      relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-chain-' + clientId);
+      relaySendIndex = 0;
+      relayReceiveStates.clear();
+      connectedClients.forEach(async (id) => {
+        if (id !== clientId) {
+          const key = await deriveChainKey(roomMaster, 'relay-chain-' + id);
+          relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
+        }
+      });
+      saveRelayStates();
+    }
+    console.log('PFS ratchet complete, new roomMaster set.');
+  } else {
+    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+  }
 }

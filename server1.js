@@ -255,6 +255,9 @@ function validateMessage(data) {
       if (!data.code) {
         return { valid: false, error: 'new-room-key: code required' };
       }
+      if (data.ephemPub && (!isValidBase64(data.ephemPub) || data.ephemPub.length < 128 || data.ephemPub.length > 132)) {
+        return { valid: false, error: 'new-room-key: invalid ephemPub format or length' };
+      }
       break;
     case 'join':
       if (!data.code) {

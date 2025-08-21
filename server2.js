@@ -283,6 +283,7 @@ module.exports = function(shared) {
           data.type === 'encrypted-room-key' && 'iv',
           data.type === 'new-room-key' && 'encrypted',
           data.type === 'new-room-key' && 'iv',
+          data.type === 'new-room-key' && 'ephemPub',
           (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'data',
           data.type === 'relay-message' && 'encryptedContent',
           (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'encryptedData',
@@ -444,7 +445,7 @@ module.exports = function(shared) {
             const room = rooms.get(data.code);
             const targetWs = room.clients.get(data.targetId)?.ws;
             if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-              targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code }));
+              targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, ephemPub: data.ephemPub, targetId: data.targetId, clientId: data.clientId, code: data.code }));
               console.log(`Forwarded new-room-key from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Target client not found or offline', code: data.code }));

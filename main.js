@@ -238,7 +238,7 @@ async function startPeerConnection(targetId, isOfferer) {
     updateMaxClientsUI();
     return;
   }
-  if (peerConnections.has(targetId) ) {
+  if (peerConnections.has(targetId)) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
   }

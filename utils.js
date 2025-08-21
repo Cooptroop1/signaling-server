@@ -1,3 +1,4 @@
+
 // utils.js
 function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
@@ -38,7 +39,7 @@ function startKeepAlive() {
       socket.send(JSON.stringify({ type: 'ping', clientId, token }));
       log('info', 'Sent keepalive ping');
     }
-  }, 50000); // Adjusted to 50 seconds
+  }, 50000);  // Adjusted to 50 seconds
 }
 
 function stopKeepAlive() {
@@ -88,14 +89,13 @@ function cleanupPeerConnection(targetId) {
 }
 
 function initializeMaxClientsUI() {
-  log('info', `initializeMaxClientsUI called, isInitiator: ${typeof isInitiator !== 'undefined' ? isInitiator : 'undefined (defaulting to false)'}`);
-  const effectiveInitiator = typeof isInitiator !== 'undefined' ? isInitiator : false;
+  log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
   const addUserText = document.getElementById('addUserText');
   const addUserModal = document.getElementById('addUserModal');
   const addUserRadios = document.getElementById('addUserRadios');
   if (addUserText && addUserModal && addUserRadios) {
-    addUserText.classList.toggle('hidden', !effectiveInitiator);
-    if (effectiveInitiator) {
+    addUserText.classList.toggle('hidden', !isInitiator);
+    if (isInitiator) {
       log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
       addUserRadios.innerHTML = '';
       for (let n = 2; n <= 10; n++) {
@@ -103,9 +103,9 @@ function initializeMaxClientsUI() {
         button.textContent = n;
         button.setAttribute('aria-label', `Set maximum users to ${n}`);
         button.className = n === maxClients ? 'active' : '';
-        button.disabled = !effectiveInitiator;
+        button.disabled = !isInitiator;
         button.addEventListener('click', () => {
-          if (effectiveInitiator) {
+          if (isInitiator) {
             log('info', `Button clicked for maxClients: ${n}`);
             setMaxClients(n);
             document.querySelectorAll('#addUserRadios button').forEach(btn => btn.classList.remove('active'));

@@ -1,39 +1,8 @@
 // main.js
-let turnUsername = '';
-let turnCredential = '';
-let localStream = null;
-let voiceCallActive = false;
-let grokBotActive = false;
-let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map();
-let audioOutputMode = 'earpiece';
-let totpEnabled = false;
-let totpSecret = '';
-let pendingTotpSecret = null;
-let mediaRecorder = null;
-let voiceChunks = [];
-let voiceTimerInterval = null;
-let messageCount = 0;
-const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
-const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
-const negotiationQueues = new Map(); // Queue pending negotiations per peer
-let relaySendingChainKey;
-let relaySendIndex = 0;
-let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
 let globalMessageRate = { count: 0, startTime: Date.now() };
-function generateCode() {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const randomBytes = window.crypto.getRandomValues(new Uint8Array(16));
-  let result = '';
-  for (let i = 0; i < 16; i++) {
-    result += chars[randomBytes[i] % chars.length];
-    if (i % 4 === 3 && i < 15) result += '-';
-  }
-  return result;
-}
 let code = generateCode();
 let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
 if (getCookie('clientId')) {
@@ -676,4 +645,32 @@ function refreshAccessToken() {
   } else {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
   }
+}
+
+function generateCode() {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const randomBytes = window.crypto.getRandomValues(new Uint8Array(16));
+  let result = '';
+  for (let i = 0; i < 16; i++) {
+    result += chars[randomBytes[i] % chars.length];
+    if (i % 4 === 3 && i < 15) result += '-';
+  }
+  return result;
+}
+
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
+function setCookie(name, value, days) {
+  let expires = '';
+  if (days) {
+    const date = new Date();
+    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    expires = '; expires=' + date.toUTCString();
+  }
+  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
 }

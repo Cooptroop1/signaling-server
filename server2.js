@@ -1,3 +1,4 @@
+
 const fs = require('fs');
 const crypto = require('crypto');
 const validator = require('validator');
@@ -626,30 +627,6 @@ module.exports = function(shared) {
             broadcastRandomCodes();
             console.log(`Removed code ${data.code} from randomCodes`);
           }
-          return;
-        }
-        if (data.type === 'relay-typing') {
-          if (!rooms.has(data.code)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
-            incrementFailure(clientIp);
-            return;
-          }
-          const room = rooms.get(data.code);
-          const senderId = data.clientId;
-          if (!room.clients.has(senderId)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
-            incrementFailure(clientIp);
-            return;
-          }
-          room.clients.forEach((client, clientId) => {
-            if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
-              client.ws.send(JSON.stringify({
-                type: 'typing',
-                username: data.username,
-                clientId: senderId
-              }));
-            }
-          });
           return;
         }
         if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') {

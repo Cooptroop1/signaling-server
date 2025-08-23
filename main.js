@@ -1,3 +1,4 @@
+
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -19,7 +20,14 @@ const negotiationQueues = new Map(); // Queue pending negotiations per peer
 let relaySendingChainKey;
 let relaySendIndex = 0;
 let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
-let typingTimeouts = new Map(); // targetId: timeoutId
+
+function clearSensitiveData() {
+  roomMaster = null;
+  signingKey = null;
+  relaySendingChainKey = null;
+  relayReceiveStates.clear();
+  console.log('Cleared sensitive cryptographic keys from memory');
+}
 
 function loadRelayStates() {
   const saved = localStorage.getItem('relayStates');
@@ -92,6 +100,8 @@ async function sendMedia(file, type) {
     } else if (file.size > 1 * 1024 * 1024) {
       quality = 0.35;
     }
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
     const img = new Image();
     img.src = URL.createObjectURL(file);
     await new Promise(resolve => img.onload = resolve);
@@ -108,11 +118,9 @@ async function sendMedia(file, type) {
         height = maxHeight;
       }
     }
-    const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    const picaInstance = pica();
-    await picaInstance.resize(img, canvas, { quality: 3 });
+    ctx.drawImage(img, 0, 0, width, height);
     const format = isWebPSupported() ? 'image/webp' : 'image/jpeg';
     base64 = canvas.toDataURL(format, quality);
     URL.revokeObjectURL(img.src);
@@ -424,10 +432,6 @@ function setupDataChannel(dataChannel, targetId) {
       showStatusMessage('Invalid message received.');
       return;
     }
-    if (data.type === 'typing') {
-      handleTypingIndicator(data.username, targetId);
-      return;
-    }
     if (data.chunk) {
       // Don't count chunks toward rate limit
       const { chunkId, index, total, data: chunkData } = data;
@@ -500,10 +504,6 @@ async function processReceivedMessage(data, targetId) {
     if (voiceCallActive) {
       stopVoiceCall();
     }
-    return;
-  }
-  if (data.type === 'typing') {
-    handleTypingIndicator(data.username, targetId);
     return;
   }
   if (!data.messageId || !data.username || (!data.content && !data.data && !data.encryptedContent && !data.encryptedData)) {
@@ -611,26 +611,6 @@ async function processReceivedMessage(data, targetId) {
       }
     });
   }
-}
-
-function handleTypingIndicator(username, targetId) {
-  if (typingTimeouts.has(targetId)) {
-    clearTimeout(typingTimeouts.get(targetId));
-  }
-  const typingDivId = `typing-${targetId}`;
-  let typingDiv = document.getElementById(typingDivId);
-  if (!typingDiv) {
-    typingDiv = document.createElement('div');
-    typingDiv.id = typingDivId;
-    typingDiv.className = 'message-bubble other typing';
-    typingDiv.textContent = `${username} is typing...`;
-    document.getElementById('messages').prepend(typingDiv);
-  }
-  typingTimeouts.set(targetId, setTimeout(() => {
-    typingDiv.remove();
-    typingTimeouts.delete(targetId);
-  }, 3000));
-  document.getElementById('messages').scrollTop = 0;
 }
 
 async function handleOffer(offer, targetId) {

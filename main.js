@@ -20,6 +20,14 @@ let relaySendingChainKey;
 let relaySendIndex = 0;
 let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
 
+function clearSensitiveData() {
+  roomMaster = null;
+  signingKey = null;
+  relaySendingChainKey = null;
+  relayReceiveStates.clear();
+  console.log('Cleared sensitive cryptographic keys from memory');
+}
+
 function loadRelayStates() {
   const saved = localStorage.getItem('relayStates');
   if (saved) {

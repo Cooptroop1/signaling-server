@@ -20,14 +20,6 @@ let relaySendingChainKey;
 let relaySendIndex = 0;
 let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
 
-function clearSensitiveData() {
-  roomMaster = null;
-  signingKey = null;
-  relaySendingChainKey = null;
-  relayReceiveStates.clear();
-  console.log('Cleared sensitive cryptographic keys from memory');
-}
-
 function loadRelayStates() {
   const saved = localStorage.getItem('relayStates');
   if (saved) {
@@ -99,8 +91,6 @@ async function sendMedia(file, type) {
     } else if (file.size > 1 * 1024 * 1024) {
       quality = 0.35;
     }
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
     const img = new Image();
     img.src = URL.createObjectURL(file);
     await new Promise(resolve => img.onload = resolve);
@@ -117,9 +107,11 @@ async function sendMedia(file, type) {
         height = maxHeight;
       }
     }
+    const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    ctx.drawImage(img, 0, 0, width, height);
+    const picaInstance = Pica();
+    await picaInstance.resize(img, canvas, { quality: 3 });
     const format = isWebPSupported() ? 'image/webp' : 'image/jpeg';
     base64 = canvas.toDataURL(format, quality);
     URL.revokeObjectURL(img.src);

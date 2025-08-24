@@ -16,10 +16,22 @@ let messageCount = 0;
 const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
+let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');
+    return;
+  }
+
+  // Global send rate limit check (aggregate all types)
+  const now = performance.now();
+  if (now - globalSendRate.startTime >= 60000) {
+    globalSendRate.count = 0;
+    globalSendRate.startTime = now;
+  }
+  if (globalSendRate.count >= 50) {
+    showStatusMessage('Global message rate limit exceeded (50/min). Please wait.');
     return;
   }
 
@@ -42,7 +54,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   }
 
   const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
-  const now = performance.now();
   const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
     rateLimit.count = 0;
@@ -140,6 +151,9 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Error: No connections.');
     return;
   }
+
+  // Increment global count after successful send
+  globalSendRate.count += 1;
 
   const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
@@ -1126,7 +1140,7 @@ function startVoiceRecording() {
         showStatusMessage('No audio recorded. Speak louder or check microphone.');
         return;
       }
-      await sendMedia(audioBlob, 'voice');
+      await prepareAndSendMessage({ type: 'voice', file: audioBlob });
       stream.getTracks().forEach(track => track.stop());
       mediaRecorder = null;
       voiceChunks = [];

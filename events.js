@@ -1,6 +1,3 @@
-
-
-// events.js
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -152,7 +149,7 @@ socket.onerror = (error) => {
 };
 socket.onclose = () => {
   console.log('WebSocket closed');
-  showStatusMessage('Lost connection, reconnecting...');
+  // Removed showStatusMessage to suppress transient error
   stopKeepAlive();
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
@@ -200,7 +197,7 @@ socket.onmessage = async (event) => {
       token = message.accessToken;
       refreshToken = message.refreshToken;
       console.log('Received new tokens:', { accessToken: token, refreshToken });
-      showStatusMessage('Authentication tokens refreshed.');
+      // Removed showStatusMessage to suppress transient error
       refreshFailures = 0;
       refreshBackoff = 1000;
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
@@ -244,7 +241,7 @@ socket.onmessage = async (event) => {
           }, refreshBackoff);
           refreshBackoff = Math.min(refreshBackoff * 2, 8000);
         }
-        showStatusMessage('Session expired. Reconnecting...');
+        // Removed showStatusMessage to suppress transient error
       } else if (message.message.includes('Rate limit exceeded')) {
         showStatusMessage('Rate limit exceeded. Waiting before retrying...');
         setTimeout(() => {

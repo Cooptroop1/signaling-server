@@ -1,4 +1,4 @@
-// events.js (updated with relay key rotation on join/leave)
+// events.js (updated: remove relay-specific derives in join-notify/init, condition key exchange on !useRelay)
 
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
@@ -314,14 +314,6 @@ socket.onmessage = async (event) => {
       updateFeaturesUI();
       if (roomMaster) {
         if (useRelay) {
-          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-chain-' + clientId);
-          relaySendIndex = 0;
-          connectedClients.forEach(async (id) => {
-            if (id !== clientId) {
-              const key = await deriveChainKey(roomMaster, 'relay-chain-' + id);
-              relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
-            }
-          });
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
             privacyStatus.textContent = 'Relay Mode';
@@ -345,8 +337,6 @@ socket.onmessage = async (event) => {
         }
         setInterval(triggerRatchet, 5 * 60 * 1000);
         if (useRelay) {
-          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-chain-' + clientId);
-          relaySendIndex = 0;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
             privacyStatus.textContent = 'Relay Mode';
@@ -358,8 +348,10 @@ socket.onmessage = async (event) => {
           updateMaxClientsUI();
         }
       } else {
-        const publicKey = await exportPublicKey(keyPair.publicKey);
-        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
+        if (!useRelay) {
+          const publicKey = await exportPublicKey(keyPair.publicKey);
+          socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
+        }
       }
       updateMaxClientsUI();
       updateDots();
@@ -387,10 +379,11 @@ socket.onmessage = async (event) => {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
-      if (useRelay && roomMaster) {
-        const key = await deriveChainKey(roomMaster, 'relay-recv-' + message.clientId);
-        relayReceiveStates.set(message.clientId, { chainKey: key, receiveIndex: 0 });
-        console.log(`Derived receive ratchet for new sender ${message.clientId}`);
+      if (useRelay) {
+        isConnected = true;
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
+        updateMaxClientsUI();
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
@@ -403,7 +396,6 @@ socket.onmessage = async (event) => {
       usernames.delete(message.clientId);
       connectedClients.delete(message.clientId);
       clientPublicKeys.delete(message.clientId);
-      relayReceiveStates.delete(message.clientId);
       cleanupPeerConnection(message.clientId);
       if (remoteAudios.has(message.clientId)) {
         const audio = remoteAudios.get(message.clientId);
@@ -477,15 +469,6 @@ socket.onmessage = async (event) => {
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Room master successfully imported.');
         if (useRelay) {
-          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
-          relaySendIndex = 0;
-          connectedClients.forEach(id => {
-            if (id !== clientId) {
-              deriveChainKey(roomMaster, 'relay-recv-' + id).then(key => {
-                relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
-              });
-            }
-          });
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
             privacyStatus.textContent = 'Relay Mode';
@@ -510,18 +493,6 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(newRoomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('New room master received and set for PFS.');
-        if (useRelay) {
-          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
-          relaySendIndex = 0;
-          relayReceiveStates.clear();
-          connectedClients.forEach(id => {
-            if (id !== clientId) {
-              deriveChainKey(roomMaster, 'relay-recv-' + id).then(key => {
-                relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
-              });
-            }
-          });
-        }
       } catch (error) {
         console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
@@ -562,29 +533,23 @@ socket.onmessage = async (event) => {
       messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
       let contentOrData = payload.content || payload.data;
       if (payload.encryptedContent || payload.encryptedData) {
-        const senderId = payload.clientId;
-        if (!relayReceiveStates.has(senderId)) {
-          console.warn(`No receive state for sender ${senderId}, initializing`);
-          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-recv-' + senderId), receiveIndex: 0 });
-        }
-        const state = relayReceiveStates.get(senderId);
-        const skip = payload.index - state.receiveIndex;
-        if (skip < 0) {
-          console.warn(`Replay message from ${senderId} with index ${payload.index}`);
+        try {
+          const messageKey = await deriveMessageKey(roomMaster);
+          const encrypted = payload.encryptedContent || payload.encryptedData;
+          const iv = payload.iv;
+          contentOrData = await decryptRaw(messageKey, encrypted, iv);
+          const toVerify = contentOrData + payload.timestamp;
+          const valid = await verifyMessage(signingKey, payload.signature, toVerify);
+          if (!valid) {
+            console.warn(`Invalid signature for message from ${payload.clientId}`);
+            showStatusMessage('Invalid message signature detected.');
+            return;
+          }
+        } catch (error) {
+          console.error(`Decryption/verification failed for message from ${payload.clientId}:`, error);
+          showStatusMessage('Failed to decrypt/verify message.');
           return;
         }
-        if (skip > 100) {
-          console.warn(`Too many skipped messages from ${senderId}, possible DoS`);
-          return;
-        }
-        for (let i = 0; i < skip; i++) {
-          await ratchetDeriveMK(state.chainKey); // derive and discard
-          state.chainKey = await ratchetAdvance(state.chainKey);
-        }
-        const mk = await ratchetDeriveMK(state.chainKey);
-        contentOrData = await decryptRaw(mk, payload.encryptedContent || payload.encryptedData, payload.iv);
-        state.chainKey = await ratchetAdvance(state.chainKey);
-        state.receiveIndex = payload.index + 1;
       }
       if (message.type === 'image') {
         const img = document.createElement('img');
@@ -665,18 +630,6 @@ async function triggerRatchet() {
   if (success > 0) {
     roomMaster = newRoomMaster;
     signingKey = await deriveSigningKey(roomMaster);
-    if (useRelay) {
-      relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
-      relaySendIndex = 0;
-      relayReceiveStates.clear();
-      connectedClients.forEach(id => {
-        if (id !== clientId) {
-          deriveChainKey(roomMaster, 'relay-recv-' + id).then(key => {
-            relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
-          });
-        }
-      });
-    }
     console.log('PFS ratchet complete, new roomMaster set.');
   } else {
     console.warn('PFS ratchet failed: No keys available to send to any clients.');

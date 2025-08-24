@@ -1,4 +1,4 @@
-// main.js (minor update to align with relay key derivation on join/leave; no major changes but included for completeness if needed)
+// main.js (updated: align relay encryption to P2P-style (no double ratchet, use messageKey + signing); seamless P2P->relay switch with UI log)
 
 let turnUsername = '';
 let turnCredential = '';
@@ -18,35 +18,15 @@ let messageCount = 0;
 const CHUNK_SIZE = 8192; // Reduced to 8192 for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
-let relaySendingChainKey;
-let relaySendIndex = 0;
-let relayReceiveStates = new Map(); // senderId: {chainKey, receiveIndex}
 
 function loadRelayStates() {
-  const saved = localStorage.getItem('relayStates');
-  if (saved) {
-    const { sendingChainKey, sendIndex, receiveStates } = JSON.parse(saved);
-    relaySendingChainKey = base64ToArrayBuffer(sendingChainKey);
-    relaySendIndex = sendIndex;
-    for (const [id, state] of Object.entries(receiveStates)) {
-      relayReceiveStates.set(id, { chainKey: base64ToArrayBuffer(state.chainKey), receiveIndex: state.receiveIndex });
-    }
-    console.log('Loaded relay ratchet states from localStorage');
-  }
+  // No longer needed, as relay now uses P2P-style encryption
+  console.log('Relay states not loaded (using P2P-style encryption in relay mode)');
 }
 
 function saveRelayStates() {
-  const receiveStates = {};
-  relayReceiveStates.forEach((state, id) => {
-    receiveStates[id] = { chainKey: arrayBufferToBase64(state.chainKey), receiveIndex: state.receiveIndex };
-  });
-  const states = {
-    sendingChainKey: arrayBufferToBase64(relaySendingChainKey),
-    sendIndex: relaySendIndex,
-    receiveStates
-  };
-  localStorage.setItem('relayStates', JSON.stringify(states));
-  console.log('Saved relay ratchet states to localStorage');
+  // No longer needed
+  console.log('Relay states not saved (using P2P-style encryption in relay mode)');
 }
 
 async function sendMedia(file, type) {
@@ -134,24 +114,13 @@ async function sendMedia(file, type) {
   const timestamp = Date.now();
   let payload = { messageId, type, username, timestamp };
   let dataToSend = base64;
-  if (!useRelay) {
-    const messageKey = await deriveMessageKey(roomMaster);
-    const { encrypted, iv } = await encryptRaw(messageKey, dataToSend);
-    const toSign = dataToSend + timestamp;
-    payload.signature = await signMessage(signingKey, toSign);
-    payload.encryptedData = encrypted;
-    payload.iv = iv;
-    payload.filename = type === 'file' ? file.name : undefined;
-  } else {
-    const mk = await ratchetDeriveMK(relaySendingChainKey);
-    const { encrypted, iv } = await encryptRaw(mk, dataToSend);
-    relaySendingChainKey = await ratchetAdvance(relaySendingChainKey);
-    payload.encryptedData = encrypted;
-    payload.iv = iv;
-    payload.index = relaySendIndex++;
-    saveRelayStates();
-    payload.filename = type === 'file' ? file.name : undefined;
-  }
+  const messageKey = await deriveMessageKey(roomMaster);
+  const { encrypted, iv } = await encryptRaw(messageKey, dataToSend);
+  const toSign = dataToSend + timestamp;
+  payload.signature = await signMessage(signingKey, toSign);
+  payload.encryptedData = encrypted;
+  payload.iv = iv;
+  payload.filename = type === 'file' ? file.name : undefined;
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
     sendRelayMessage(`relay-${type}`, payload);
@@ -367,7 +336,7 @@ async function startPeerConnection(targetId, isOfferer) {
   }
   const timeout = setTimeout(() => {
     if (!dataChannels.get(targetId) || dataChannels.get(targetId).readyState !== 'open') {
-      console.log(`P2P failed with ${targetId}, checking relay availability`);
+      console.log(`P2P failed with ${targetId}, switching to relay mode`);
       if (features.enableRelay) {
         useRelay = true;
         showStatusMessage('P2P connection failed, switching to server relay mode.');
@@ -482,7 +451,6 @@ function setupDataChannel(dataChannel, targetId) {
       messages.classList.add('waiting');
       document.getElementById('audioOutputButton').classList.add('hidden');
     }
-    saveRelayStates();
   };
 }
 
@@ -521,44 +489,16 @@ async function processReceivedMessage(data, targetId) {
   let contentOrData = data.content || data.data;
   if (data.encryptedContent || data.encryptedData) {
     try {
-      let mk;
-      if (useRelay) {
-        const senderId = targetId;
-        if (!relayReceiveStates.has(senderId)) {
-          console.warn(`No receive state for sender ${senderId}, initializing`);
-          relayReceiveStates.set(senderId, { chainKey: await deriveChainKey(roomMaster, 'relay-chain-' + senderId), receiveIndex: 0 });
-        }
-        const state = relayReceiveStates.get(senderId);
-        const skip = data.index - state.receiveIndex;
-        if (skip < 0) {
-          console.warn(`Replay message from ${senderId} with index ${data.index}`);
-          return;
-        }
-        if (skip > 100) {
-          console.warn(`Too many skipped messages from ${senderId}, possible DoS`);
-          return;
-        }
-        for (let i = 0; i < skip; i++) {
-          await ratchetDeriveMK(state.chainKey); // derive and discard
-          state.chainKey = await ratchetAdvance(state.chainKey);
-        }
-        mk = await ratchetDeriveMK(state.chainKey);
-        contentOrData = await decryptRaw(mk, data.encryptedContent || data.encryptedData, data.iv);
-        state.chainKey = await ratchetAdvance(state.chainKey);
-        state.receiveIndex = data.index + 1;
-        saveRelayStates();
-      } else {
-        const messageKey = await deriveMessageKey(roomMaster);
-        const encrypted = data.encryptedContent || data.encryptedData;
-        const iv = data.iv;
-        contentOrData = await decryptRaw(messageKey, encrypted, iv);
-        const toVerify = contentOrData + data.timestamp;
-        const valid = await verifyMessage(signingKey, data.signature, toVerify);
-        if (!valid) {
-          console.warn(`Invalid signature for message from ${targetId}`);
-          showStatusMessage('Invalid message signature detected.');
-          return;
-        }
+      const messageKey = await deriveMessageKey(roomMaster);
+      const encrypted = data.encryptedContent || data.encryptedData;
+      const iv = data.iv;
+      contentOrData = await decryptRaw(messageKey, encrypted, iv);
+      const toVerify = contentOrData + data.timestamp;
+      const valid = await verifyMessage(signingKey, data.signature, toVerify);
+      if (!valid) {
+        console.warn(`Invalid signature for message from ${targetId}`);
+        showStatusMessage('Invalid message signature detected.');
+        return;
       }
     } catch (error) {
       console.error(`Decryption/verification failed for message from ${targetId}:`, error);
@@ -725,22 +665,12 @@ async function sendMessage(content) {
     const timestamp = Date.now();
     let payload = { messageId, username, timestamp };
     let contentToSend = sanitizedContent;
-    if (!useRelay) {
-      const messageKey = await deriveMessageKey(roomMaster);
-      const { encrypted, iv } = await encryptRaw(messageKey, contentToSend);
-      const toSign = contentToSend + timestamp;
-      payload.signature = await signMessage(signingKey, toSign);
-      payload.encryptedContent = encrypted;
-      payload.iv = iv;
-    } else {
-      const mk = await ratchetDeriveMK(relaySendingChainKey);
-      const { encrypted, iv } = await encryptRaw(mk, contentToSend);
-      relaySendingChainKey = await ratchetAdvance(relaySendingChainKey);
-      payload.encryptedContent = encrypted;
-      payload.iv = iv;
-      payload.index = relaySendIndex++;
-      saveRelayStates();
-    }
+    const messageKey = await deriveMessageKey(roomMaster);
+    const { encrypted, iv } = await encryptRaw(messageKey, contentToSend);
+    const toSign = contentToSend + timestamp;
+    payload.signature = await signMessage(signingKey, toSign);
+    payload.encryptedContent = encrypted;
+    payload.iv = iv;
     const jsonString = JSON.stringify(payload);
     if (useRelay) {
       sendRelayMessage('relay-message', payload);

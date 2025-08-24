@@ -1,3 +1,4 @@
+// events.js
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -89,6 +90,15 @@ if (typeof window !== 'undefined') {
     setTimeout(triggerCycle, 60000);
   }
   setTimeout(triggerCycle, 60000);
+}
+function refreshAccessToken() {
+  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
+    refreshingToken = true;
+    console.log('Proactively refreshing access token');
+    socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
+  } else {
+    console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
+  }
 }
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
@@ -585,34 +595,6 @@ socket.onmessage = async (event) => {
   }
 };
 
-async function triggerRatchet() {
-  if (!isInitiator || connectedClients.size <= 1) return;
-  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-  let success = 0;
-  for (const cId of connectedClients) {
-    if (cId === clientId) continue;
-    const joiner = clientPublicKeys.get(cId);
-    if (!joiner) {
-      console.warn(`No public keys for client ${cId}, skipping ratchet send`);
-      continue;
-    }
-    try {
-      const { aesKey, kyberCt } = await hybridDeriveAesEncap(keyPair.privateKey, joiner.ecdh, joiner.kyber);
-      const { encrypted, iv } = await encryptBytes(aesKey, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, kyberCt, targetId: cId, code, clientId, token }));
-      success++;
-    } catch (error) {
-      console.error(`Error sending new room key to ${cId}:`, error);
-    }
-  }
-  if (success > 0) {
-    roomMaster = newRoomMaster;
-    signingKey = await deriveSigningKey(roomMaster);
-    console.log('PFS ratchet complete, new roomMaster set.');
-  } else {
-    console.warn('PFS ratchet failed: No keys available to send to any clients.');
-  }
-}
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');
@@ -831,7 +813,7 @@ document.getElementById('imageInput').onchange = (event) => {
   if (file) {
     const type = file.type.startsWith('image/') ? 'image' : 'file';
     sendMedia(file, type);
-  event.target.value = '';
+    event.target.value = '';
   }
 };
 document.getElementById('voiceButton').onclick = () => {

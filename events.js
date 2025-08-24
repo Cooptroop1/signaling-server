@@ -32,7 +32,7 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableAudioToggle: true, enableGrokBot: true, enableP2P: true, enableRelay: true };
 let keyPair;
 let roomMaster;
 let signingKey;
@@ -348,6 +348,7 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
+      updateRecentCodes(code);  // Save to recent
       return;
     }
     if (message.type === 'initiator-changed') {
@@ -379,6 +380,7 @@ socket.onmessage = async (event) => {
         messages.classList.remove('waiting');
         updateMaxClientsUI();
       }
+      updateRecentCodes(code);  // Update on join notify
       return;
     }
     if (message.type === 'client-disconnected') {
@@ -547,21 +549,25 @@ socket.onmessage = async (event) => {
         }
       }
       if (message.type === 'image') {
+        const thumbnail = await generateThumbnail(contentOrData);
         const img = document.createElement('img');
-        img.src = contentOrData;
+        img.src = thumbnail;
+        img.dataset.fullSrc = contentOrData;
         img.style.maxWidth = '100%';
         img.style.borderRadius = '0.5rem';
         img.style.cursor = 'pointer';
         img.setAttribute('alt', 'Received image');
         img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(img);
+        lazyObserver.observe(img);
       } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
-        audio.src = contentOrData;
+        audio.dataset.src = contentOrData;
         audio.controls = true;
         audio.setAttribute('alt', 'Received voice message');
         audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(audio);
+        lazyObserver.observe(audio);
       } else if (message.type === 'file') {
         const link = document.createElement('a');
         link.href = contentOrData;
@@ -1035,6 +1041,10 @@ document.addEventListener('DOMContentLoaded', () => {
       e.target.value = formatted;
     });
   }
+  // Setup lazy observer
+  setupLazyObserver();
+  // Load recent codes
+  loadRecentCodes();
 });
 
 function setupWaitingForJoin(codeParam) {
@@ -1107,5 +1117,42 @@ function setupWaitingForJoin(codeParam) {
       }
     }
     document.getElementById('messageInput')?.focus();
+  }
+}
+
+function setupLazyObserver() {
+  lazyObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const elem = entry.target;
+        if (elem.dataset.src) {
+          elem.src = elem.dataset.src;
+          delete elem.dataset.src;
+          lazyObserver.unobserve(elem);
+        }
+        if (elem.dataset.fullSrc) {
+          elem.src = elem.dataset.fullSrc;
+          delete elem.dataset.fullSrc;
+          lazyObserver.unobserve(elem);
+        }
+      }
+    });
+  }, { rootMargin: '100px' }); // Preload 100px before view
+}
+
+function loadRecentCodes() {
+  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  const recentCodesList = document.getElementById('recentCodesList');
+  recentCodesList.innerHTML = '';
+  if (recentCodes.length > 0) {
+    document.getElementById('recentChats').classList.remove('hidden');
+    recentCodes.forEach(recentCode => {
+      const button = document.createElement('button');
+      button.textContent = recentCode;
+      button.onclick = () => autoConnect(recentCode);
+      recentCodesList.appendChild(button);
+    });
+  } else {
+    document.getElementById('recentChats').classList.add('hidden');
   }
 }

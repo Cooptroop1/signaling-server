@@ -19,6 +19,7 @@ const negotiationQueues = new Map(); // Queue pending negotiations per peer
 let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
 const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
 const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
+let keyVersion = 0; // New: Global key version counter for ratcheting
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -1203,4 +1204,66 @@ async function isWebPSupported() {
     return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
   }
   return false;
+}
+
+async function triggerRatchet() {
+  if (!isInitiator || connectedClients.size <= 1) return;
+  keyVersion++; // Increment version
+  const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  let success = 0;
+  let failures = [];
+  for (const cId of connectedClients) {
+    if (cId === clientId) continue;
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) {
+      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      failures.push(cId);
+      continue;
+    }
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion }));
+      success++;
+    } catch (error) {
+      console.error(`Error sending new room key to ${cId}:`, error);
+      failures.push(cId);
+    }
+  }
+  if (success > 0) {
+    roomMaster = newRoomMaster;
+    signingKey = await deriveSigningKey(roomMaster);
+    console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster set.`);
+    if (failures.length > 0) {
+      console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying in 10s...`);
+      setTimeout(() => triggerRatchetPartial(failures, newRoomMaster, keyVersion), 10000);
+    }
+  } else {
+    console.warn(`PFS ratchet failed (version ${keyVersion}): No keys available to send to any clients.`);
+    keyVersion--; // Revert version on full failure
+  }
+}
+
+// New: Function to retry ratchet for failed clients
+async function triggerRatchetPartial(failedClients, newRoomMaster, version) {
+  let retrySuccess = 0;
+  for (const cId of failedClients) {
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) continue;
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version }));
+      retrySuccess++;
+    } catch (error) {
+      console.error(`Retry failed for ${cId}:`, error);
+    }
+  }
+  if (retrySuccess > 0) {
+    console.log(`Partial ratchet retry successful for ${retrySuccess} clients (version ${version}).`);
+  } else {
+    console.warn(`Partial ratchet retry failed for all remaining clients (version ${version}).`);
+  }
 }

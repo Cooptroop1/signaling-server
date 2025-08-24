@@ -862,18 +862,18 @@ function processSignalingQueue() {
 async function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
   code = codeParam;
-  initialContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  usernameContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
+  initialContainer.hidden = true;
+  connectContainer.hidden = true;
+  usernameContainer.hidden = true;
+  chatContainer.hidden = false;
+  codeDisplayElement.hidden = true;
+  copyCodeButton.hidden = true;
   if (validateCode(codeParam)) {
     if (validateUsername(username)) {
       console.log('Valid username and code, joining chat');
       codeDisplayElement.textContent = `Using code: ${code}`;
-      codeDisplayElement.classList.remove('hidden');
-      copyCodeButton.classList.remove('hidden');
+      codeDisplayElement.hidden = false;
+      copyCodeButton.hidden = false;
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN) {
@@ -890,8 +890,8 @@ async function autoConnect(codeParam) {
       updateFeaturesUI();
     } else {
       console.log('No valid username, prompting for username');
-      usernameContainer.classList.remove('hidden');
-      chatContainer.classList.add('hidden');
+      usernameContainer.hidden = false;
+      chatContainer.hidden = true;
       statusElement.textContent = 'Please enter a username to join the chat';
       document.getElementById('usernameInput').value = username || '';
       document.getElementById('usernameInput')?.focus();
@@ -904,11 +904,11 @@ async function autoConnect(codeParam) {
         }
         username = usernameInput;
         localStorage.setItem('username', username);
-        usernameContainer.classList.add('hidden');
-        chatContainer.classList.remove('hidden');
+        usernameContainer.hidden = true;
+        chatContainer.hidden = false;
         codeDisplayElement.textContent = `Using code: ${code}`;
-        codeDisplayElement.classList.remove('hidden');
-        copyCodeButton.classList.remove('hidden');
+        codeDisplayElement.hidden = false;
+        copyCodeButton.hidden = false;
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
@@ -918,9 +918,9 @@ async function autoConnect(codeParam) {
     }
   } else {
     console.log('Invalid code, showing initial container');
-    initialContainer.classList.remove('hidden');
-    usernameContainer.classList.add('hidden');
-    chatContainer.classList.add('hidden');
+    initialContainer.hidden = false;
+    usernameContainer.hidden = true;
+    chatContainer.hidden = true;
     showStatusMessage('Invalid code format. Please enter a valid code.');
     document.getElementById('connectToggleButton')?.focus();
   }
@@ -1217,4 +1217,16 @@ async function isWebPSupported() {
     return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
   }
   return false;
+}
+
+function updateRecentCodes(code) {
+  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  if (recentCodes.includes(code)) {
+    recentCodes = recentCodes.filter(c => c !== code);
+  }
+  recentCodes.unshift(code);
+  if (recentCodes.length > 5) {
+    recentCodes = recentCodes.slice(0, 5);
+  }
+  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
 }

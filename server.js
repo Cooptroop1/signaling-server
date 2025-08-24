@@ -80,6 +80,7 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const AUDIT_FILE = path.join(__dirname, 'audit.log'); // New: Separate audit log file
 const FEATURES_FILE = path.join('/data', 'features.json');
 const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
@@ -94,6 +95,7 @@ const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
 const processedMessageIds = new Map();
+const clientSizeLimits = new Map(); // New: Per-client size tracking
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -827,6 +829,12 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
+        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
+        if (!restrictClientSize(data.clientId, payloadSize)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
         if (payloadKey && payloadKey.length > 9333333) {
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
           incrementFailure(clientIp);
@@ -1055,6 +1063,24 @@ function restrictRate(ws) {
   return true;
 }
 
+// New: Per-client size cap (1MB/min total)
+function restrictClientSize(clientId, size) {
+  const now = Date.now();
+  const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
+  if (now - sizeLimit.startTime >= 60000) {
+    sizeLimit.totalSize = 0;
+    sizeLimit.startTime = now;
+  }
+  sizeLimit.totalSize += size;
+  clientSizeLimits.set(clientId, sizeLimit);
+  if (sizeLimit.totalSize > 1048576) { // 1MB
+    console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
+    fs.appendFileSync(AUDIT_FILE, `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
+    return false;
+  }
+  return true;
+}
+
 function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const now = Date.now();
@@ -1096,6 +1122,7 @@ function incrementFailure(ip) {
   ipFailureCounts.set(hashedIp, failure);
   if (failure.count % 5 === 0) {
     console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
+    fs.appendFileSync(AUDIT_FILE, `${new Date().toISOString()} - High failure anomaly for hashed IP ${hashedIp}: ${failure.count} failures\n`);
   }
   if (failure.count >= 10) {
     const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];

@@ -302,8 +302,14 @@ function validateMessage(data) {
     case 'get-random-codes':
       break;
     case 'relay-message':
-      if (!data.content || typeof data.content !== 'string') {
-        return { valid: false, error: 'relay-message: content required as string' };
+      if ((!data.content && !data.encryptedContent) || typeof (data.content || data.encryptedContent) !== 'string') {
+        return { valid: false, error: 'relay-message: content or encryptedContent required as string' };
+      }
+      if (data.encryptedContent && !data.iv) {
+        return { valid: false, error: 'relay-message: iv required for encryptedContent' };
+      }
+      if (data.encryptedContent && !data.signature) {
+        return { valid: false, error: 'relay-message: signature required for encryptedContent' };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: 'relay-message: messageId required as string' };
@@ -318,8 +324,14 @@ function validateMessage(data) {
     case 'relay-image':
     case 'relay-voice':
     case 'relay-file':
-      if (!data.data || !isValidBase64(data.data)) {
-        return { valid: false, error: data.type + ': invalid data (base64)' };
+      if ((!data.data && !data.encryptedData) || !isValidBase64(data.data || data.encryptedData)) {
+        return { valid: false, error: data.type + ': invalid data or encryptedData (base64)' };
+      }
+      if (data.encryptedData && !data.iv) {
+        return { valid: false, error: data.type + ': iv required for encryptedData' };
+      }
+      if (data.encryptedData && !data.signature) {
+        return { valid: false, error: data.type + ': signature required for encryptedData' };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: data.type + ': messageId required as string' };
@@ -455,7 +467,11 @@ wss.on('connection', (ws, req) => {
         data.type === 'encrypted-room-key' && 'iv',
         data.type === 'new-room-key' && 'encrypted',
         data.type === 'new-room-key' && 'iv',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'data'
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'data',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature'
       ];
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -804,13 +820,13 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
           return;
         }
-        const payload = data.type === 'relay-message' ? data.content : data.data;
-        if (payload && (typeof payload !== 'string' || (data.type !== 'relay-message' && !isValidBase64(payload)))) {
+        const payloadKey = data.encryptedContent || data.encryptedData || data.content || data.data;
+        if (payloadKey && (typeof payloadKey !== 'string' || (data.encryptedContent || data.encryptedData || data.type !== 'relay-message') && !isValidBase64(payloadKey))) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
           incrementFailure(clientIp);
           return;
         }
-        if (payload && payload.length > 9333333) {
+        if (payloadKey && payloadKey.length > 9333333) {
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
           incrementFailure(clientIp);
           return;
@@ -842,10 +858,14 @@ wss.on('connection', (ws, req) => {
               type: data.type.replace('relay-', ''),
               messageId: data.messageId,
               username: data.username,
-              content: data.type === 'relay-message' ? data.content : undefined,
-              data: data.type !== 'relay-message' ? data.data : undefined,
+              content: data.content,
+              encryptedContent: data.encryptedContent,
+              data: data.data,
+              encryptedData: data.encryptedData,
               filename: data.filename,
-              timestamp: data.timestamp
+              timestamp: data.timestamp,
+              iv: data.iv,
+              signature: data.signature
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
           }

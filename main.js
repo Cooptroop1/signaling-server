@@ -1,3 +1,4 @@
+
 // main.js
 let turnUsername = '';
 let turnCredential = '';
@@ -189,9 +190,13 @@ async function startPeerConnection(targetId, isOfferer) {
     useRelay = true;
     const privacyStatus = document.getElementById('privacyStatus');
     if (privacyStatus) {
-      privacyStatus.textContent = 'E2EE (Relay)';
+      privacyStatus.textContent = 'Relay Mode (E2EE)';
       privacyStatus.classList.remove('hidden');
     }
+    isConnected = true;
+    inputContainer.classList.remove('hidden');
+    messages.classList.remove('waiting');
+    updateMaxClientsUI();
     return;
   }
   if (peerConnections.has(targetId)) {
@@ -275,7 +280,7 @@ async function startPeerConnection(targetId, isOfferer) {
       updateMaxClientsUI();
       const privacyStatus = document.getElementById('privacyStatus');
       if (privacyStatus) {
-        privacyStatus.textContent = 'E2EE (P2P)';
+        privacyStatus.textContent = 'E2E Encrypted (P2P)';
         privacyStatus.classList.remove('hidden');
       }
     }
@@ -327,9 +332,12 @@ async function startPeerConnection(targetId, isOfferer) {
         showStatusMessage('P2P connection failed, switching to server relay mode (with E2EE).');
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
-          privacyStatus.textContent = 'E2EE (Relay)';
+          privacyStatus.textContent = 'Relay Mode (E2EE)';
           privacyStatus.classList.remove('hidden');
         }
+        isConnected = true;
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
       } else {
         showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
         cleanupPeerConnection(targetId);

@@ -1,4 +1,4 @@
-// server1.js (updated: make index optional in relay validation; add optional signature check)
+// server1.js (fixed: added validateUsername/validateCode; made index optional in validateMessage)
 
 const WebSocket = require('ws');
 const fs = require('fs');
@@ -156,6 +156,16 @@ if (fs.existsSync(FEATURES_FILE)) {
 }
 
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+
+function validateUsername(username) {
+  const regex = /^[a-zA-Z0-9]{1,16}$/;
+  return username && regex.test(username);
+}
+
+function validateCode(code) {
+  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+  return code && regex.test(code);
+}
 
 function saveFeatures() {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
@@ -325,11 +335,8 @@ function validateMessage(data) {
         if (!data.iv || !isValidBase64(data.iv)) {
           return { valid: false, error: 'relay-message: invalid iv format' };
         }
-        if (data.index !== undefined && typeof data.index !== 'number') {
-          return { valid: false, error: 'relay-message: index must be number if provided' };
-        }
-        if (data.signature && typeof data.signature !== 'string') {
-          return { valid: false, error: 'relay-message: signature must be string if provided' };
+        if (data.signature && !isValidBase64(data.signature)) {
+          return { valid: false, error: 'relay-message: invalid signature format' };
         }
       }
       break;
@@ -355,11 +362,8 @@ function validateMessage(data) {
         if (!data.iv || !isValidBase64(data.iv)) {
           return { valid: false, error: data.type + ': invalid iv format' };
         }
-        if (data.index !== undefined && typeof data.index !== 'number') {
-          return { valid: false, error: data.type + ': index must be number if provided' };
-        }
-        if (data.signature && typeof data.signature !== 'string') {
-          return { valid: false, error: data.type + ': signature must be string if provided' };
+        if (data.signature && !isValidBase64(data.signature)) {
+          return { valid: false, error: data.type + ': invalid signature format' };
         }
       }
       break;

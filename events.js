@@ -320,24 +320,8 @@ socket.onmessage = async (event) => {
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Generated initial roomMaster and signingKey for initiator.');
-        isConnected = true;
-        if (pendingTotpSecret) {
-          socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
-          showTotpSecretModal(pendingTotpSecret.display);
-          pendingTotpSecret = null;
-        }
         setInterval(triggerRatchet, 5 * 60 * 1000);
-        if (useRelay) {
-          const privacyStatus = document.getElementById('privacyStatus');
-          if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode (E2EE)';
-            privacyStatus.classList.remove('hidden');
-          }
-          isConnected = true;
-          inputContainer.classList.remove('hidden');
-          messages.classList.remove('waiting');
-          updateMaxClientsUI();
-        }
+        // For initiator in relay, do NOT set isConnected yet - wait for join-notify
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
@@ -372,10 +356,17 @@ socket.onmessage = async (event) => {
         renegotiate(message.clientId);
       }
       if (useRelay) {
-        isConnected = true;
-        inputContainer.classList.remove('hidden');
-        messages.classList.remove('waiting');
-        updateMaxClientsUI();
+        if (totalClients >= 2 && !isConnected) {
+          isConnected = true;
+          inputContainer.classList.remove('hidden');
+          messages.classList.remove('waiting');
+          updateMaxClientsUI();
+          const privacyStatus = document.getElementById('privacyStatus');
+          if (privacyStatus) {
+            privacyStatus.textContent = 'Relay Mode (E2EE)';
+            privacyStatus.classList.remove('hidden');
+          }
+        }
       }
       return;
     }
@@ -399,6 +390,7 @@ socket.onmessage = async (event) => {
       if (totalClients <= 1) {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
+        isConnected = false;
       }
       return;
     }
@@ -457,7 +449,7 @@ socket.onmessage = async (event) => {
         roomMaster = new Uint8Array(roomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Room master successfully imported.');
-        if (useRelay) {
+        if (useRelay && !isConnected) {
           isConnected = true;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {

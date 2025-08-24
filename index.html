@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -619,6 +618,20 @@
  background-color: white !important;
  min-width: 300px;
  }
+ #recentChats {
+ margin-top: 1rem;
+ }
+ #recentCodesList button {
+ background-color: #3b82f6;
+ color: white;
+ padding: 0.5rem;
+ border-radius: 0.5rem;
+ margin-bottom: 0.5rem;
+ width: 100%;
+ }
+ #recentCodesList button:hover {
+ background-color: #1d4ed8;
+ }
  </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
@@ -633,6 +646,10 @@
  <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
  <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
  <button id="connect2FAChatButton" class="bg-teal-500 text-white px-4 py-2 rounded w-full hover:bg-teal-600 transition-colors" aria-label="Connect to 2FA Room">Connect to 2FA Room</button>
+ <div id="recentChats" class="mt-4">
+  <h2 class="text-xl font-bold mb-2">Recent Chats</h2>
+  <div id="recentCodesList"></div>
+ </div>
  </div>
  <div id="usernameContainer" class="hidden">
  <label for="usernameInput" class="sr-only">Enter your username</label>

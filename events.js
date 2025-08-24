@@ -301,9 +301,6 @@ socket.onmessage = async (event) => {
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
       return;
     }
-    if (message.type === 'error') {
-      // ... (existing error handling)
-    }
     if (message.type === 'init') {
       clientId = message.clientId;
       maxClients = Math.min(message.maxClients, 10);
@@ -319,7 +316,7 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
-        // Generate initial roomMaster and signingKey for E2E
+        // Generate initial roomMaster and signingKey for E2EE
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Generated initial roomMaster and signingKey for initiator.');
@@ -333,7 +330,7 @@ socket.onmessage = async (event) => {
         if (useRelay) {
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode';
+            privacyStatus.textContent = 'Relay Mode (E2EE)';
             privacyStatus.classList.remove('hidden');
           }
           isConnected = true;
@@ -427,7 +424,7 @@ socket.onmessage = async (event) => {
       handleCandidate(message.candidate, message.clientId);
       return;
     }
-    if (message.type === 'public-key' && isInitiator && !useRelay) {
+    if (message.type === 'public-key' && isInitiator) {
       try {
         clientPublicKeys.set(message.clientId, message.publicKey);
         const joinerPublic = await importPublicKey(message.publicKey);
@@ -451,7 +448,7 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'encrypted-room-key' && !useRelay) {
+    if (message.type === 'encrypted-room-key') {
       try {
         initiatorPublic = message.publicKey;
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
@@ -464,7 +461,7 @@ socket.onmessage = async (event) => {
           isConnected = true;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode';
+            privacyStatus.textContent = 'Relay Mode (E2EE)';
             privacyStatus.classList.remove('hidden');
           }
           inputContainer.classList.remove('hidden');
@@ -477,7 +474,7 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'new-room-key' && message.targetId === clientId && !useRelay) {
+    if (message.type === 'new-room-key' && message.targetId === clientId) {
       try {
         const importedInitiatorPublic = await importPublicKey(initiatorPublic);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
@@ -494,16 +491,20 @@ socket.onmessage = async (event) => {
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
-      console.log('Received plain relay message:', message); // Debug
+      console.log('Received relay message:', message); // Debug
       const payload = {
         messageId: message.messageId,
         username: message.username,
-        content: message.type === 'message' ? message.content : undefined,
-        data: message.type !== 'message' ? message.data : undefined,
+        content: message.content,
+        encryptedContent: message.encryptedContent,
+        data: message.data,
+        encryptedData: message.encryptedData,
         filename: message.filename,
-        timestamp: Number(message.timestamp) || Date.now() // Ensure valid timestamp
+        timestamp: Number(message.timestamp) || Date.now(), // Ensure valid timestamp
+        iv: message.iv,
+        signature: message.signature
       };
-      if (!payload.username || (!payload.content && !payload.data) || isNaN(payload.timestamp)) {
+      if (!payload.username || ((!payload.content && !payload.encryptedContent) && (!payload.data && !payload.encryptedData)) || isNaN(payload.timestamp)) {
         console.error('Invalid payload in relay message:', payload);
         showStatusMessage('Invalid message received.');
         return;
@@ -518,31 +519,51 @@ socket.onmessage = async (event) => {
       timeSpan.textContent = new Date(payload.timestamp).toLocaleTimeString();
       messageDiv.appendChild(timeSpan);
       messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+      let contentOrData = payload.content || payload.data;
+      if (payload.encryptedContent || payload.encryptedData) {
+        try {
+          const messageKey = await deriveMessageKey(roomMaster);
+          const encrypted = payload.encryptedContent || payload.encryptedData;
+          const iv = payload.iv;
+          contentOrData = await decryptRaw(messageKey, encrypted, iv);
+          const toVerify = contentOrData + payload.timestamp;
+          const valid = await verifyMessage(signingKey, payload.signature, toVerify);
+          if (!valid) {
+            console.warn(`Invalid signature for relay message`);
+            showStatusMessage('Invalid message signature detected.');
+            return;
+          }
+        } catch (error) {
+          console.error(`Decryption/verification failed for relay message:`, error);
+          showStatusMessage('Failed to decrypt/verify message.');
+          return;
+        }
+      }
       if (message.type === 'image') {
         const img = document.createElement('img');
-        img.src = payload.data;
+        img.src = contentOrData;
         img.style.maxWidth = '100%';
         img.style.borderRadius = '0.5rem';
         img.style.cursor = 'pointer';
         img.setAttribute('alt', 'Received image');
-        img.addEventListener('click', () => createImageModal(payload.data, 'messageInput'));
+        img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(img);
       } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
-        audio.src = payload.data;
+        audio.src = contentOrData;
         audio.controls = true;
         audio.setAttribute('alt', 'Received voice message');
-        audio.addEventListener('click', () => createAudioModal(payload.data, 'messageInput'));
+        audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(audio);
       } else if (message.type === 'file') {
         const link = document.createElement('a');
-        link.href = payload.data;
+        link.href = contentOrData;
         link.download = payload.filename || 'file';
         link.textContent = `Download ${payload.filename || 'file'}`;
         link.setAttribute('alt', 'Received file');
         messageDiv.appendChild(link);
       } else {
-        messageDiv.appendChild(document.createTextNode(sanitizeMessage(payload.content)));
+        messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
       }
       messages.prepend(messageDiv);
       messages.scrollTop = 0;

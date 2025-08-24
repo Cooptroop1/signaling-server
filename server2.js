@@ -831,7 +831,7 @@ module.exports = function(shared) {
             clientId: ws.clientId,
             totalClients: room.clients.size,
             isInitiator
-          });
+          };
         }
       }
     });

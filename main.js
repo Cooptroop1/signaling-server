@@ -184,18 +184,20 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     let element;
     if (type === 'image') {
       element = document.createElement('img');
-      element.src = dataToSend;
+      element.dataset.src = dataToSend;
       element.style.maxWidth = '100%';
       element.style.borderRadius = '0.5rem';
       element.style.cursor = 'pointer';
       element.setAttribute('alt', 'Sent image');
       element.addEventListener('click', () => createImageModal(dataToSend, `${type}Button`));
+      lazyObserver.observe(element);
     } else if (type === 'voice') {
       element = document.createElement('audio');
-      element.src = dataToSend;
+      element.dataset.src = dataToSend;
       element.controls = true;
       element.setAttribute('alt', 'Sent voice message');
       element.addEventListener('click', () => createAudioModal(dataToSend, `${type}Button`));
+      lazyObserver.observe(element);
     } else {
       element = document.createElement('a');
       element.href = dataToSend;
@@ -562,21 +564,25 @@ async function processReceivedMessage(data, targetId) {
     }
   }
   if (data.type === 'image') {
+    const thumbnail = await generateThumbnail(contentOrData);
     const img = document.createElement('img');
-    img.src = contentOrData;
+    img.src = thumbnail;
+    img.dataset.fullSrc = contentOrData;
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
     img.setAttribute('alt', 'Received image');
     img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
     messageDiv.appendChild(img);
+    lazyObserver.observe(img);
   } else if (data.type === 'voice') {
     const audio = document.createElement('audio');
-    audio.src = contentOrData;
+    audio.dataset.src = contentOrData;
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
     messageDiv.appendChild(audio);
+    lazyObserver.observe(audio);
   } else if (data.type === 'file') {
     const link = document.createElement('a');
     link.href = contentOrData;
@@ -862,18 +868,18 @@ function processSignalingQueue() {
 async function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
   code = codeParam;
-  initialContainer.hidden = true;
-  connectContainer.hidden = true;
-  usernameContainer.hidden = true;
-  chatContainer.hidden = false;
-  codeDisplayElement.hidden = true;
-  copyCodeButton.hidden = true;
+  initialContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
   if (validateCode(codeParam)) {
     if (validateUsername(username)) {
       console.log('Valid username and code, joining chat');
       codeDisplayElement.textContent = `Using code: ${code}`;
-      codeDisplayElement.hidden = false;
-      copyCodeButton.hidden = false;
+      codeDisplayElement.classList.remove('hidden');
+      copyCodeButton.classList.remove('hidden');
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN) {
@@ -890,8 +896,8 @@ async function autoConnect(codeParam) {
       updateFeaturesUI();
     } else {
       console.log('No valid username, prompting for username');
-      usernameContainer.hidden = false;
-      chatContainer.hidden = true;
+      usernameContainer.classList.remove('hidden');
+      chatContainer.classList.add('hidden');
       statusElement.textContent = 'Please enter a username to join the chat';
       document.getElementById('usernameInput').value = username || '';
       document.getElementById('usernameInput')?.focus();
@@ -904,11 +910,11 @@ async function autoConnect(codeParam) {
         }
         username = usernameInput;
         localStorage.setItem('username', username);
-        usernameContainer.hidden = true;
-        chatContainer.hidden = false;
+        usernameContainer.classList.add('hidden');
+        chatContainer.classList.remove('hidden');
         codeDisplayElement.textContent = `Using code: ${code}`;
-        codeDisplayElement.hidden = false;
-        copyCodeButton.hidden = false;
+        codeDisplayElement.classList.remove('hidden');
+        copyCodeButton.classList.remove('hidden');
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
@@ -918,9 +924,9 @@ async function autoConnect(codeParam) {
     }
   } else {
     console.log('Invalid code, showing initial container');
-    initialContainer.hidden = false;
-    usernameContainer.hidden = true;
-    chatContainer.hidden = true;
+    initialContainer.classList.remove('hidden');
+    usernameContainer.classList.add('hidden');
+    chatContainer.classList.add('hidden');
     showStatusMessage('Invalid code format. Please enter a valid code.');
     document.getElementById('connectToggleButton')?.focus();
   }
@@ -1219,14 +1225,18 @@ async function isWebPSupported() {
   return false;
 }
 
-function updateRecentCodes(code) {
-  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
-  if (recentCodes.includes(code)) {
-    recentCodes = recentCodes.filter(c => c !== code);
-  }
-  recentCodes.unshift(code);
-  if (recentCodes.length > 5) {
-    recentCodes = recentCodes.slice(0, 5);
-  }
-  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
+async function generateThumbnail(dataURL, width = 100, height = 100) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = dataURL;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.5));
+    };
+    img.onerror = () => resolve(dataURL); // Fallback to full if error
+  });
 }

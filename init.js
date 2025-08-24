@@ -28,25 +28,6 @@ function validateCode(code) {
   return code && regex.test(code);
 }
 
-let keepAliveTimer = null;
-function startKeepAlive() {
-  if (keepAliveTimer) clearInterval(keepAliveTimer);
-  keepAliveTimer = setInterval(() => {
-    if (typeof socket !== 'undefined' && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'ping', clientId, token }));
-      log('info', 'Sent keepalive ping');
-    }
-  }, 50000); // Adjusted to 50 seconds
-}
-
-function stopKeepAlive() {
-  if (keepAliveTimer) {
-    clearInterval(keepAliveTimer);
-    keepAliveTimer = null;
-    log('info', 'Stopped keepalive');
-  }
-}
-
 function cleanupPeerConnection(targetId) {
   const peerConnection = peerConnections.get(targetId);
   const dataChannel = dataChannels.get(targetId);

@@ -358,6 +358,12 @@ function validateMessage(data) {
         return { valid: false, error: 'toggle-feature: feature required as string' };
       }
       break;
+    case 'export-stats-csv': // New
+    case 'export-logs-csv': // New
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: data.type + ': secret required as string' };
+      }
+      break;
     case 'ping':
     case 'pong':
       break;
@@ -972,6 +978,25 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
+      // New: Handle export requests
+      if (data.type === 'export-stats-csv') {
+        if (data.secret === ADMIN_SECRET) {
+          const csv = generateStatsCSV();
+          ws.send(JSON.stringify({ type: 'export-stats-csv', csv }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+        return;
+      }
+      if (data.type === 'export-logs-csv') {
+        if (data.secret === ADMIN_SECRET) {
+          const csv = generateLogsCSV();
+          ws.send(JSON.stringify({ type: 'export-logs-csv', csv }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+        return;
+      }
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
         return;
@@ -1262,6 +1287,36 @@ function computeAggregate(days) {
     }
   }
   return { users, connections };
+}
+
+// New: Generate CSV for stats
+function generateStatsCSV() {
+  let csv = 'Period,Users,Connections\n';
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  csv += `Daily,${dailyUsers.get(day)?.size || 0},${dailyConnections.get(day)?.size || 0}\n`;
+  const weekly = computeAggregate(7);
+  csv += `Weekly,${weekly.users},${weekly.connections}\n`;
+  const monthly = computeAggregate(30);
+  csv += `Monthly,${monthly.users},${monthly.connections}\n`;
+  const yearly = computeAggregate(365);
+  csv += `Yearly,${yearly.users},${yearly.connections}\n`;
+  csv += `All-Time,${allTimeUsers.size},N/A\n`;
+  return csv;
+}
+
+// New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
+function generateLogsCSV() {
+  let csv = 'Timestamp,Event\n';
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
+  logContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  const auditContent = fs.readFileSync(`${AUDIT_FILE_BASE}.log`, 'utf8');
+  auditContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  return csv;
 }
 
 function broadcast(code, message) {

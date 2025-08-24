@@ -1021,6 +1021,20 @@ document.addEventListener('DOMContentLoaded', () => {
   if (codeParam && validateCode(codeParam)) {
     setupWaitingForJoin(codeParam);
   }
+  // New: Auto-format code input
+  const codeInput = document.getElementById('codeInput');
+  if (codeInput) {
+    codeInput.addEventListener('input', (e) => {
+      let val = e.target.value.replace(/[^a-zA-Z0-9]/gi, ''); // Remove non-alphanum, case insensitive
+      val = val.substring(0, 16);
+      let formatted = '';
+      for (let i = 0; i < val.length; i++) {
+        if (i > 0 && i % 4 === 0) formatted += '-';
+        formatted += val[i];
+      }
+      e.target.value = formatted;
+    });
+  }
 });
 
 function setupWaitingForJoin(codeParam) {

@@ -1,4 +1,4 @@
-
+// events.js (updated with relay key rotation on join/leave)
 
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
@@ -314,13 +314,12 @@ socket.onmessage = async (event) => {
       updateFeaturesUI();
       if (roomMaster) {
         if (useRelay) {
-          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
+          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-chain-' + clientId);
           relaySendIndex = 0;
-          connectedClients.forEach(id => {
+          connectedClients.forEach(async (id) => {
             if (id !== clientId) {
-              deriveChainKey(roomMaster, 'relay-recv-' + id).then(key => {
-                relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
-              });
+              const key = await deriveChainKey(roomMaster, 'relay-chain-' + id);
+              relayReceiveStates.set(id, { chainKey: key, receiveIndex: 0 });
             }
           });
           const privacyStatus = document.getElementById('privacyStatus');
@@ -346,7 +345,7 @@ socket.onmessage = async (event) => {
         }
         setInterval(triggerRatchet, 5 * 60 * 1000);
         if (useRelay) {
-          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-send-' + clientId);
+          relaySendingChainKey = await deriveChainKey(roomMaster, 'relay-chain-' + clientId);
           relaySendIndex = 0;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
@@ -389,14 +388,9 @@ socket.onmessage = async (event) => {
         startPeerConnection(message.clientId, true);
       }
       if (useRelay && roomMaster) {
-        deriveChainKey(roomMaster, 'relay-recv-' + message.clientId).then(key => {
-          relayReceiveStates.set(message.clientId, { chainKey: key, receiveIndex: 0 });
-          console.log(`Initialized receive ratchet for sender ${message.clientId}`);
-        });
-        isConnected = true;
-        inputContainer.classList.remove('hidden');
-        messages.classList.remove('waiting');
-        updateMaxClientsUI();
+        const key = await deriveChainKey(roomMaster, 'relay-recv-' + message.clientId);
+        relayReceiveStates.set(message.clientId, { chainKey: key, receiveIndex: 0 });
+        console.log(`Derived receive ratchet for new sender ${message.clientId}`);
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);

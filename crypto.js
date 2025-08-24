@@ -70,7 +70,7 @@ async function importPublicKey(base64) {
 
 async function encrypt(text, master) {
   try {
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
+    const salt = window.crypto.getRandomValues(new Uint8Array(16)); // Unique per session
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       master,
@@ -82,7 +82,7 @@ async function encrypt(text, master) {
       { name: 'HKDF', salt, info: new Uint8Array(0), hash: 'SHA-256' },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
-      false,
+      false, // Non-extractable
       ['encrypt', 'decrypt']
     );
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -118,7 +118,7 @@ async function decrypt(encrypted, iv, salt, master) {
       { name: 'HKDF', salt: base64ToArrayBuffer(salt), info: new Uint8Array(0), hash: 'SHA-256' },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
-      false,
+      false, // Non-extractable
       ['encrypt', 'decrypt']
     );
     const decoded = await window.crypto.subtle.decrypt(
@@ -181,7 +181,7 @@ async function deriveSharedKey(privateKey, publicKey) {
       "raw",
       sharedBits,
       "AES-GCM",
-      false,
+      false, // Non-extractable
       ["encrypt", "decrypt"]
     );
     console.log('deriveSharedKey successful');
@@ -262,7 +262,7 @@ async function verifyMessage(signingKey, signature, data) {
 
 async function deriveSigningKey(master) {
   try {
-    const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // Fixed non-empty salt
+    const salt = window.crypto.getRandomValues(new Uint8Array(16)); // Unique per session
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       master,
@@ -274,7 +274,7 @@ async function deriveSigningKey(master) {
       { name: 'HKDF', salt, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'HMAC', hash: 'SHA-256' },
-      false,
+      false, // Non-extractable
       ['sign', 'verify']
     );
     console.log('deriveSigningKey successful');
@@ -287,7 +287,7 @@ async function deriveSigningKey(master) {
 
 async function deriveMessageKey(master) {
   try {
-    const salt = new Uint8Array([17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]); // Fixed non-empty salt, different from signing
+    const salt = window.crypto.getRandomValues(new Uint8Array(16)); // Unique per session
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       master,
@@ -299,7 +299,7 @@ async function deriveMessageKey(master) {
       { name: 'HKDF', salt, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
-      false,
+      false, // Non-extractable
       ['encrypt', 'decrypt']
     );
     console.log('deriveMessageKey successful');

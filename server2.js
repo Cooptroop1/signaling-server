@@ -1,4 +1,4 @@
-// server2.js (fixed syntax, made index optional in relay validation)
+// server2.js (fixed: make index optional in relay validation; no other changes)
 
 const fs = require('fs');
 const crypto = require('crypto');
@@ -831,7 +831,7 @@ module.exports = function(shared) {
             clientId: ws.clientId,
             totalClients: room.clients.size,
             isInitiator
-          };
+          });
         }
       }
     });

@@ -63,6 +63,18 @@
     .feature-toggle button.off {
       background-color: #ef4444;
     }
+    #exportContainer {
+      margin-top: 2rem;
+      text-align: left;
+    }
+    #exportContainer button {
+      background-color: #3b82f6;
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      margin-right: 1rem;
+    }
   </style>
 </head>
 <body>
@@ -108,6 +120,11 @@
         <button id="toggleRelay" aria-label="Toggle relay mode">Loading...</button>
       </div>
     </div>
+    <div id="exportContainer" class="hidden">
+      <h2 class="text-xl font-bold mb-4">Exports</h2>
+      <button id="exportStatsButton" aria-label="Export stats to CSV">Export Stats (CSV)</button>
+      <button id="exportLogsButton" aria-label="Export logs to CSV">Export Logs (CSV)</button>
+    </div>
     <div class="text-center mt-4">
       <a href="index.html" class="text-blue-500 hover:underline">Back to Chat</a>
     </div>
@@ -119,6 +136,7 @@
     const submitButton = document.getElementById('submitButton');
     const statsDisplay = document.getElementById('statsDisplay');
     const featuresContainer = document.getElementById('featuresContainer');
+    const exportContainer = document.getElementById('exportContainer');
     let clientId = Math.random().toString(36).substr(2, 9);
     let token = '';
     let reconnectAttempts = 0;
@@ -175,6 +193,28 @@
       }
     }
 
+    // New: Function to export data to CSV
+    function exportToCSV(data, filename) {
+      const csvContent = "data:text/csv;charset=utf-8," + data;
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement('a');
+      link.setAttribute('href', encodedUri);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // New: Request export from server
+    function requestExport(type) {
+      const secret = adminPasswordInput.value.trim();
+      if (socket.readyState === WebSocket.OPEN && token) {
+        socket.send(JSON.stringify({ type, secret, clientId, token, csrfToken }));
+      } else {
+        showStatusMessage('Connection not open. Please reconnect.');
+      }
+    }
+
     socket.onopen = () => {
       console.log('Admin page WebSocket opened');
       if (socket.readyState === WebSocket.OPEN) {
@@ -219,6 +259,7 @@
           });
         } else if (data.type === 'features') {
           featuresContainer.classList.remove('hidden');
+          exportContainer.classList.remove('hidden'); // Show export buttons
           document.getElementById('toggleService').textContent = data.enableService ? 'On' : 'Off';
           document.getElementById('toggleService').classList.toggle('off', !data.enableService);
           document.getElementById('toggleImages').textContent = data.enableImages ? 'On' : 'Off';
@@ -269,6 +310,12 @@
           if (!data.enableService) {
             statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
           }
+        } else if (data.type === 'export-stats-csv') {
+          exportToCSV(data.csv, 'stats.csv');
+          showStatusMessage('Stats exported to CSV.');
+        } else if (data.type === 'export-logs-csv') {
+          exportToCSV(data.csv, 'logs.csv');
+          showStatusMessage('Logs exported to CSV.');
         } else if (data.type === 'error') {
           if (data.message.includes('Service has been disabled by admin.')) {
             statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
@@ -277,6 +324,7 @@
           statsDisplay.innerHTML = '';
           statsDisplay.classList.add('hidden');
           featuresContainer.classList.add('hidden');
+          exportContainer.classList.add('hidden');
           showStatusMessage(data.message || 'Error fetching stats. Please try again.');
           console.error('Server error:', data.message);
           if (data.message.includes('Invalid or expired token')) {
@@ -304,6 +352,7 @@
         showStatusMessage('Error fetching stats. Please try again.');
         statsDisplay.classList.add('hidden');
         featuresContainer.classList.add('hidden');
+        exportContainer.classList.add('hidden');
       }
     };
 
@@ -312,6 +361,7 @@
       showStatusMessage('Connection error. Reconnecting...');
       statsDisplay.classList.add('hidden');
       featuresContainer.classList.add('hidden');
+      exportContainer.classList.add('hidden');
     };
 
     socket.onclose = () => {
@@ -319,6 +369,7 @@
       showStatusMessage('Disconnected. Reconnecting...');
       statsDisplay.classList.add('hidden');
       featuresContainer.classList.add('hidden');
+      exportContainer.classList.add('hidden');
       if (reconnectAttempts >= maxReconnectAttempts) {
         showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
         return;
@@ -353,6 +404,10 @@
     document.getElementById('toggleGrokBot').onclick = () => toggleFeature('grokBot');
     document.getElementById('toggleP2P').onclick = () => toggleFeature('p2P');
     document.getElementById('toggleRelay').onclick = () => toggleFeature('relay');
+
+    // New: Export buttons handlers
+    document.getElementById('exportStatsButton').onclick = () => requestExport('export-stats-csv');
+    document.getElementById('exportLogsButton').onclick = () => requestExport('export-logs-csv');
   </script>
 </body>
 </html>

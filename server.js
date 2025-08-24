@@ -80,6 +80,7 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const AUDIT_FILE_BASE = path.join(__dirname, 'audit'); // Base name without extension
 const FEATURES_FILE = path.join('/data', 'features.json');
 const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
@@ -94,6 +95,7 @@ const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
 const processedMessageIds = new Map();
+const clientSizeLimits = new Map(); // New: Per-client size tracking
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -1188,6 +1190,37 @@ function logStats(data) {
     }
   });
 }
+
+// New: Audit log rotation function
+function rotateAuditLog() {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const currentFile = `${AUDIT_FILE_BASE}.log`;
+  const rotatedFile = `${AUDIT_FILE_BASE}-${today}.log`;
+
+  if (fs.existsSync(currentFile)) {
+    fs.renameSync(currentFile, rotatedFile);
+    console.log(`Rotated audit log to ${rotatedFile}`);
+  }
+
+  // Delete files older than 7 days
+  const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
+  files.forEach(file => {
+    const fileDate = file.match(/audit-(\d{4}-\d{2}-\d{2})\.log/)[1];
+    const fileTime = new Date(fileDate).getTime();
+    if (now.getTime() - fileTime > 7 * 24 * 60 * 60 * 1000) {
+      fs.unlinkSync(path.join(__dirname, file));
+      console.log(`Deleted old audit log: ${file}`);
+    }
+  });
+
+  // Create new current file
+  fs.writeFileSync(currentFile, '');
+}
+
+// Call rotation on startup and every 24 hours
+rotateAuditLog();
+setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
 
 function updateLogFile() {
   const now = new Date();

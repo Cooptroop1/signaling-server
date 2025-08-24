@@ -17,50 +17,51 @@ const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
 
-async function sendMedia(file, type) {
-  const validTypes = {
-    image: ['image/jpeg', 'image/png'],
-    voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
-  };
-  if ((type === 'image' && !features.enableImages) || (type === 'voice' && !features.enableVoice)) {
-    showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} messages are disabled by admin.`);
-    document.getElementById(`${type}Button`)?.focus();
+async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
+  if (!username || (dataChannels.size === 0 && !useRelay)) {
+    showStatusMessage('Error: Ensure you are connected and have a username.');
     return;
   }
-  if (!file || (type !== 'file' && !validTypes[type]?.includes(file.type)) || !username || dataChannels.size === 0 && !useRelay) {
-    showStatusMessage(`Error: Select a ${type === 'image' ? 'JPEG/PNG image' : type === 'voice' ? 'valid audio format' : 'valid file'} and ensure you are connected.`);
-    document.getElementById(`${type}Button`)?.focus();
-    return;
+
+  let dataToSend = content || base64;
+  if (type === 'image' || type === 'file') {
+    if (!features.enableImages) {
+      showStatusMessage('Error: Images/Files are disabled by admin.');
+      return;
+    }
+  } else if (type === 'voice') {
+    if (!features.enableVoice) {
+      showStatusMessage('Error: Voice messages are disabled by admin.');
+      return;
+    }
   }
-  if (file.size > 5 * 1024 * 1024) {
+
+  if (file && file.size > 5 * 1024 * 1024) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
-    document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  const rateLimits = type === 'image' ? imageRateLimits : voiceRateLimits;
+
+  const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
   const now = performance.now();
-  const rateLimit = rateLimits.get(clientId) || { count: 0, startTime: now };
+  const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
     rateLimit.count = 0;
     rateLimit.startTime = now;
   }
   rateLimit.count += 1;
-  rateLimits.set(clientId, rateLimit);
+  rateLimitsMap.set(clientId, rateLimit);
   if (rateLimit.count > 5) {
     showStatusMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} rate limit reached (5/min). Please wait.`);
-    document.getElementById(`${type}Button`)?.focus();
     return;
   }
-  let base64;
-  if (type === 'image') {
+
+  if (file && type === 'image') {
     const maxWidth = 640;
     const maxHeight = 360;
     let quality = 0.4;
-    if (file.size > 3 * 1024 * 1024) {
-      quality = 0.3;
-    } else if (file.size > 1 * 1024 * 1024) {
-      quality = 0.35;
-    }
+    if (file.size > 3 * 1024 * 1024) quality = 0.3;
+    else if (file.size > 1 * 1024 * 1024) quality = 0.35;
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
@@ -82,33 +83,33 @@ async function sendMedia(file, type) {
     canvas.width = width;
     canvas.height = height;
     ctx.drawImage(img, 0, 0, width, height);
-    const format = isWebPSupported() ? 'image/webp' : 'image/jpeg';
-    base64 = canvas.toDataURL(format, quality);
+    const format = await isWebPSupported() ? 'image/webp' : 'image/jpeg';
+    dataToSend = canvas.toDataURL(format, quality);
     URL.revokeObjectURL(img.src);
-  } else if (type === 'voice') {
-    base64 = await new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(file);
-    });
-  } else {
-    base64 = await new Promise(resolve => {
+  } else if (file) {
+    dataToSend = await new Promise(resolve => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.readAsDataURL(file);
     });
   }
+
   const messageId = generateMessageId();
   const timestamp = Date.now();
-  let payload = { messageId, type, username, timestamp };
-  let dataToSend = base64;
+  const sanitizedContent = content ? sanitizeMessage(content) : null;
+  let payload = { messageId, username, timestamp, type };
   const messageKey = await deriveMessageKey(roomMaster);
-  const { encrypted, iv } = await encryptRaw(messageKey, dataToSend);
-  const toSign = dataToSend + timestamp;
+  const { encrypted, iv } = await encryptRaw(messageKey, dataToSend || sanitizedContent);
+  const toSign = (dataToSend || sanitizedContent) + timestamp;
   payload.signature = await signMessage(signingKey, toSign);
-  payload.encryptedData = encrypted;
+  if (dataToSend) {
+    payload.encryptedData = encrypted;
+    payload.filename = file?.name;
+  } else {
+    payload.encryptedContent = encrypted;
+  }
   payload.iv = iv;
-  payload.filename = type === 'file' ? file.name : undefined;
+
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
     sendRelayMessage(`relay-${type}`, payload);
@@ -119,7 +120,7 @@ async function sendMedia(file, type) {
       for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
         chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
       }
-      dataChannels.forEach(async (dataChannel) => {
+      for (const dataChannel of dataChannels.values()) {
         if (dataChannel.readyState === 'open') {
           for (let index = 0; index < chunks.length; index++) {
             const chunk = chunks[index];
@@ -127,19 +128,20 @@ async function sendMedia(file, type) {
             await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
           }
         }
-      });
+      }
     } else {
-      dataChannels.forEach((dataChannel) => {
+      for (const dataChannel of dataChannels.values()) {
         if (dataChannel.readyState === 'open') {
           dataChannel.send(jsonString);
         }
-      });
+      }
     }
   } else {
     showStatusMessage('Error: No connections.');
     return;
   }
-  const messages = document.getElementById('messages');
+
+  const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-bubble self';
   const timeSpan = document.createElement('span');
@@ -147,40 +149,75 @@ async function sendMedia(file, type) {
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   messageDiv.appendChild(document.createTextNode(`${username}: `));
-  if (type === 'image') {
-    const imgElement = document.createElement('img');
-    imgElement.src = base64;
-    imgElement.style.maxWidth = '100%';
-    imgElement.style.borderRadius = '0.5rem';
-    imgElement.style.cursor = 'pointer';
-    imgElement.setAttribute('alt', 'Sent image');
-    imgElement.addEventListener('click', () => createImageModal(base64, `${type}Button`));
-    messageDiv.appendChild(imgElement);
-  } else if (type === 'voice') {
-    const audioElement = document.createElement('audio');
-    audioElement.src = base64;
-    audioElement.controls = true;
-    audioElement.setAttribute('alt', 'Sent voice message');
-    audioElement.addEventListener('click', () => createAudioModal(base64, `${type}Button`));
-    messageDiv.appendChild(audioElement);
+
+  if (type === 'image' || type === 'voice' || type === 'file') {
+    let element;
+    if (type === 'image') {
+      element = document.createElement('img');
+      element.src = dataToSend;
+      element.style.maxWidth = '100%';
+      element.style.borderRadius = '0.5rem';
+      element.style.cursor = 'pointer';
+      element.setAttribute('alt', 'Sent image');
+      element.addEventListener('click', () => createImageModal(dataToSend, `${type}Button`));
+    } else if (type === 'voice') {
+      element = document.createElement('audio');
+      element.src = dataToSend;
+      element.controls = true;
+      element.setAttribute('alt', 'Sent voice message');
+      element.addEventListener('click', () => createAudioModal(dataToSend, `${type}Button`));
+    } else {
+      element = document.createElement('a');
+      element.href = dataToSend;
+      element.download = file.name;
+      element.textContent = `Download ${file.name}`;
+      element.setAttribute('alt', 'Sent file');
+    }
+    messageDiv.appendChild(element);
   } else {
-    const link = document.createElement('a');
-    link.href = base64;
-    link.download = file.name;
-    link.textContent = `Download ${file.name}`;
-    link.setAttribute('alt', 'Sent file');
-    messageDiv.appendChild(link);
+    messageDiv.appendChild(document.createTextNode(sanitizedContent));
   }
-  messages.prepend(messageDiv);
-  messages.scrollTop = 0;
+
+  messagesElement.prepend(messageDiv);
+  messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
-  document.getElementById(`${type}Button`)?.focus();
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
-    triggerRatchet();
+    await triggerRatchet();
   }
 }
 
+async function sendMessage(content) {
+  if (!content) return;
+  if (grokBotActive && content.startsWith('/grok ')) {
+    const query = content.slice(6).trim();
+    if (query) await sendToGrok(query);
+  } else if (content === '/ratchet' && isInitiator) {
+    await triggerRatchet();
+    showStatusMessage('Key ratchet triggered manually.');
+  } else {
+    await prepareAndSendMessage({ content });
+  }
+  const messageInput = document.getElementById('messageInput');
+  messageInput.value = '';
+  messageInput.style.height = '2.5rem';
+  messageInput?.focus();
+}
+
+async function sendMedia(file, type) {
+  const validTypes = {
+    image: ['image/jpeg', 'image/png'],
+    voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
+  };
+  if (type !== 'file' && !validTypes[type]?.includes(file.type)) {
+    showStatusMessage(`Error: Invalid file type for ${type}.`);
+    return;
+  }
+  await prepareAndSendMessage({ type, file });
+  document.getElementById(`${type}Button`)?.focus();
+}
+
+// Rest of the code remains the same...
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
   if (!features.enableP2P) {
@@ -616,93 +653,6 @@ function handleCandidate(candidate, targetId) {
     const queue = candidatesQueues.get(targetId) || [];
     queue.push({ type: 'candidate', candidate });
     candidatesQueues.set(targetId, queue);
-  }
-}
-
-async function sendMessage(content) {
-  if (content && username) {
-    if (grokBotActive && content.startsWith('/grok ')) {
-      const query = content.slice(6).trim();
-      if (query) {
-        await sendToGrok(query);
-      }
-      const messageInput = document.getElementById('messageInput');
-      messageInput.value = '';
-      messageInput.style.height = '2.5rem';
-      messageInput?.focus();
-      return;
-    }
-    if (content === '/ratchet' && isInitiator) {
-      triggerRatchet();
-      showStatusMessage('Key ratchet triggered manually.');
-      const messageInput = document.getElementById('messageInput');
-      messageInput.value = '';
-      messageInput.style.height = '2.5rem';
-      messageInput?.focus();
-      return;
-    }
-    const messageId = generateMessageId();
-    const sanitizedContent = sanitizeMessage(content);
-    const timestamp = Date.now();
-    let payload = { messageId, username, timestamp };
-    const messageKey = await deriveMessageKey(roomMaster);
-    const { encrypted, iv } = await encryptRaw(messageKey, sanitizedContent);
-    const toSign = sanitizedContent + timestamp;
-    payload.signature = await signMessage(signingKey, toSign);
-    payload.encryptedContent = encrypted;
-    payload.iv = iv;
-    const jsonString = JSON.stringify(payload);
-    if (useRelay) {
-      sendRelayMessage('relay-message', payload);
-    } else if (dataChannels.size > 0) {
-      if (jsonString.length > CHUNK_SIZE) {
-        const chunkId = generateMessageId();
-        const chunks = [];
-        for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
-          chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
-        }
-        dataChannels.forEach(async (dataChannel) => {
-          if (dataChannel.readyState === 'open') {
-            for (let index = 0; index < chunks.length; index++) {
-              const chunk = chunks[index];
-              dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
-              await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
-            }
-          }
-        });
-      } else {
-        dataChannels.forEach((dataChannel) => {
-          if (dataChannel.readyState === 'open') {
-            dataChannel.send(jsonString);
-          }
-        });
-      }
-    } else {
-      showStatusMessage('Error: No connections.');
-      return;
-    }
-    const messages = document.getElementById('messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message-bubble self';
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'timestamp';
-    timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
-    messageDiv.appendChild(timeSpan);
-    messageDiv.appendChild(document.createTextNode(`${username}: ${sanitizedContent}`));
-    messages.prepend(messageDiv);
-    messages.scrollTop = 0;
-    processedMessageIds.add(messageId);
-    const messageInput = document.getElementById('messageInput');
-    messageInput.value = '';
-    messageInput.style.height = '2.5rem';
-    messageInput?.focus();
-    messageCount++;
-    if (isInitiator && messageCount % 100 === 0) {
-      triggerRatchet();
-    }
-  } else {
-    showStatusMessage('Error: No connections or username not set.');
-    document.getElementById('messageInput')?.focus();
   }
 }
 
@@ -1176,7 +1126,7 @@ function startVoiceRecording() {
         showStatusMessage('No audio recorded. Speak louder or check microphone.');
         return;
       }
-      sendMedia(audioBlob, 'voice');
+      await sendMedia(audioBlob, 'voice');
       stream.getTracks().forEach(track => track.stop());
       mediaRecorder = null;
       voiceChunks = [];

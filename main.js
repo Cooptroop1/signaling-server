@@ -1,5 +1,3 @@
-
-// main.js
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -264,7 +262,7 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Connection state for ${targetId}: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
       console.log(`Connection failed with ${targetId}`);
-      showStatusMessage('Peer connection failed, attempting to reconnect...');
+      // Removed showStatusMessage to suppress transient error
       cleanupPeerConnection(targetId);
       const retryCount = retryCounts.get(targetId) || 0;
       if (retryCount < maxRetries) {
@@ -321,7 +319,7 @@ async function startPeerConnection(targetId, isOfferer) {
       sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
     }).catch(error => {
       console.error(`Error creating offer for ${targetId}:`, error);
-      showStatusMessage('Failed to establish peer connection.');
+      // Removed showStatusMessage to suppress transient error
     });
   }
   const timeout = setTimeout(() => {
@@ -329,7 +327,7 @@ async function startPeerConnection(targetId, isOfferer) {
       console.log(`P2P failed with ${targetId}, checking relay availability`);
       if (features.enableRelay) {
         useRelay = true;
-        showStatusMessage('P2P connection failed, switching to server relay mode (with E2EE).');
+        // Removed showStatusMessage to suppress transient error; user sees final connection status
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
           privacyStatus.textContent = 'Relay Mode (E2EE)';
@@ -419,11 +417,11 @@ function setupDataChannel(dataChannel, targetId) {
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
-    showStatusMessage('Error in peer connection.');
+    // Removed showStatusMessage to suppress transient error
   };
   dataChannel.onclose = () => {
     console.log(`Data channel closed with ${targetId}`);
-    showStatusMessage('Peer disconnected.');
+    // Removed showStatusMessage to suppress transient error
     cleanupPeerConnection(targetId);
     messageRateLimits.delete(targetId);
     imageRateLimits.delete(targetId);
@@ -560,7 +558,7 @@ async function handleOffer(offer, targetId) {
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling offer from ${targetId}:`, error);
-    showStatusMessage('Failed to connect to peer.');
+    // Removed showStatusMessage to suppress transient error
   }
 }
 
@@ -589,9 +587,7 @@ async function handleAnswer(answer, targetId) {
       if (item.type === 'answer') {
         peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
           console.error(`Error applying queued answer from ${targetId}:`, error);
-          if (error.name !== 'InvalidStateError') {
-            showStatusMessage('Error processing peer response.');
-          }
+          // Removed showStatusMessage to suppress transient error
         });
       } else {
         handleCandidate(item.candidate, targetId);
@@ -600,9 +596,7 @@ async function handleAnswer(answer, targetId) {
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling answer from ${targetId}:`, error);
-    if (error.name !== 'InvalidStateError') {
-      showStatusMessage('Error connecting to peer.');
-    }
+    // Removed showStatusMessage to suppress transient error
   }
 }
 
@@ -616,7 +610,7 @@ function handleCandidate(candidate, targetId) {
   if (peerConnection && peerConnection.remoteDescription) {
     peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(error => {
       console.error(`Error adding ICE candidate from ${targetId}:`, error);
-      showStatusMessage('Error establishing peer connection.');
+      // Removed showStatusMessage to suppress transient error
     });
   } else {
     const queue = candidatesQueues.get(targetId) || [];
@@ -792,7 +786,7 @@ async function renegotiate(targetId) {
         sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
       } catch (error) {
         console.error(`Error renegotiating with ${targetId}:`, error);
-        showStatusMessage('Failed to renegotiate peer connection.');
+        // Removed showStatusMessage to suppress transient error
       } finally {
         renegotiating.set(targetId, false);
       }

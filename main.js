@@ -1,4 +1,4 @@
-// main.js (updated: align relay encryption to P2P-style (no double ratchet, use messageKey + signing); seamless P2P->relay switch with UI log)
+// main.js (updated: remove relay ratchet from sendMedia/sendMessage; use P2P-style everywhere)
 
 let turnUsername = '';
 let turnCredential = '';
@@ -18,16 +18,6 @@ let messageCount = 0;
 const CHUNK_SIZE = 8192; // Reduced to 8192 for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
-
-function loadRelayStates() {
-  // No longer needed, as relay now uses P2P-style encryption
-  console.log('Relay states not loaded (using P2P-style encryption in relay mode)');
-}
-
-function saveRelayStates() {
-  // No longer needed
-  console.log('Relay states not saved (using P2P-style encryption in relay mode)');
-}
 
 async function sendMedia(file, type) {
   const validTypes = {
@@ -203,10 +193,7 @@ async function startPeerConnection(targetId, isOfferer) {
       privacyStatus.textContent = 'Relay Mode';
       privacyStatus.classList.remove('hidden');
     }
-    isConnected = true;
-    inputContainer.classList.remove('hidden');
-    messages.classList.remove('waiting');
-    updateMaxClientsUI();
+    messages.classList.add('waiting');
     return;
   }
   if (peerConnections.has(targetId)) {
@@ -345,9 +332,7 @@ async function startPeerConnection(targetId, isOfferer) {
           privacyStatus.textContent = 'Relay Mode';
           privacyStatus.classList.remove('hidden');
         }
-        isConnected = true;
-        inputContainer.classList.remove('hidden');
-        messages.classList.remove('waiting');
+        messages.classList.add('waiting');
       } else {
         showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
         cleanupPeerConnection(targetId);

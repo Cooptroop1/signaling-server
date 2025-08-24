@@ -80,7 +80,6 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const AUDIT_FILE = path.join(__dirname, 'audit.log'); // New: Separate audit log file
 const FEATURES_FILE = path.join('/data', 'features.json');
 const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
@@ -95,7 +94,6 @@ const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
 const processedMessageIds = new Map();
-const clientSizeLimits = new Map(); // New: Per-client size tracking
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -1157,11 +1155,11 @@ function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
-    clientId: data.clientId,
-    username: data.username ? crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex') : '',
-    targetId: data.targetId || '',
-    code: data.code || '',
-    event: data.event || '',
+    clientId: validator.escape(data.clientId || ''), // Escape all strings
+    username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
+    targetId: validator.escape(data.targetId || ''),
+    code: validator.escape(data.code || ''),
+    event: validator.escape(data.event || ''),
     totalClients: data.totalClients || 0,
     isInitiator: data.isInitiator || false,
     timestamp,
@@ -1174,12 +1172,12 @@ function logStats(data) {
     if (!dailyConnections.has(day)) {
       dailyConnections.set(day, new Set());
     }
-    dailyUsers.get(day).add(data.clientId);
-    allTimeUsers.add(data.clientId);
+    dailyUsers.get(day).add(stats.clientId);
+    allTimeUsers.add(stats.clientId);
     if (data.event === 'webrtc-connection' && data.targetId) {
-      dailyUsers.get(day).add(data.targetId);
-      allTimeUsers.add(data.targetId);
-      const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
+      dailyUsers.get(day).add(stats.targetId);
+      allTimeUsers.add(stats.targetId);
+      const connectionKey = `${stats.clientId}-${stats.targetId}-${stats.code}`;
       dailyConnections.get(day).add(connectionKey);
     }
   }

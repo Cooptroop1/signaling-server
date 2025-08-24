@@ -1,3 +1,4 @@
+// server2.js (updated: make index optional in validateMessage for relay encrypted; no other changes)
 
 const fs = require('fs');
 const crypto = require('crypto');
@@ -685,7 +686,7 @@ module.exports = function(shared) {
                 filename: data.filename,
                 timestamp: data.timestamp,
                 iv: data.iv,
-                index: data.index,
+                signature: data.signature,
                 clientId: senderId
               }));
               console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
@@ -834,5 +835,5 @@ module.exports = function(shared) {
         }
       }
     });
-  });
+  };
 };

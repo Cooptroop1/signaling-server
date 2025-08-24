@@ -1,4 +1,4 @@
-// events.js (updated: remove relay-specific derives in join-notify/init, condition key exchange on !useRelay)
+// events.js (updated: delay UI show in relay until peer joins; seamless P2P fallback mimics join flow)
 
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
@@ -319,17 +319,13 @@ socket.onmessage = async (event) => {
             privacyStatus.textContent = 'Relay Mode';
             privacyStatus.classList.remove('hidden');
           }
-          isConnected = true;
-          inputContainer.classList.remove('hidden');
-          messages.classList.remove('waiting');
-          updateMaxClientsUI();
+          messages.classList.add('waiting');
         }
       }
       if (isInitiator) {
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Generated initial roomMaster and signingKey for initiator.');
-        isConnected = true;
         if (pendingTotpSecret) {
           socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
           showTotpSecretModal(pendingTotpSecret.display);
@@ -342,10 +338,7 @@ socket.onmessage = async (event) => {
             privacyStatus.textContent = 'Relay Mode';
             privacyStatus.classList.remove('hidden');
           }
-          isConnected = true;
-          inputContainer.classList.remove('hidden');
-          messages.classList.remove('waiting');
-          updateMaxClientsUI();
+          messages.classList.add('waiting');
         }
       } else {
         if (!useRelay) {
@@ -379,11 +372,11 @@ socket.onmessage = async (event) => {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
-      if (useRelay) {
+      if (totalClients > 1) {
         isConnected = true;
+        newSessionButton.classList.remove('hidden');
         inputContainer.classList.remove('hidden');
         messages.classList.remove('waiting');
-        updateMaxClientsUI();
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
@@ -408,6 +401,7 @@ socket.onmessage = async (event) => {
       updateMaxClientsUI();
       updateDots();
       if (totalClients <= 1) {
+        isConnected = false;
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
       }
@@ -513,7 +507,7 @@ socket.onmessage = async (event) => {
         filename: message.filename,
         timestamp: Number(message.timestamp) || Date.now(), // Ensure valid timestamp
         iv: message.iv,
-        index: message.index,
+        signature: message.signature,
         clientId: message.clientId
       };
       if (!payload.username || (!payload.content && !payload.data && !payload.encryptedContent && !payload.encryptedData) || isNaN(payload.timestamp)) {

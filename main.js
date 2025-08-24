@@ -103,21 +103,16 @@ async function sendMedia(file, type) {
   const timestamp = Date.now();
   let payload = { messageId, type, username, timestamp };
   let dataToSend = base64;
-  if (!useRelay) {
-    const messageKey = await deriveMessageKey(roomMaster);
-    const { encrypted, iv } = await encryptRaw(messageKey, dataToSend);
-    const toSign = dataToSend + timestamp;
-    payload.signature = await signMessage(signingKey, toSign);
-    payload.encryptedData = encrypted;
-    payload.iv = iv;
-    payload.filename = type === 'file' ? file.name : undefined;
-  } else {
-    payload.data = base64;
-    payload.filename = type === 'file' ? file.name : undefined;
-  }
+  const messageKey = await deriveMessageKey(roomMaster);
+  const { encrypted, iv } = await encryptRaw(messageKey, dataToSend);
+  const toSign = dataToSend + timestamp;
+  payload.signature = await signMessage(signingKey, toSign);
+  payload.encryptedData = encrypted;
+  payload.iv = iv;
+  payload.filename = type === 'file' ? file.name : undefined;
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
-    sendRelayMessage(`relay-${type}`, { data: base64, messageId, username, timestamp, filename: type === 'file' ? file.name : undefined });
+    sendRelayMessage(`relay-${type}`, payload);
   } else if (dataChannels.size > 0) {
     if (jsonString.length > CHUNK_SIZE) {
       const chunkId = generateMessageId();
@@ -194,7 +189,7 @@ async function startPeerConnection(targetId, isOfferer) {
     useRelay = true;
     const privacyStatus = document.getElementById('privacyStatus');
     if (privacyStatus) {
-      privacyStatus.textContent = 'Relay Mode';
+      privacyStatus.textContent = 'Relay Mode (E2EE)';
       privacyStatus.classList.remove('hidden');
     }
     isConnected = true;
@@ -333,10 +328,10 @@ async function startPeerConnection(targetId, isOfferer) {
       console.log(`P2P failed with ${targetId}, checking relay availability`);
       if (features.enableRelay) {
         useRelay = true;
-        showStatusMessage('P2P connection failed, switching to server relay mode.');
+        showStatusMessage('P2P connection failed, switching to server relay mode (with E2EE).');
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
-          privacyStatus.textContent = 'Relay Mode';
+          privacyStatus.textContent = 'Relay Mode (E2EE)';
           privacyStatus.classList.remove('hidden');
         }
         isConnected = true;
@@ -655,20 +650,15 @@ async function sendMessage(content) {
     const sanitizedContent = sanitizeMessage(content);
     const timestamp = Date.now();
     let payload = { messageId, username, timestamp };
-    let contentToSend = sanitizedContent;
-    if (!useRelay) {
-      const messageKey = await deriveMessageKey(roomMaster);
-      const { encrypted, iv } = await encryptRaw(messageKey, contentToSend);
-      const toSign = contentToSend + timestamp;
-      payload.signature = await signMessage(signingKey, toSign);
-      payload.encryptedContent = encrypted;
-      payload.iv = iv;
-    } else {
-      payload.content = sanitizedContent;
-    }
+    const messageKey = await deriveMessageKey(roomMaster);
+    const { encrypted, iv } = await encryptRaw(messageKey, sanitizedContent);
+    const toSign = sanitizedContent + timestamp;
+    payload.signature = await signMessage(signingKey, toSign);
+    payload.encryptedContent = encrypted;
+    payload.iv = iv;
     const jsonString = JSON.stringify(payload);
     if (useRelay) {
-      sendRelayMessage('relay-message', { content: sanitizedContent, messageId, username, timestamp });
+      sendRelayMessage('relay-message', payload);
     } else if (dataChannels.size > 0) {
       if (jsonString.length > CHUNK_SIZE) {
         const chunkId = generateMessageId();

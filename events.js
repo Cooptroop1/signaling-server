@@ -1,5 +1,3 @@
-
-// events.js
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -36,14 +34,16 @@ let token = '';
 let refreshToken = '';
 let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableGrokBot: true };
 let keyPair;
+let kyberInstance;
+let kyberKeys = {};
 let roomMaster;
 let signingKey;
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
 let connectedClients = new Set();
-let clientPublicKeys = new Map();
-let initiatorPublic;
+let clientPublicKeys = new Map(); // Now {ecdh: base64, kyber: base64}
+let initiatorPublic = {}; // {ecdh: base64}
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 if (typeof window !== 'undefined') {
   socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
@@ -76,6 +76,8 @@ if (typeof window !== 'undefined') {
       true,
       ['deriveKey', 'deriveBits']
     );
+    kyberInstance = new MlKem768();
+    [kyberKeys.pk, kyberKeys.sk] = await kyberInstance.generateKeyPair();
   })();
   let cycleTimeout;
   function triggerCycle() {
@@ -317,7 +319,6 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
-        // Generate initial roomMaster and signingKey for E2EE
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Generated initial roomMaster and signingKey for initiator.');
@@ -341,7 +342,8 @@ socket.onmessage = async (event) => {
         }
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
-        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
+        const kyberPublic = arrayBufferToBase64(kyberKeys.pk);
+        socket.send(JSON.stringify({ type: 'public-key', publicKey, kyberPublic, clientId, code, token }));
       }
       updateMaxClientsUI();
       updateDots();
@@ -427,16 +429,16 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'public-key' && isInitiator) {
       try {
-        clientPublicKeys.set(message.clientId, message.publicKey);
-        const joinerPublic = await importPublicKey(message.publicKey);
-        const sharedKey = await deriveSharedKey(keyPair.privateKey, joinerPublic);
-        const { encrypted, iv } = await encryptBytes(sharedKey, roomMaster);
+        clientPublicKeys.set(message.clientId, { ecdh: message.publicKey, kyber: message.kyberPublic });
+        const { aesKey, kyberCt } = await hybridDeriveAesEncap(keyPair.privateKey, message.publicKey, message.kyberPublic);
+        const { encrypted, iv } = await encryptBytes(aesKey, roomMaster);
         const myPublic = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({
           type: 'encrypted-room-key',
           encryptedKey: encrypted,
           iv,
           publicKey: myPublic,
+          kyberCt,
           targetId: message.clientId,
           code,
           clientId,
@@ -451,10 +453,9 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'encrypted-room-key') {
       try {
-        initiatorPublic = message.publicKey;
-        const initiatorPublicImported = await importPublicKey(initiatorPublic);
-        const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
-        const roomMasterBuffer = await decryptBytes(sharedKey, message.encryptedKey, message.iv);
+        initiatorPublic = { ecdh: message.publicKey };
+        const aesKey = await hybridDeriveAesDecap(keyPair.privateKey, message.publicKey, message.kyberCt, kyberKeys.sk);
+        const roomMasterBuffer = await decryptBytes(aesKey, message.encryptedKey, message.iv);
         roomMaster = new Uint8Array(roomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('Room master successfully imported.');
@@ -477,9 +478,8 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'new-room-key' && message.targetId === clientId) {
       try {
-        const importedInitiatorPublic = await importPublicKey(initiatorPublic);
-        const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
-        const newRoomMasterBuffer = await decryptBytes(shared, message.encrypted, message.iv);
+        const aesKey = await hybridDeriveAesDecap(keyPair.privateKey, initiatorPublic.ecdh, message.kyberCt, kyberKeys.sk);
+        const newRoomMasterBuffer = await decryptBytes(aesKey, message.encrypted, message.iv);
         roomMaster = new Uint8Array(newRoomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
         console.log('New room master received and set for PFS.');
@@ -492,7 +492,7 @@ socket.onmessage = async (event) => {
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
-      console.log('Received relay message:', message); // Debug
+      console.log('Received relay message:', message);
       const payload = {
         messageId: message.messageId,
         username: message.username,
@@ -501,7 +501,7 @@ socket.onmessage = async (event) => {
         data: message.data,
         encryptedData: message.encryptedData,
         filename: message.filename,
-        timestamp: Number(message.timestamp) || Date.now(), // Ensure valid timestamp
+        timestamp: Number(message.timestamp) || Date.now(),
         iv: message.iv,
         signature: message.signature
       };
@@ -585,32 +585,21 @@ socket.onmessage = async (event) => {
   }
 };
 
-function refreshAccessToken() {
-  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
-    refreshingToken = true;
-    console.log('Proactively refreshing access token');
-    socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
-  } else {
-    console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
-  }
-}
-
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
   let success = 0;
   for (const cId of connectedClients) {
     if (cId === clientId) continue;
-    const publicKey = clientPublicKeys.get(cId);
-    if (!publicKey) {
-      console.warn(`No public key for client ${cId}, skipping ratchet send`);
+    const joiner = clientPublicKeys.get(cId);
+    if (!joiner) {
+      console.warn(`No public keys for client ${cId}, skipping ratchet send`);
       continue;
     }
     try {
-      const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
-      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      const { aesKey, kyberCt } = await hybridDeriveAesEncap(keyPair.privateKey, joiner.ecdh, joiner.kyber);
+      const { encrypted, iv } = await encryptBytes(aesKey, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, kyberCt, targetId: cId, code, clientId, token }));
       success++;
     } catch (error) {
       console.error(`Error sending new room key to ${cId}:`, error);
@@ -724,7 +713,6 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
-  console.log('Username set in localStorage:', username);
   code = generateCode();
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -767,7 +755,6 @@ document.getElementById('connectButton').onclick = () => {
   }
   username = usernameInput;
   localStorage.setItem('username', username);
-  console.log('Username set in localStorage:', username);
   code = inputCode;
   codeDisplayElement.textContent = `Using code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -844,7 +831,7 @@ document.getElementById('imageInput').onchange = (event) => {
   if (file) {
     const type = file.type.startsWith('image/') ? 'image' : 'file';
     sendMedia(file, type);
-    event.target.value = '';
+  event.target.value = '';
   }
 };
 document.getElementById('voiceButton').onclick = () => {
@@ -897,7 +884,7 @@ document.getElementById('copyCodeButton').onclick = () => {
     }, 2000);
   }).catch(err => {
     console.error('Failed to copy text: ', err);
-    showStatusMessage('Failed to copy code.');
+    showStatusMessage('Failed to copy code. ');
   });
   copyCodeButton?.focus();
 };

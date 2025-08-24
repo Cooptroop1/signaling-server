@@ -1,4 +1,3 @@
-// utils.js
 function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
@@ -11,9 +10,8 @@ function showStatusMessage(message, duration = 3000) {
 }
 
 function sanitizeMessage(content) {
-  const div = document.createElement('div');
-  div.textContent = content;
-  return div.innerHTML.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Switch to DOMPurify for better sanitization
+  return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); // Plain text only, no HTML
 }
 
 function generateMessageId() {
@@ -38,7 +36,7 @@ function startKeepAlive() {
       socket.send(JSON.stringify({ type: 'ping', clientId, token }));
       log('info', 'Sent keepalive ping');
     }
-  }, 50000);  // Adjusted to 50 seconds
+  }, 50000); // Adjusted to 50 seconds
 }
 
 function stopKeepAlive() {

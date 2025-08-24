@@ -835,5 +835,5 @@ module.exports = function(shared) {
         }
       }
     });
-  };
+  });
 };

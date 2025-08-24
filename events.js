@@ -631,10 +631,8 @@ async function triggerRatchet() {
     signingKey = await deriveSigningKey(roomMaster);
     console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster set.`);
     if (failures.length > 0) {
-      console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying in 10s...`);
-      setTimeout(() => {
-        triggerRatchetPartial(failures, newRoomMaster, keyVersion);
-      }, 10000);
+      console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
+      triggerRatchetPartial(failures, newRoomMaster, keyVersion, 1); // Start retry with count 1
     }
   } else {
     console.warn(`PFS ratchet failed (version ${keyVersion}): No keys available to send to any clients.`);
@@ -642,12 +640,25 @@ async function triggerRatchet() {
   }
 }
 
-// New: Function to retry ratchet for failed clients
-async function triggerRatchetPartial(failedClients, newRoomMaster, version) {
+// Updated: Function to retry ratchet for failed clients with backoff and max retries
+async function triggerRatchetPartial(failedClients, newRoomMaster, version, retryCount) {
+  if (retryCount > 3) {
+    console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
+    return;
+  }
+  const backoffTimes = [10000, 30000, 60000]; // 10s, 30s, 60s
+  const delay = backoffTimes[retryCount - 1];
+  console.log(`Scheduling retry ${retryCount} in ${delay / 1000}s for version ${version}`);
+  await new Promise(resolve => setTimeout(resolve, delay));
+
   let retrySuccess = 0;
+  let newFailures = [];
   for (const cId of failedClients) {
     const publicKey = clientPublicKeys.get(cId);
-    if (!publicKey) continue;
+    if (!publicKey) {
+      newFailures.push(cId);
+      continue;
+    }
     try {
       const importedPublic = await importPublicKey(publicKey);
       const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
@@ -655,13 +666,18 @@ async function triggerRatchetPartial(failedClients, newRoomMaster, version) {
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version }));
       retrySuccess++;
     } catch (error) {
-      console.error(`Retry failed for ${cId}:`, error);
+      console.error(`Retry ${retryCount} failed for ${cId}:`, error);
+      newFailures.push(cId);
     }
   }
   if (retrySuccess > 0) {
-    console.log(`Partial ratchet retry successful for ${retrySuccess} clients (version ${version}).`);
+    console.log(`Partial ratchet retry ${retryCount} successful for ${retrySuccess} clients (version ${version}).`);
+  }
+  if (newFailures.length > 0) {
+    console.warn(`Still failures after retry ${retryCount}: ${newFailures.join(', ')}. Trying again...`);
+    triggerRatchetPartial(newFailures, newRoomMaster, version, retryCount + 1);
   } else {
-    console.log(`Partial ratchet retry failed for all remaining clients (version ${version}).`);
+    console.log(`All partial ratchet retries complete for version ${version}.`);
   }
 }
 document.getElementById('startChatToggleButton').onclick = () => {

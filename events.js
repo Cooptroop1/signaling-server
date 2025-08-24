@@ -71,7 +71,7 @@ if (typeof window !== 'undefined') {
   (async () => {
     keyPair = await window.crypto.subtle.generateKey(
       { name: 'ECDH', namedCurve: 'P-384' },
-      true,
+      false, // Non-extractable
       ['deriveKey', 'deriveBits']
     );
   })();
@@ -477,13 +477,18 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'new-room-key' && message.targetId === clientId) {
+      if (message.version <= keyVersion) {
+        console.log(`Ignoring outdated key version ${message.version} (current: ${keyVersion})`);
+        return;
+      }
       try {
         const importedInitiatorPublic = await importPublicKey(initiatorPublic);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
         const newRoomMasterBuffer = await decryptBytes(shared, message.encrypted, message.iv);
         roomMaster = new Uint8Array(newRoomMasterBuffer);
         signingKey = await deriveSigningKey(roomMaster);
-        console.log('New room master received and set for PFS.');
+        keyVersion = message.version;
+        console.log(`New room master received and set for PFS (version ${keyVersion}).`);
       } catch (error) {
         console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
@@ -598,31 +603,65 @@ function refreshAccessToken() {
 
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
+  keyVersion++; // Increment version
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
   let success = 0;
+  let failures = [];
   for (const cId of connectedClients) {
     if (cId === clientId) continue;
     const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
       console.warn(`No public key for client ${cId}, skipping ratchet send`);
+      failures.push(cId);
       continue;
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
       const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
       const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token }));
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion }));
       success++;
     } catch (error) {
       console.error(`Error sending new room key to ${cId}:`, error);
+      failures.push(cId);
     }
   }
   if (success > 0) {
     roomMaster = newRoomMaster;
     signingKey = await deriveSigningKey(roomMaster);
-    console.log('PFS ratchet complete, new roomMaster set.');
+    console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster set.`);
+    if (failures.length > 0) {
+      console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying in 10s...`);
+      setTimeout(() => {
+        triggerRatchetPartial(failures, newRoomMaster, keyVersion);
+      }, 10000);
+    }
   } else {
-    console.warn('PFS ratchet failed: No keys available to send to any clients.');
+    console.warn(`PFS ratchet failed (version ${keyVersion}): No keys available to send to any clients.`);
+    keyVersion--; // Revert version on full failure
+  }
+}
+
+// New: Function to retry ratchet for failed clients
+async function triggerRatchetPartial(failedClients, newRoomMaster, version) {
+  let retrySuccess = 0;
+  for (const cId of failedClients) {
+    const publicKey = clientPublicKeys.get(cId);
+    if (!publicKey) continue;
+    try {
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version }));
+      retrySuccess++;
+    } catch (error) {
+      console.error(`Retry failed for ${cId}:`, error);
+    }
+  }
+  if (retrySuccess > 0) {
+    console.log(`Partial ratchet retry successful for ${retrySuccess} clients (version ${version}).`);
+  } else {
+    console.log(`Partial ratchet retry failed for all remaining clients (version ${version}).`);
   }
 }
 document.getElementById('startChatToggleButton').onclick = () => {

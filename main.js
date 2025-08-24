@@ -17,6 +17,8 @@ const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
 let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
+const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
+const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -602,10 +604,9 @@ async function handleOffer(offer, targetId) {
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
+    // Process queued candidates asynchronously
     const queue = candidatesQueues.get(targetId) || [];
-    queue.forEach(candidate => {
-      handleCandidate(candidate, targetId);
-    });
+    await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling offer from ${targetId}:`, error);
@@ -633,17 +634,9 @@ async function handleAnswer(answer, targetId) {
   }
   try {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    // Process queued items asynchronously
     const queue = candidatesQueues.get(targetId) || [];
-    queue.forEach(item => {
-      if (item.type === 'answer') {
-        peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer)).catch(error => {
-          console.error(`Error applying queued answer from ${targetId}:`, error);
-          // Removed showStatusMessage to suppress transient error
-        });
-      } else {
-        handleCandidate(item.candidate, targetId);
-      }
-    });
+    await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling answer from ${targetId}:`, error);
@@ -651,7 +644,7 @@ async function handleAnswer(answer, targetId) {
   }
 }
 
-function handleCandidate(candidate, targetId) {
+async function handleCandidate(candidate, targetId) {
   console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
   if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
     console.warn(`Ignoring invalid ICE candidate from ${targetId}: both sdpMid and sdpMLineIndex null`);
@@ -659,14 +652,37 @@ function handleCandidate(candidate, targetId) {
   }
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection && peerConnection.remoteDescription) {
-    peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(error => {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
       console.error(`Error adding ICE candidate from ${targetId}:`, error);
       // Removed showStatusMessage to suppress transient error
-    });
+    }
   } else {
     const queue = candidatesQueues.get(targetId) || [];
     queue.push({ type: 'candidate', candidate });
     candidatesQueues.set(targetId, queue);
+  }
+}
+
+// New helper to process queue with Promises for efficiency
+async function processCandidateQueue(peerConnection, queue) {
+  for (const item of queue) {
+    if (item.type === 'answer') {
+      try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer));
+      } catch (error) {
+        console.error(`Error applying queued answer:`, error);
+        // Removed showStatusMessage to suppress transient error
+      }
+    } else if (item.type === 'candidate') {
+      try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(item.candidate));
+      } catch (error) {
+        console.error(`Error adding queued ICE candidate:`, error);
+        // Removed showStatusMessage to suppress transient error
+      }
+    }
   }
 }
 
@@ -731,6 +747,15 @@ function stopVoiceCall() {
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection) {
+    // Check renegotiation limit
+    const count = renegotiationCounts.get(targetId) || 0;
+    if (count >= maxRenegotiations) {
+      console.warn(`Max renegotiations reached for ${targetId} (${maxRenegotiations}), aborting.`);
+      cleanupPeerConnection(targetId);
+      return;
+    }
+    renegotiationCounts.set(targetId, count + 1);
+
     if (!negotiationQueues.has(targetId)) {
       negotiationQueues.set(targetId, Promise.resolve());
     }

@@ -1,35 +1,29 @@
-
-// crypto.js
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  let base64 = btoa(binary);
-  const padding = (4 - base64.length % 4) % 4;
-  base64 += '='.repeat(padding);
-  base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  console.log('Generated base64:', base64);
+  const base64 = window.btoa(binary);
+  // Strict validation: Check if it's valid base64
+  if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
+    throw new Error('Invalid base64 generated');
+  }
   return base64;
 }
 
 function base64ToArrayBuffer(base64) {
-  base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '');
-  const padding = (4 - base64.length % 4) % 4;
-  base64 += '='.repeat(padding);
-  try {
-    const binary = atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes.buffer;
-  } catch (error) {
-    console.error('base64ToArrayBuffer error:', error, 'Input:', base64);
-    throw new Error('Invalid base64 data');
+  // Strict validation: Check if input is valid base64
+  if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
+    throw new Error('Invalid base64 input');
   }
+  const binary = window.atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
 
 async function exportPublicKey(key) {
@@ -268,6 +262,7 @@ async function verifyMessage(signingKey, signature, data) {
 
 async function deriveSigningKey(master) {
   try {
+    const salt = window.crypto.getRandomValues(new Uint8Array(16)); // Added non-empty salt
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       master,
@@ -276,7 +271,7 @@ async function deriveSigningKey(master) {
       ['deriveKey']
     );
     const key = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
+      { name: 'HKDF', salt, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'HMAC', hash: 'SHA-256' },
       false,
@@ -292,6 +287,7 @@ async function deriveSigningKey(master) {
 
 async function deriveMessageKey(master) {
   try {
+    const salt = window.crypto.getRandomValues(new Uint8Array(16)); // Added non-empty salt
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       master,
@@ -300,7 +296,7 @@ async function deriveMessageKey(master) {
       ['deriveKey']
     );
     const key = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt: new Uint8Array(0), info: new TextEncoder().encode('message'), hash: 'SHA-256' },
+      { name: 'HKDF', salt, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
       false,

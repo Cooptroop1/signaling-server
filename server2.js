@@ -1,4 +1,4 @@
-// server2.js (updated: remove index requirement from relay validation; fix syntax if any paren mismatch)
+// server2.js (fixed syntax, made index optional in relay validation)
 
 const fs = require('fs');
 const crypto = require('crypto');
@@ -835,5 +835,5 @@ module.exports = function(shared) {
         }
       }
     });
-  });
+  };
 };

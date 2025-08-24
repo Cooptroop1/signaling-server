@@ -262,7 +262,7 @@ async function verifyMessage(signingKey, signature, data) {
 
 async function deriveSigningKey(master) {
   try {
-    const salt = window.crypto.getRandomValues(new Uint8Array(16)); // Added non-empty salt
+    const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // Fixed non-empty salt
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       master,
@@ -287,7 +287,7 @@ async function deriveSigningKey(master) {
 
 async function deriveMessageKey(master) {
   try {
-    const salt = window.crypto.getRandomValues(new Uint8Array(16)); // Added non-empty salt
+    const salt = new Uint8Array([17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]); // Fixed non-empty salt, different from signing
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       master,

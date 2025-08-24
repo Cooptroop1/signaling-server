@@ -467,7 +467,8 @@ wss.on('connection', (ws, req) => {
         data.type === 'encrypted-room-key' && 'iv',
         data.type === 'new-room-key' && 'encrypted',
         data.type === 'new-room-key' && 'iv',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'data',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'content',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'data',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
@@ -820,7 +821,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
           return;
         }
-        const payloadKey = data.encryptedContent || data.encryptedData || data.content || data.data;
+        const payloadKey = data.content || data.encryptedContent || data.data || data.encryptedData;
         if (payloadKey && (typeof payloadKey !== 'string' || (data.encryptedContent || data.encryptedData || data.type !== 'relay-message') && !isValidBase64(payloadKey))) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
           incrementFailure(clientIp);
@@ -851,7 +852,18 @@ wss.on('connection', (ws, req) => {
           console.warn(`Duplicate messageId ${data.messageId} in room ${data.code}, ignoring`);
           return;
         }
-        messageSet.set(data.messageId, Date.now());
+        const now = Date.now();
+        if (Math.abs(now - data.timestamp) > 300000) { // 5 minutes window
+          console.warn(`Invalid timestamp for messageId ${data.messageId} in room ${data.code}: ${data.timestamp} (now: ${now})`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
+          return;
+        }
+        if (data.timestamp > now) {
+          console.warn(`Future timestamp for messageId ${data.messageId} in room ${data.code}: ${data.timestamp}`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
+          return;
+        }
+        messageSet.set(data.messageId, data.timestamp);
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({

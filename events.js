@@ -233,12 +233,15 @@ socket.onmessage = async (event) => {
           refreshBackoff = 1000;
           socket.close();
         } else {
+          // Exponential backoff with jitter (1-5s random delay)
+          const jitter = Math.random() * 4000 + 1000; // 1-5s
+          const delay = Math.min(refreshBackoff + jitter, 8000);
           setTimeout(() => {
             if (refreshToken && !refreshingToken) {
               refreshingToken = true;
               socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
             }
-          }, refreshBackoff);
+          }, delay);
           refreshBackoff = Math.min(refreshBackoff * 2, 8000);
         }
         // Removed showStatusMessage to suppress transient error

@@ -1,3 +1,5 @@
+// server1.js (updated: make index optional in relay validation; add optional signature check)
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -180,16 +182,6 @@ function isValidBase64(str) {
   return isValid;
 }
 
-function validateUsername(username) {
-  const regex = /^[a-zA-Z0-9]{1,16}$/;
-  return username && regex.test(username);
-}
-
-function validateCode(code) {
-  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
-  return code && regex.test(code);
-}
-
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -333,8 +325,11 @@ function validateMessage(data) {
         if (!data.iv || !isValidBase64(data.iv)) {
           return { valid: false, error: 'relay-message: invalid iv format' };
         }
-        if (data.index === undefined || typeof data.index !== 'number') {
-          return { valid: false, error: 'relay-message: index required as number for encrypted' };
+        if (data.index !== undefined && typeof data.index !== 'number') {
+          return { valid: false, error: 'relay-message: index must be number if provided' };
+        }
+        if (data.signature && typeof data.signature !== 'string') {
+          return { valid: false, error: 'relay-message: signature must be string if provided' };
         }
       }
       break;
@@ -360,8 +355,11 @@ function validateMessage(data) {
         if (!data.iv || !isValidBase64(data.iv)) {
           return { valid: false, error: data.type + ': invalid iv format' };
         }
-        if (data.index === undefined || typeof data.index !== 'number') {
-          return { valid: false, error: data.type + ': index required as number for encrypted' };
+        if (data.index !== undefined && typeof data.index !== 'number') {
+          return { valid: false, error: data.type + ': index must be number if provided' };
+        }
+        if (data.signature && typeof data.signature !== 'string') {
+          return { valid: false, error: data.type + ': signature must be string if provided' };
         }
       }
       break;
@@ -441,7 +439,7 @@ setInterval(() => {
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 3600000);
 
-const shared = module.exports = {
+const shared2 = module.exports = {
   wss,
   rooms,
   dailyUsers,
@@ -480,7 +478,7 @@ const shared = module.exports = {
   validateCode
 };
 
-require('./server2')(shared);
+require('./server2')(shared2);
 
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);

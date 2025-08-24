@@ -420,7 +420,7 @@ setInterval(() => {
     }
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
-}, 3600000);
+}, 600000); // Changed to every 10 minutes (600000 ms)
 
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
@@ -942,6 +942,15 @@ wss.on('connection', (ws, req) => {
               }
             });
             if (data.feature === 'service' && !features.enableService) {
+              // Invalidate all tokens on service toggle off
+              clientTokens.forEach((tokens, clientId) => {
+                revokedTokens.set(tokens.accessToken, Date.now() + 1000); // Immediate revocation
+                if (tokens.refreshToken) {
+                  revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
+                }
+              });
+              clientTokens.clear();
+              console.log('All tokens invalidated due to service disable');
               rooms.clear();
               randomCodes.clear();
               totpSecrets.clear();

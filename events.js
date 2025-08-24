@@ -1,4 +1,4 @@
-// events.js (updated: delay UI show in relay until peer joins; seamless P2P fallback mimics join flow)
+// events.js (updated: add share-room-key for relay mode; ensure message display)
 
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
@@ -312,16 +312,6 @@ socket.onmessage = async (event) => {
       connectedClients.add(clientId);
       initializeMaxClientsUI();
       updateFeaturesUI();
-      if (roomMaster) {
-        if (useRelay) {
-          const privacyStatus = document.getElementById('privacyStatus');
-          if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode';
-            privacyStatus.classList.remove('hidden');
-          }
-          messages.classList.add('waiting');
-        }
-      }
       if (isInitiator) {
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingKey = await deriveSigningKey(roomMaster);
@@ -332,19 +322,14 @@ socket.onmessage = async (event) => {
           pendingTotpSecret = null;
         }
         setInterval(triggerRatchet, 5 * 60 * 1000);
-        if (useRelay) {
-          const privacyStatus = document.getElementById('privacyStatus');
-          if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode';
-            privacyStatus.classList.remove('hidden');
-          }
-          messages.classList.add('waiting');
+      }
+      if (useRelay) {
+        const privacyStatus = document.getElementById('privacyStatus');
+        if (privacyStatus) {
+          privacyStatus.textContent = 'Relay Mode';
+          privacyStatus.classList.remove('hidden');
         }
-      } else {
-        if (!useRelay) {
-          const publicKey = await exportPublicKey(keyPair.publicKey);
-          socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
-        }
+        messages.classList.add('waiting');
       }
       updateMaxClientsUI();
       updateDots();
@@ -368,7 +353,19 @@ socket.onmessage = async (event) => {
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
       updateDots();
-      if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
+      if (isInitiator && message.clientId !== clientId && useRelay) {
+        console.log(`Sending roomMaster to new joiner ${message.clientId} in relay mode`);
+        const roomMasterBase64 = btoa(String.fromCharCode(...roomMaster));
+        socket.send(JSON.stringify({
+          type: 'share-room-key',
+          roomKey: roomMasterBase64,
+          targetId: message.clientId,
+          code,
+          clientId,
+          token
+        }));
+      }
+      if (isInitiator && message.clientId !== clientId && !useRelay && !peerConnections.has(message.clientId)) {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
@@ -380,6 +377,29 @@ socket.onmessage = async (event) => {
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);
+      }
+      return;
+    }
+    if (message.type === 'share-room-key' && message.targetId === clientId) {
+      try {
+        console.log(`Received roomMaster from initiator for code: ${code}`);
+        roomMaster = new Uint8Array(atob(message.roomKey).split('').map(c => c.charCodeAt(0)));
+        signingKey = await deriveSigningKey(roomMaster);
+        console.log('Room master and signing key set for joiner.');
+        if (useRelay) {
+          isConnected = true;
+          inputContainer.classList.remove('hidden');
+          messages.classList.remove('waiting');
+          updateMaxClientsUI();
+          const privacyStatus = document.getElementById('privacyStatus');
+          if (privacyStatus) {
+            privacyStatus.textContent = 'Relay Mode';
+            privacyStatus.classList.remove('hidden');
+          }
+        }
+      } catch (error) {
+        console.error('Error setting roomMaster:', error);
+        showStatusMessage('Failed to set encryption key.');
       }
       return;
     }
@@ -496,7 +516,7 @@ socket.onmessage = async (event) => {
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
-      console.log('Received plain relay message:', message); // Debug
+      console.log('Received plain relay message:', message);
       const payload = {
         messageId: message.messageId,
         username: message.username,
@@ -505,7 +525,7 @@ socket.onmessage = async (event) => {
         data: message.data,
         encryptedData: message.encryptedData,
         filename: message.filename,
-        timestamp: Number(message.timestamp) || Date.now(), // Ensure valid timestamp
+        timestamp: Number(message.timestamp) || Date.now(),
         iv: message.iv,
         signature: message.signature,
         clientId: message.clientId
@@ -606,6 +626,19 @@ async function triggerRatchet() {
   let success = 0;
   for (const cId of connectedClients) {
     if (cId === clientId) continue;
+    if (useRelay) {
+      const roomMasterBase64 = btoa(String.fromCharCode(...newRoomMaster));
+      socket.send(JSON.stringify({
+        type: 'share-room-key',
+        roomKey: roomMasterBase64,
+        targetId: cId,
+        code,
+        clientId,
+        token
+      }));
+      success++;
+      continue;
+    }
     const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
       console.warn(`No public key for client ${cId}, skipping ratchet send`);
@@ -629,6 +662,7 @@ async function triggerRatchet() {
     console.warn('PFS ratchet failed: No keys available to send to any clients.');
   }
 }
+
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');

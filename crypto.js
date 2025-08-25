@@ -54,14 +54,14 @@ async function importPublicKey(base64) {
     let buffer = base64ToArrayBuffer(base64);
     if (buffer.byteLength === 96) {
       const newBuffer = new Uint8Array(97);
-      newBuffer[0] = 4;
+      newBuffer[0] = 4; // Uncompressed point prefix
       newBuffer.set(new Uint8Array(buffer), 1);
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
     } else if (buffer.byteLength !== 97) {
       throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
     }
-    // Validate point on curve
+    // Validate point on curve (basic check)
     const bytes = new Uint8Array(buffer);
     if (bytes[0] !== 4) {
       throw new Error('Invalid uncompressed public key prefix');
@@ -85,9 +85,15 @@ async function importPublicKey(base64) {
     }
 
     // Additional full validation with noble-curves
-    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-    const point = window.p384.ProjectivePoint.fromHex(hex);
-    point.assertValidity();
+    try {
+      const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      const point = window.getP384.ProjectivePoint.fromHex(hex);
+      point.assertValidity(); // Validates order, subgroup, not infinity
+      console.log('Noble-curves validation passed for public key');
+    } catch (nobleError) {
+      console.error('Noble-curves validation failed:', nobleError);
+      throw new Error('Invalid public key: failed noble-curves validation');
+    }
 
     const key = await window.crypto.subtle.importKey(
       'raw',

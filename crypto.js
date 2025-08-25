@@ -1,7 +1,12 @@
-async function deriveSalt(master, purpose) {
-  const encoder = new TextEncoder();
-  const data = new Uint8Array([...new Uint8Array(master), ...encoder.encode(purpose)]);
-  return await crypto.subtle.digest('SHA-256', data);
+async function deriveKey(master, salt, infoStr, alg, usages) {
+  const hkdfKey = await crypto.subtle.importKey('raw', master, 'HKDF', false, ['deriveKey']);
+  return await crypto.subtle.deriveKey(
+    { name: 'HKDF', salt, info: new TextEncoder().encode(infoStr), hash: 'SHA-256' },
+    hkdfKey,
+    alg,
+    false,
+    usages
+  );
 }
 
 function arrayBufferToBase64(buffer) {
@@ -32,6 +37,14 @@ function base64ToArrayBuffer(base64) {
   return bytes.buffer;
 }
 
+function bytesToBigInt(bytes) {
+  let hex = '';
+  for (let byte of bytes) {
+    hex += byte.toString(16).padStart(2, '0');
+  }
+  return BigInt('0x' + hex);
+}
+
 async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
@@ -59,11 +72,33 @@ async function importPublicKey(base64) {
     } else if (buffer.byteLength !== 97) {
       throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
     }
+    // Validate point on curve
+    const bytes = new Uint8Array(buffer);
+    if (bytes[0] !== 4) {
+      throw new Error('Invalid uncompressed public key prefix');
+    }
+    const p = 39402006196394479212279040100143613805079739270465446667948293404245721771496870329047266088258938001861606973112319n;
+    const a = p - 3n;
+    const b = 27580193559959705877849011840389048093056905856361568521428707301988689241309860865136260764883745107765439761230575n;
+    const xBytes = bytes.slice(1, 49);
+    const yBytes = bytes.slice(49, 97);
+    const x = bytesToBigInt(xBytes);
+    const y = bytesToBigInt(yBytes);
+    if (x >= p || y >= p || x < 0n || y < 0n) {
+      throw new Error('Public key coordinates out of range');
+    }
+    const y2 = (y * y) % p;
+    const x3 = (x * x * x) % p;
+    const ax = (a * x) % p;
+    const right = (x3 + ax + b) % p;
+    if (y2 !== right) {
+      throw new Error('Public key point not on P-384 curve');
+    }
     const key = await window.crypto.subtle.importKey(
       'raw',
       buffer,
       { name: 'ECDH', namedCurve: 'P-384' },
-      false, // Non-extractable
+      false,
       []
     );
     console.log('Imported public key successfully');
@@ -71,73 +106,6 @@ async function importPublicKey(base64) {
   } catch (error) {
     console.error('importPublicKey error:', error, 'Input base64:', base64);
     throw new Error('Failed to import public key');
-  }
-}
-
-async function encrypt(text, master) {
-  try {
-    const salt = window.crypto.getRandomValues(new Uint8Array(16));
-    const hkdfKey = await window.crypto.subtle.importKey(
-      'raw',
-      master,
-      { name: 'HKDF' },
-      false,
-      ['deriveKey']
-    );
-    const derivedKey = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt, info: new Uint8Array(0), hash: 'SHA-256' },
-      hkdfKey,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encoded = new TextEncoder().encode(text);
-    const encrypted = await window.crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      derivedKey,
-      encoded
-    );
-    const result = {
-      encrypted: arrayBufferToBase64(encrypted),
-      iv: arrayBufferToBase64(iv),
-      salt: arrayBufferToBase64(salt)
-    };
-    console.log('Encryption result:', result);
-    return result;
-  } catch (error) {
-    console.error('encrypt error:', error);
-    throw new Error('Encryption failed');
-  }
-}
-
-async function decrypt(encrypted, iv, salt, master) {
-  try {
-    const hkdfKey = await window.crypto.subtle.importKey(
-      'raw',
-      master,
-      { name: 'HKDF' },
-      false,
-      ['deriveKey']
-    );
-    const derivedKey = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt: base64ToArrayBuffer(salt), info: new Uint8Array(0), hash: 'SHA-256' },
-      hkdfKey,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-    const decoded = await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
-      derivedKey,
-      base64ToArrayBuffer(encrypted)
-    );
-    const result = new TextDecoder().decode(decoded);
-    console.log('Decryption successful, result:', result);
-    return result;
-  } catch (error) {
-    console.error('decrypt error:', error, 'Encrypted:', encrypted, 'IV:', iv, 'Salt:', salt);
-    throw new Error('Decryption failed');
   }
 }
 
@@ -263,57 +231,5 @@ async function verifyMessage(signingKey, signature, data) {
   } catch (error) {
     console.error('verifyMessage error:', error);
     return false;
-  }
-}
-
-async function deriveSigningKey(master) {
-  try {
-    const saltBuffer = await deriveSalt(master, 'signing');
-    const salt = new Uint8Array(saltBuffer);
-    const hkdfKey = await window.crypto.subtle.importKey(
-      'raw',
-      master,
-      { name: 'HKDF' },
-      false,
-      ['deriveKey']
-    );
-    const key = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
-      hkdfKey,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false, // Non-extractable
-      ['sign', 'verify']
-    );
-    console.log('deriveSigningKey successful');
-    return key;
-  } catch (error) {
-    console.error('deriveSigningKey error:', error);
-    throw new Error('Signing key derivation failed');
-  }
-}
-
-async function deriveMessageKey(master) {
-  try {
-    const saltBuffer = await deriveSalt(master, 'message');
-    const salt = new Uint8Array(saltBuffer);
-    const hkdfKey = await window.crypto.subtle.importKey(
-      'raw',
-      master,
-      { name: 'HKDF' },
-      false,
-      ['deriveKey']
-    );
-    const key = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
-      hkdfKey,
-      { name: 'AES-GCM', length: 256 },
-      false, // Non-extractable
-      ['encrypt', 'decrypt']
-    );
-    console.log('deriveMessageKey successful');
-    return key;
-  } catch (error) {
-    console.error('deriveMessageKey error:', error);
-    throw new Error('Message key derivation failed');
   }
 }

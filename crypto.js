@@ -1,14 +1,3 @@
-async function deriveKey(master, salt, infoStr, alg, usages) {
-  const hkdfKey = await crypto.subtle.importKey('raw', master, 'HKDF', false, ['deriveKey']);
-  return await crypto.subtle.deriveKey(
-    { name: 'HKDF', salt, info: new TextEncoder().encode(infoStr), hash: 'SHA-256' },
-    hkdfKey,
-    alg,
-    false,
-    usages
-  );
-}
-
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -149,7 +138,7 @@ async function deriveSharedKey(privateKey, publicKey) {
     const sharedBits = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: publicKey },
       privateKey,
-      256
+      384  // P-384 provides 192-bit security, but derive 384 bits for safety
     );
     const key = await window.crypto.subtle.importKey(
       "raw",
@@ -169,7 +158,7 @@ async function deriveSharedKey(privateKey, publicKey) {
 async function encryptRaw(key, data) {
   try {
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encoded = new TextEncoder().encode(data);
+    const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data;
     const encrypted = await window.crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
       key,
@@ -231,5 +220,53 @@ async function verifyMessage(signingKey, signature, data) {
   } catch (error) {
     console.error('verifyMessage error:', error);
     return false;
+  }
+}
+
+async function deriveSigningKey() {
+  try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      roomMaster,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt: signingSalt, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign', 'verify']
+    );
+    console.log('deriveSigningKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveSigningKey error:', error);
+    throw new Error('Signing key derivation failed');
+  }
+}
+
+async function deriveMessageKey() {
+  try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      roomMaster,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt: messageSalt, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    console.log('deriveMessageKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveMessageKey error:', error);
+    throw new Error('Message key derivation failed');
   }
 }

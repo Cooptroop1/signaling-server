@@ -1,3 +1,4 @@
+
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -529,13 +530,6 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if (message.type === 'ratchet-request') {
-      if (isInitiator) {
-        await triggerRatchet();
-        showStatusMessage(`Ratchet requested by ${message.from}, triggering ratchet.`);
-      }
-      return;
-    }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
@@ -580,9 +574,6 @@ socket.onmessage = async (event) => {
             console.warn(`Invalid signature for relay message`);
             showStatusMessage('Invalid message signature detected.');
             return;
-          }
-          if (payload.encryptedContent) {
-            contentOrData = contentOrData.trimEnd(); // Trim padding for text
           }
         } catch (error) {
           console.error(`Decryption/verification failed for relay message:`, error);

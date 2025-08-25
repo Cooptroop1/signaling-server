@@ -80,6 +80,7 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const AUDIT_FILE_BASE = path.join(__dirname, 'audit'); // Base name without extension
 const FEATURES_FILE = path.join('/data', 'features.json');
 const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
@@ -375,6 +376,9 @@ function validateMessage(data) {
         return { valid: false, error: data.type + ': secret required as string' };
       }
       break;
+    case 'ping':
+    case 'pong':
+      break;
     case 'set-totp':
       if (!data.code) {
         return { valid: false, error: 'set-totp: code required' };
@@ -382,9 +386,6 @@ function validateMessage(data) {
       if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
         return { valid: false, error: 'set-totp: valid base32 secret required' };
       }
-      break;
-    case 'ping':
-    case 'pong':
       break;
     default:
       return { valid: false, error: 'Unknown message type' };
@@ -698,15 +699,11 @@ wss.on('connection', (ws, req) => {
           }
         }
         if (!rooms.has(code)) {
-          rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2, banned: new Set() });
+          rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
           logStats({ clientId, username, code, event: 'init', totalClients: 1 });
         } else {
           const room = rooms.get(code);
-          if (room.banned.has(clientId)) {
-            ws.send(JSON.stringify({ type: 'error', message: 'You are banned from this room.', code: data.code }));
-            return;
-          }
           if (room.clients.size >= room.maxClients) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
             incrementFailure(clientIp);
@@ -761,36 +758,6 @@ wss.on('connection', (ws, req) => {
         ws.code = code;
         ws.username = username;
         broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
-        return;
-      }
-      if (data.type === 'kick' || data.type === 'ban') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          if (data.clientId !== room.initiator) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can kick/ban.', code: data.code }));
-            return;
-          }
-          const targetClient = room.clients.get(data.targetId);
-          if (!targetClient) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Target client not found.', code: data.code }));
-            return;
-          }
-          // Verify signature (assume signingKey is shared or public verify; for simplicity, skip if not implemented)
-          // For now, trust since only initiator sends, but add signature check as per user request
-          const toVerify = data.targetId + data.type + data.code;
-          // Assuming data.signature is HMAC of toVerify with room signingKey (client-side signed)
-          // Server doesn't have signingKey (E2EE), so perhaps use initiator's public key for verification if asymmetric
-          // For this impl, skip detailed verify; assume valid if from initiator
-
-          if (data.type === 'ban') {
-            room.banned.add(data.targetId);
-          }
-          targetClient.ws.send(JSON.stringify({ type: data.type, message: `You have been ${data.type}ed from the room.`, code: data.code }));
-          targetClient.ws.close();
-          room.clients.delete(data.targetId);
-          broadcast(data.code, { type: 'client-disconnected', clientId: data.targetId, totalClients: room.clients.size });
-          console.log(`${data.type}ed client ${data.targetId} from room ${data.code} by initiator ${data.clientId}`);
-        }
         return;
       }
       if (data.type === 'check-totp') {

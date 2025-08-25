@@ -22,6 +22,7 @@ const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Set(); // New for nonce dedup
+let lazyObserver;
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -565,21 +566,19 @@ async function processReceivedMessage(data, targetId) {
       return;
     }
     // New: Parse metadata from rawData
-    const metadataEnd = rawData.indexOf('{', 1);  // Assuming JSON starts after first char or something; better to use length prefix if possible
-    // Wait, since metadata is JSON string prepended, find end of JSON
-    let metadataStr;
-    try {
-      metadataStr = rawData.substring(0, rawData.indexOf('}') + 1);
-      const metadata = JSON.parse(metadataStr);
-      senderUsername = metadata.username;
-      timestamp = metadata.timestamp;
-      contentType = metadata.type;
-      contentOrData = rawData.substring(metadataStr.length).trimEnd();  // Content after metadata, trim padding
-    } catch (error) {
-      console.error('Failed to parse metadata:', error);
-      showStatusMessage('Invalid message metadata.');
-      return;
+    let metadataStr = '';
+    let braceCount = 0;
+    for (let i = 0; i < rawData.length; i++) {
+      metadataStr += rawData[i];
+      if (rawData[i] === '{') braceCount++;
+      if (rawData[i] === '}') braceCount--;
+      if (braceCount === 0 && metadataStr.startsWith('{')) break;
     }
+    const metadata = JSON.parse(metadataStr);
+    senderUsername = metadata.username;
+    timestamp = metadata.timestamp;
+    contentType = metadata.type;
+    contentOrData = rawData.substring(metadataStr.length).trimEnd();  // Content after metadata, trim padding
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
@@ -596,19 +595,21 @@ async function processReceivedMessage(data, targetId) {
   messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
   if (contentType === 'image') {
     const img = document.createElement('img');
-    img.src = contentOrData;
+    img.dataset.src = contentOrData;  // Lazy load
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
     img.setAttribute('alt', 'Received image');
     img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
+    lazyObserver.observe(img);  // Observe for lazy loading
     messageDiv.appendChild(img);
   } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
-    audio.src = contentOrData;
+    audio.dataset.src = contentOrData;  // Lazy load
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
+    lazyObserver.observe(audio);  // Observe for lazy loading
     messageDiv.appendChild(audio);
   } else if (contentType === 'file') {
     const link = document.createElement('a');

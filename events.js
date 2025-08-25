@@ -994,9 +994,10 @@ function updateDots() {
   selfDot.className = 'user-dot online';
   userDots.appendChild(selfDot);
   // Add other users' dots with menu if initiator
-  otherClientIds.forEach(targetId => {
+  otherClientIds.forEach((targetId, index) => {
     const dot = document.createElement('div');
     dot.className = 'user-dot online';
+    dot.dataset.targetId = targetId;
     if (isInitiator) {
       const menu = document.createElement('div');
       menu.className = 'user-menu';
@@ -1021,19 +1022,33 @@ function updateDots() {
 }
 
 async function kickUser(targetId) {
-  if (!isInitiator || !targetId) return;
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for kick:', targetId);
+    showStatusMessage('Invalid target user for kick.');
+    return;
+  }
   console.log('Kicking user', targetId);
   const toSign = targetId + 'kick' + code;
   const signature = await signMessage(signingKey, toSign);
-  socket.send(JSON.stringify({ type: 'kick', targetId, code, clientId, token, signature }));
+  const message = { type: 'kick', targetId, code, clientId, token, signature };
+  console.log('Sending kick message:', message);
+  socket.send(JSON.stringify(message));
 }
 
 async function banUser(targetId) {
-  if (!isInitiator || !targetId) return;
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for ban:', targetId);
+    showStatusMessage('Invalid target user for ban.');
+    return;
+  }
   console.log('Banning user', targetId);
   const toSign = targetId + 'ban' + code;
   const signature = await signMessage(signingKey, toSign);
-  socket.send(JSON.stringify({ type: 'ban', targetId, code, clientId, token, signature }));
+  const message = { type: 'ban', targetId, code, clientId, token, signature };
+  console.log('Sending ban message:', message);
+  socket.send(JSON.stringify(message));
 }
 
 function getCookie(name) {

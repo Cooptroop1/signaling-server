@@ -643,7 +643,7 @@ async function triggerRatchet() {
 }
 
 // Updated: Function to retry ratchet for failed clients with backoff and max retries
-async function triggerRatchetPartial(failedClients, newRoomMaster, version, retryCount) {
+async function triggerRatchetPartial(failures, newRoomMaster, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
     return;
@@ -655,7 +655,7 @@ async function triggerRatchetPartial(failedClients, newRoomMaster, version, retr
 
   let retrySuccess = 0;
   let newFailures = [];
-  for (const cId of failedClients) {
+  for (const cId of failures) {
     const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
       newFailures.push(cId);
@@ -988,21 +988,25 @@ function updateDots() {
   userDots.innerHTML = '';
   const greenCount = Math.min(totalClients, maxClients);
   const redCount = maxClients - greenCount;
+  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId); // Exclude self
   for (let i = 0; i < greenCount; i++) {
     const dot = document.createElement('div');
     dot.className = 'user-dot online';
     if (isInitiator && i > 0) { // Skip self (first dot)
-      const menu = document.createElement('div');
-      menu.className = 'user-menu';
-      const kickButton = document.createElement('button');
-      kickButton.textContent = 'Kick';
-      kickButton.onclick = () => kickUser(connectedClients[i]); // Assume connectedClients array; adjust if set
-      const banButton = document.createElement('button');
-      banButton.textContent = 'Ban';
-      banButton.onclick = () => banUser(connectedClients[i]);
-      menu.appendChild(kickButton);
-      menu.appendChild(banButton);
-      dot.appendChild(menu);
+      const targetId = otherClientIds[i - 1]; // Since i=0 is self, i=1 is first other
+      if (targetId) {
+        const menu = document.createElement('div');
+        menu.className = 'user-menu';
+        const kickButton = document.createElement('button');
+        kickButton.textContent = 'Kick';
+        kickButton.onclick = () => kickUser(targetId);
+        const banButton = document.createElement('button');
+        banButton.textContent = 'Ban';
+        banButton.onclick = () => banUser(targetId);
+        menu.appendChild(kickButton);
+        menu.appendChild(banButton);
+        dot.appendChild(menu);
+      }
     }
     userDots.appendChild(dot);
   }

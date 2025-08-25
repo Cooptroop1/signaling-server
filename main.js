@@ -122,12 +122,18 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
 
   const messageId = generateMessageId();
   const timestamp = Date.now();
+  const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
+  const jitteredTimestamp = timestamp + jitter * 1000;
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
-  const { encrypted, iv } = await encryptRaw(messageKey, dataToSend || sanitizedContent);
-  const toSign = (dataToSend || sanitizedContent) + timestamp;
+  let rawData = dataToSend || sanitizedContent;
+  // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
+  const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
+  rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
+  const { encrypted, iv } = await encryptRaw(messageKey, rawData);
+  const toSign = rawData + jitteredTimestamp;
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, username, timestamp, type, iv, signature };
+  let payload = { messageId, username, timestamp: jitteredTimestamp, type, iv, signature };
   if (dataToSend) {
     payload.encryptedData = encrypted;
     payload.filename = file?.name;
@@ -557,6 +563,7 @@ async function processReceivedMessage(data, targetId) {
       const encrypted = data.encryptedContent || data.encryptedData;
       const iv = data.iv;
       contentOrData = await decryptRaw(messageKey, encrypted, iv);
+      contentOrData = contentOrData.trim(); // Trim padding spaces
       const toVerify = contentOrData + data.timestamp;
       const valid = await verifyMessage(signingKey, data.signature, toVerify);
       if (!valid) {

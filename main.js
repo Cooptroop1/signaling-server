@@ -21,6 +21,8 @@ const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt co
 const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
+let signingSalt;
+let messageSalt;
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -123,18 +125,17 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
-  let payload = { messageId, username, timestamp, type };
-  const messageKey = await deriveMessageKey(roomMaster);
+  let messageKey = await deriveMessageKey();
   const { encrypted, iv } = await encryptRaw(messageKey, dataToSend || sanitizedContent);
   const toSign = (dataToSend || sanitizedContent) + timestamp;
-  payload.signature = await signMessage(signingKey, toSign);
+  const signature = await signMessage(signingKey, toSign);
+  let payload = { messageId, username, timestamp, type, iv, signature };
   if (dataToSend) {
     payload.encryptedData = encrypted;
     payload.filename = file?.name;
   } else {
     payload.encryptedContent = encrypted;
   }
-  payload.iv = iv;
 
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
@@ -554,7 +555,7 @@ async function processReceivedMessage(data, targetId) {
   let contentOrData = data.content || data.data;
   if (data.encryptedContent || data.encryptedData) {
     try {
-      const messageKey = await deriveMessageKey(roomMaster);
+      const messageKey = await deriveMessageKey();
       const encrypted = data.encryptedContent || data.encryptedData;
       const iv = data.iv;
       contentOrData = await decryptRaw(messageKey, encrypted, iv);

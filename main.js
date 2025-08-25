@@ -563,13 +563,15 @@ async function processReceivedMessage(data, targetId) {
       const encrypted = data.encryptedContent || data.encryptedData;
       const iv = data.iv;
       contentOrData = await decryptRaw(messageKey, encrypted, iv);
-      contentOrData = contentOrData.trim(); // Trim padding spaces
       const toVerify = contentOrData + data.timestamp;
       const valid = await verifyMessage(signingKey, data.signature, toVerify);
       if (!valid) {
         console.warn(`Invalid signature for message from ${targetId}`);
         showStatusMessage('Invalid message signature detected.');
         return;
+      }
+      if (data.type === 'message') {
+        contentOrData = contentOrData.trimEnd(); // Trim trailing padding spaces for text
       }
     } catch (error) {
       console.error(`Decryption/verification failed for message from ${targetId}:`, error);

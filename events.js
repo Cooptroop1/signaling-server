@@ -659,7 +659,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, version, retryCoun
     const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
       newFailures.push(cId);
-      continue;
+      return;
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
@@ -1034,6 +1034,7 @@ async function kickUser(targetId) {
   const message = { type: 'kick', targetId, code, clientId, token, signature };
   console.log('Sending kick message:', message);
   socket.send(JSON.stringify(message));
+  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
 }
 
 async function banUser(targetId) {
@@ -1049,6 +1050,7 @@ async function banUser(targetId) {
   const message = { type: 'ban', targetId, code, clientId, token, signature };
   console.log('Sending ban message:', message);
   socket.send(JSON.stringify(message));
+  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
 }
 
 function getCookie(name) {

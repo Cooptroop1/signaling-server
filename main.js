@@ -21,6 +21,8 @@ const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt co
 const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
+let roomMaster;
+let signingKey;
 let signingSalt;
 let messageSalt;
 
@@ -125,7 +127,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
-  let messageKey = await deriveMessageKey();
+  const messageKey = await deriveMessageKey();
   const { encrypted, iv } = await encryptRaw(messageKey, dataToSend || sanitizedContent);
   const toSign = (dataToSend || sanitizedContent) + timestamp;
   const signature = await signMessage(signingKey, toSign);
@@ -1245,3 +1247,4 @@ async function generateThumbnail(dataURL, width = 100, height = 100) {
     img.onerror = () => resolve(dataURL); // Fallback to full if error
   });
 }
+</xai:function_call

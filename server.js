@@ -1,3 +1,5 @@
+
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -124,15 +126,6 @@ if (fs.existsSync(secretFile)) {
     console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
   }
 }
-if (fs.existsSync(previousSecretFile)) {
-  const stats = fs.statSync(previousSecretFile);
-  const mtime = stats.mtime.getTime();
-  const gracePeriodEnd = mtime + (2 * 60 * 60 * 1000); // 2 hours grace
-  if (Date.now() > gracePeriodEnd) {
-    fs.unlinkSync(previousSecretFile);
-    console.log('Deleted previous JWT secret after grace period.');
-  }
-}
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
   throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
@@ -252,9 +245,6 @@ function validateMessage(data) {
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'new-room-key: targetId required as string' };
-      }
-      if (!data.version || typeof data.version !== 'number') {
-        return { valid: false, error: 'new-room-key: version required as number' };
       }
       if (!data.code) {
         return { valid: false, error: 'new-room-key: code required' };
@@ -396,11 +386,6 @@ function validateMessage(data) {
       }
       if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
         return { valid: false, error: 'set-totp: valid base32 secret required' };
-      }
-      break;
-    case 'ratchet-request':
-      if (!data.code) {
-        return { valid: false, error: 'ratchet-request: code required' };
       }
       break;
     default:
@@ -665,23 +650,10 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(data.code);
           const targetWs = room.clients.get(data.targetId)?.ws;
           if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, version: data.version, clientId: data.clientId, code: data.code }));
+            targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code }));
             console.log(`Forwarded new-room-key from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Target client not found or offline', code: data.code }));
-          }
-        }
-        return;
-      }
-      if (data.type === 'ratchet-request') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const initiatorWs = room.clients.get(room.initiator)?.ws;
-          if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
-            initiatorWs.send(JSON.stringify({ type: 'ratchet-request', from: data.clientId, code: data.code }));
-            console.log(`Forwarded ratchet-request from ${data.clientId} to initiator ${room.initiator} for code: ${data.code}`);
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline, cannot request ratchet', code: data.code }));
           }
         }
         return;
@@ -1044,15 +1016,6 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'pong') {
         console.log('Received pong from client');
-        return;
-      }
-      if (data.type === 'set-totp') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          totpSecrets.set(data.code, data.secret);
-          broadcast(data.code, { type: 'totp-enabled', code: data.code });
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
-        }
         return;
       }
     } catch (error) {

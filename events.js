@@ -172,9 +172,7 @@ socket.onclose = () => {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
     return;
   }
-  const baseDelay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
-  const jitter = Math.random() * baseDelay * 0.2; // Add up to 20% jitter
-  const delay = baseDelay + jitter;
+  const delay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
   reconnectAttempts++;
   setTimeout(() => {
     socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
@@ -324,7 +322,7 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'init') {
       clientId = message.clientId;
-      maxClients = message.maxClients;
+      maxClients = Math.min(message.maxClients, 10);
       isInitiator = message.isInitiator;
       features = message.features || features;
       if (!features.enableP2P) {

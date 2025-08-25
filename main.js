@@ -551,6 +551,11 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
     return;
   }
+  const now = Date.now();
+  if (Math.abs(now - data.timestamp) > 300000) {  // New: Anti-replay window ±5min
+    console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
+    return;
+  }
   processedMessageIds.add(data.messageId);
   processedNonces.set(data.nonce, Date.now());  // Changed to Map: nonce -> timestamp
   let senderUsername, timestamp, contentType, contentOrData;

@@ -34,6 +34,15 @@ function bytesToBigInt(bytes) {
   return BigInt('0x' + hex);
 }
 
+function bigIntToBytes(bigInt, byteLength) {
+  let hex = bigInt.toString(16).padStart(byteLength * 2, '0');
+  const bytes = new Uint8Array(byteLength);
+  for (let i = 0; i < byteLength; i++) {
+    bytes[i] = parseInt(hex.slice(i * 2, (i + 1) * 2), 16);
+  }
+  return bytes;
+}
+
 async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
@@ -54,7 +63,7 @@ async function importPublicKey(base64) {
     let buffer = base64ToArrayBuffer(base64);
     if (buffer.byteLength === 96) {
       const newBuffer = new Uint8Array(97);
-      newBuffer[0] = 4; // Uncompressed point prefix
+      newBuffer[0] = 4;
       newBuffer.set(new Uint8Array(buffer), 1);
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
@@ -84,16 +93,76 @@ async function importPublicKey(base64) {
       throw new Error('Public key point not on P-384 curve');
     }
 
-    // Additional full validation with noble-curves
-    try {
-      const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-      const point = window.getP384.ProjectivePoint.fromHex(hex);
-      point.assertValidity(); // Validates order, subgroup, not infinity
-      console.log('Noble-curves validation passed for public key');
-    } catch (nobleError) {
-      console.error('Noble-curves validation failed:', nobleError);
-      throw new Error('Invalid public key: failed noble-curves validation');
+    // Manual subgroup validation: Check if [order] * point = infinity
+    const order = 39402006196394479212279040100143613805079739270465446667946905279627659399113263569398956308152294913554433653942643n;
+    // Simple scalar multiplication check (not full impl, but for validation: compute [order]G should be O)
+    // For received point Q, compute [order]Q and check if x=y=0 (infinity)
+    // But full scalar mult in JS BigInt is complex; approximate by checking if Q is not low-order
+    // For full check, we'd need to implement point multiplication, but to keep light, check if [cofactor]Q is on curve and not low order
+    // P-384 has cofactor 1, so order*Q should be O if Q has order dividing order
+    // To implement simple: use double-and-add for scalar mult
+    // Implementing basic point mult for validation
+    function isInfinity(Px, Py) {
+      return Px === 0n && Py === 0n;
     }
+
+    function pointDouble(x, y) {
+      if (isInfinity(x, y)) return {x: 0n, y: 0n};
+      const lambda = (3n * x * x + a) * modInverse(2n * y, p) % p;
+      const xr = (lambda * lambda - 2n * x) % p;
+      const yr = (lambda * (x - xr) - y) % p;
+      return {x: xr, y: yr};
+    }
+
+    function pointAdd(x1, y1, x2, y2) {
+      if (isInfinity(x1, y1)) return {x: x2, y: y2};
+      if (isInfinity(x2, y2)) return {x: x1, y: y1};
+      if (x1 === x2 && y1 === -y2 % p) return {x: 0n, y: 0n};
+      const lambda = (y2 - y1) * modInverse(x2 - x1, p) % p;
+      const xr = (lambda * lambda - x1 - x2) % p;
+      const yr = (lambda * (x1 - xr) - y1) % p;
+      return {x: xr, y: yr};
+    }
+
+    function modInverse(a, m) {
+      let m0 = m;
+      let y = 0n, x = 1n;
+      if (m === 1n) return 0n;
+      while (a > 1n) {
+        const q = a / m;
+        let t = m;
+        m = a % m;
+        a = t;
+        t = BigInt(y);
+        y = BigInt(x) - q * BigInt(y);
+        x = t;
+      }
+      if (x < 0n) x += m0;
+      return x;
+    }
+
+    function scalarMultiply(k, Px, Py) {
+      let Rx = 0n, Ry = 0n;
+      let Qx = Px, Qy = Py;
+      while (k > 0n) {
+        if (k & 1n) {
+          const R = pointAdd(Rx, Ry, Qx, Qy);
+          Rx = R.x;
+          Ry = R.y;
+        }
+        const Q = pointDouble(Qx, Qy);
+        Qx = Q.x;
+        Qy = Q.y;
+        k >>= 1n;
+      }
+      return {x: Rx, y: Ry};
+    }
+
+    const result = scalarMultiply(order, x, y);
+    if (!isInfinity(result.x, result.y)) {
+      throw new Error('Public key point has invalid order (not in prime-order subgroup)');
+    }
+    console.log('Manual subgroup validation passed for public key');
 
     const key = await window.crypto.subtle.importKey(
       'raw',

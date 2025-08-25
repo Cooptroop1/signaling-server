@@ -1156,3 +1156,16 @@ function loadRecentCodes() {
     document.getElementById('recentChats').classList.add('hidden');
   }
 }
+
+function updateRecentCodes(code) {
+  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  if (recentCodes.includes(code)) {
+    recentCodes = recentCodes.filter(c => c !== code);
+  }
+  recentCodes.unshift(code);
+  if (recentCodes.length > 5) {
+    recentCodes = recentCodes.slice(0, 5);
+  }
+  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
+  loadRecentCodes(); // Refresh UI
+}

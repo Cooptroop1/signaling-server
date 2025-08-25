@@ -229,9 +229,14 @@ async function sendMessage(content) {
   if (grokBotActive && content.startsWith('/grok ')) {
     const query = content.slice(6).trim();
     if (query) await sendToGrok(query);
-  } else if (content === '/ratchet' && isInitiator) {
-    await triggerRatchet();
-    showStatusMessage('Key ratchet triggered manually.');
+  } else if (content === '/ratchet') {
+    if (isInitiator) {
+      await triggerRatchet();
+      showStatusMessage('Key ratchet triggered manually.');
+    } else {
+      sendSignalingMessage('ratchet-request', {});
+      showStatusMessage('Ratchet request sent to initiator.');
+    }
   } else {
     await prepareAndSendMessage({ content });
   }
@@ -570,8 +575,8 @@ async function processReceivedMessage(data, targetId) {
         showStatusMessage('Invalid message signature detected.');
         return;
       }
-      if (data.type === 'message') {
-        contentOrData = contentOrData.trimEnd(); // Trim trailing padding spaces for text
+      if (data.encryptedContent) {
+        contentOrData = contentOrData.trimEnd(); // Trim padding for text
       }
     } catch (error) {
       console.error(`Decryption/verification failed for message from ${targetId}:`, error);

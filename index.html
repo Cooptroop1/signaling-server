@@ -546,12 +546,41 @@
  width: 8px;
  height: 8px;
  border-radius: 50%;
+ cursor: pointer;
+ position: relative;
  }
  .online {
  background-color: green;
  }
  .offline {
  background-color: red;
+ }
+ .user-dot.online:hover .user-menu {
+ display: block;
+ }
+ .user-menu {
+ display: none;
+ position: absolute;
+ top: 100%;
+ left: 0;
+ background-color: white;
+ border: 1px solid #ccc;
+ border-radius: 0.5rem;
+ box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+ z-index: 100;
+ min-width: 100px;
+ }
+ .user-menu button {
+ display: block;
+ width: 100%;
+ padding: 0.5rem;
+ text-align: left;
+ border: none;
+ background: none;
+ cursor: pointer;
+ }
+ .user-menu button:hover {
+ background-color: #f0f0f0;
  }
  [data-has-code] #initialContainer,
  [data-has-code] #connectContainer,
@@ -646,7 +675,7 @@
  <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
  <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
  <button id="connect2FAChatButton" class="bg-teal-500 text-white px-4 py-2 rounded w-full hover:bg-teal-600 transition-colors" aria-label="Connect to 2FA Room">Connect to 2FA Room</button>
- <div id="recentChats" class="mt-4">
+ <div id="recentChats" class="mt-4 hidden">
   <h2 class="text-xl font-bold mb-2">Recent Chats</h2>
   <div id="recentCodesList"></div>
  </div>

@@ -574,6 +574,9 @@ socket.onmessage = async (event) => {
             showStatusMessage('Invalid message signature detected.');
             return;
           }
+          if (payload.encryptedContent) {
+            contentOrData = contentOrData.trimEnd(); // Trim padding for text
+          }
         } catch (error) {
           console.error(`Decryption/verification failed for relay message:`, error);
           showStatusMessage('Failed to decrypt/verify message.');

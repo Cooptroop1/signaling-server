@@ -46,7 +46,7 @@ server.on('request', (req, res) => {
       const nonce = crypto.randomBytes(16).toString('base64');
       let updatedCSP = "default-src 'self'; " +
         `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +  // Removed 'unsafe-hashes' and sha256 hash
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
         "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +

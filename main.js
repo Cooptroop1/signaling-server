@@ -1,5 +1,3 @@
-
-
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -23,6 +21,7 @@ const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt co
 const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
+let processedNonces = new Set(); // New for nonce dedup
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -126,6 +125,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
   const jitteredTimestamp = timestamp + jitter * 1000;
+  const nonce = crypto.randomUUID();  // New: Generate nonce
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
   let rawData = dataToSend || sanitizedContent;
@@ -133,9 +133,9 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + jitteredTimestamp;
+  const toSign = rawData + jitteredTimestamp + nonce;  // New: Include nonce in signature
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, username, timestamp: jitteredTimestamp, type, iv, signature };
+  let payload = { messageId, username, timestamp: jitteredTimestamp, nonce, type, iv, signature };  // New: Add nonce
   if (dataToSend) {
     payload.encryptedData = encrypted;
     payload.filename = file?.name;
@@ -220,6 +220,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
+  processedNonces.add(nonce);  // New: Add nonce
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
     await triggerRatchet();
@@ -547,7 +548,12 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate message ${data.messageId} from ${targetId}`);
     return;
   }
+  if (processedNonces.has(data.nonce)) {  // New: Check nonce
+    console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
+    return;
+  }
   processedMessageIds.add(data.messageId);
+  processedNonces.add(data.nonce);  // New: Add nonce
   const senderUsername = usernames.get(targetId) || data.username;
   const messages = document.getElementById('messages');
   const isSelf = senderUsername === username;
@@ -565,7 +571,7 @@ async function processReceivedMessage(data, targetId) {
       const encrypted = data.encryptedContent || data.encryptedData;
       const iv = data.iv;
       contentOrData = await decryptRaw(messageKey, encrypted, iv);
-      const toVerify = contentOrData + data.timestamp;
+      const toVerify = contentOrData + data.timestamp + data.nonce;  // New: Include nonce in verification
       const valid = await verifyMessage(signingKey, data.signature, toVerify);
       if (!valid) {
         console.warn(`Invalid signature for message from ${targetId}`);
@@ -933,7 +939,6 @@ async function autoConnect(codeParam) {
         statusElement.textContent = 'Waiting for connection...';
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
         document.getElementById('messageInput')?.focus();
-        updateFeaturesUI();
       };
     }
   } else {

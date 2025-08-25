@@ -21,8 +21,7 @@ const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt co
 const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
-let processedNonces = new Set(); // New for nonce dedup
-let lazyObserver;
+let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -220,7 +219,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
-  processedNonces.add(nonce);  // New: Add nonce
+  processedNonces.set(nonce, Date.now());  // Changed to Map: nonce -> timestamp
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
     await triggerRatchet();
@@ -553,7 +552,7 @@ async function processReceivedMessage(data, targetId) {
     return;
   }
   processedMessageIds.add(data.messageId);
-  processedNonces.add(data.nonce);  // New: Add nonce
+  processedNonces.set(data.nonce, Date.now());  // Changed to Map: nonce -> timestamp
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     const messageKey = await deriveMessageKey();
@@ -1267,3 +1266,14 @@ async function generateThumbnail(dataURL, width = 100, height = 100) {
     img.onerror = () => resolve(dataURL); // Fallback to full if error
   });
 }
+
+// New: Cleanup old nonces every 5min
+setInterval(() => {
+  const now = Date.now();
+  for (const [nonce, ts] of processedNonces) {
+    if (now - ts > 3600000) { // 1hr = 3600000ms
+      processedNonces.delete(nonce);
+    }
+  }
+  console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
+}, 300000); // 5min

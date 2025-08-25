@@ -659,7 +659,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, version, retryCoun
     const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
       newFailures.push(cId);
-      return;
+      continue;
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
@@ -1100,6 +1100,13 @@ document.addEventListener('DOMContentLoaded', () => {
       // Toggle menu if needed; already in CSS hover, but for touch/mobile, add click toggle
       e.target.classList.toggle('active'); // Add .active to show menu on click
     }
+  });
+  // Toggle recent chats
+  const toggleRecent = document.getElementById('toggleRecent');
+  const recentCodesList = document.getElementById('recentCodesList');
+  toggleRecent.addEventListener('click', () => {
+    const isHidden = recentCodesList.classList.toggle('hidden');
+    toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
 });
 

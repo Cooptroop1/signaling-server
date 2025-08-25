@@ -1,5 +1,3 @@
-
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -48,7 +46,7 @@ server.on('request', (req, res) => {
       const nonce = crypto.randomBytes(16).toString('base64');
       let updatedCSP = "default-src 'self'; " +
         `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
         "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
@@ -332,6 +330,9 @@ function validateMessage(data) {
       if (!data.timestamp || typeof data.timestamp !== 'number') {
         return { valid: false, error: 'relay-message: timestamp required as number' };
       }
+      if (!data.nonce || typeof data.nonce !== 'string') {
+        return { valid: false, error: 'relay-message: nonce required as string' };
+      }
       if (!data.code) {
         return { valid: false, error: 'relay-message: code required' };
       }
@@ -353,6 +354,9 @@ function validateMessage(data) {
       }
       if (!data.timestamp || typeof data.timestamp !== 'number') {
         return { valid: false, error: data.type + ': timestamp required as number' };
+      }
+      if (!data.nonce || typeof data.nonce !== 'string') {
+        return { valid: false, error: data.type + ': nonce required as string' };
       }
       if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string')) {
         return { valid: false, error: 'relay-file: filename required as string' };
@@ -431,9 +435,9 @@ setInterval(() => {
   });
   processedMessageIds.forEach((messageSet, code) => {
     const now = Date.now();
-    messageSet.forEach((timestamp, messageId) => {
+    messageSet.forEach((timestamp, nonce) => {  // Changed from messageId to nonce
       if (now - timestamp > 300000) {
-        messageSet.delete(messageId);
+        messageSet.delete(nonce);
       }
     });
     if (messageSet.size === 0) {
@@ -875,22 +879,22 @@ wss.on('connection', (ws, req) => {
           processedMessageIds.set(data.code, new Map());
         }
         const messageSet = processedMessageIds.get(data.code);
-        if (messageSet.has(data.messageId)) {
-          console.warn(`Duplicate messageId ${data.messageId} in room ${data.code}, ignoring`);
+        if (messageSet.has(data.nonce)) {  // Changed to check nonce instead of messageId
+          console.warn(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
           return;
         }
         const now = Date.now();
         if (Math.abs(now - data.timestamp) > 300000) { // 5 minutes window
-          console.warn(`Invalid timestamp for messageId ${data.messageId} in room ${data.code}: ${data.timestamp} (now: ${now})`);
+          console.warn(`Invalid timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp} (now: ${now})`);
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
           return;
         }
         if (data.timestamp > now) {
-          console.warn(`Future timestamp for messageId ${data.messageId} in room ${data.code}: ${data.timestamp}`);
+          console.warn(`Future timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
           return;
         }
-        messageSet.set(data.messageId, data.timestamp);
+        messageSet.set(data.nonce, data.timestamp);  // Changed to set nonce
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
@@ -904,7 +908,8 @@ wss.on('connection', (ws, req) => {
               filename: data.filename,
               timestamp: data.timestamp,
               iv: data.iv,
-              signature: data.signature
+              signature: data.signature,
+              nonce: data.nonce  // Forward nonce
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
           }
@@ -1084,7 +1089,7 @@ wss.on('connection', (ws, req) => {
 
 function restrictRate(ws) {
   if (ws.isAdmin) return true;
-  if (!ws.clientId) return true;
+  if (ws.clientId) return true;
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {

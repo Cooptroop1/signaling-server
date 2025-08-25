@@ -1264,3 +1264,17 @@ function updateRecentCodes(code) {
   localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
   loadRecentCodes(); // Refresh UI
 }
+
+function processSignalingQueue() {
+  signalingQueue.forEach((queue, key) => {
+    while (queue.length > 0) {
+      const { type, additionalData } = queue.shift();
+      if (type.startsWith('relay-')) {
+        sendRelayMessage(type, additionalData);
+      } else {
+        sendSignalingMessage(type, additionalData);
+      }
+    }
+  });
+  signalingQueue.clear();
+}

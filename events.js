@@ -549,25 +549,21 @@ socket.onmessage = async (event) => {
         }
       }
       if (message.type === 'image') {
-        const thumbnail = await generateThumbnail(contentOrData);
         const img = document.createElement('img');
-        img.src = thumbnail;
-        img.dataset.fullSrc = contentOrData;
+        img.src = contentOrData;
         img.style.maxWidth = '100%';
         img.style.borderRadius = '0.5rem';
         img.style.cursor = 'pointer';
         img.setAttribute('alt', 'Received image');
         img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(img);
-        lazyObserver.observe(img);
       } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
-        audio.dataset.src = contentOrData;
+        audio.src = contentOrData;
         audio.controls = true;
         audio.setAttribute('alt', 'Received voice message');
         audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(audio);
-        lazyObserver.observe(audio);
       } else if (message.type === 'file') {
         const link = document.createElement('a');
         link.href = contentOrData;
@@ -865,7 +861,7 @@ document.getElementById('backButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
+  statusElement.textContent = 'Start a new chat or connect to an existing chat';
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
 };
@@ -877,7 +873,7 @@ document.getElementById('backButtonConnect').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
+  statusElement.textContent = 'Start a new chat or connect to an existing chat';
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
 };
@@ -995,6 +991,19 @@ function updateDots() {
   for (let i = 0; i < greenCount; i++) {
     const dot = document.createElement('div');
     dot.className = 'user-dot online';
+    if (isInitiator && i > 0) { // Skip self (first dot)
+      const menu = document.createElement('div');
+      menu.className = 'user-menu';
+      const kickButton = document.createElement('button');
+      kickButton.textContent = 'Kick';
+      kickButton.onclick = () => kickUser(connectedClients[i]); // Assume connectedClients array; adjust if set
+      const banButton = document.createElement('button');
+      banButton.textContent = 'Ban';
+      banButton.onclick = () => banUser(connectedClients[i]);
+      menu.appendChild(kickButton);
+      menu.appendChild(banButton);
+      dot.appendChild(menu);
+    }
     userDots.appendChild(dot);
   }
   for (let i = 0; i < redCount; i++) {
@@ -1002,6 +1011,20 @@ function updateDots() {
     dot.className = 'user-dot offline';
     userDots.appendChild(dot);
   }
+}
+
+async function kickUser(targetId) {
+  if (!isInitiator) return;
+  const toSign = targetId + 'kick' + code;
+  const signature = await signMessage(signingKey, toSign);
+  socket.send(JSON.stringify({ type: 'kick', targetId, code, clientId, token, signature }));
+}
+
+async function banUser(targetId) {
+  if (!isInitiator) return;
+  const toSign = targetId + 'ban' + code;
+  const signature = await signMessage(signingKey, toSign);
+  socket.send(JSON.stringify({ type: 'ban', targetId, code, clientId, token, signature }));
 }
 
 function getCookie(name) {
@@ -1045,6 +1068,13 @@ document.addEventListener('DOMContentLoaded', () => {
   setupLazyObserver();
   // Load recent codes
   loadRecentCodes();
+  // Setup user dots click for menu
+  document.getElementById('userDots').addEventListener('click', (e) => {
+    if (e.target.classList.contains('user-dot')) {
+      // Toggle menu if needed; already in CSS hover, but for touch/mobile, add click toggle
+      e.target.classList.toggle('active'); // Add .active to show menu on click
+    }
+  });
 });
 
 function setupWaitingForJoin(codeParam) {

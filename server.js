@@ -1,1254 +1,1363 @@
-let turnUsername = '';
-let turnCredential = '';
-let localStream = null;
-let voiceCallActive = false;
-let grokBotActive = false;
-let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map();
-let audioOutputMode = 'earpiece';
-let totpEnabled = false;
-let totpSecret = '';
-let pendingTotpSecret = null;
-let mediaRecorder = null;
-let voiceChunks = [];
-let voiceTimerInterval = null;
-let messageCount = 0;
-const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
-const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
-const negotiationQueues = new Map(); // Queue pending negotiations per peer
-let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
-const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
-const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
-let keyVersion = 0; // New: Global key version counter for ratcheting
-let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 
-async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
-  if (!username || (dataChannels.size === 0 && !useRelay)) {
-    showStatusMessage('Error: Ensure you are connected and have a username.');
+const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken');
+const validator = require('validator');
+const http = require('http');
+const https = require('https');
+const url = require('url');
+const crypto = require('crypto');
+const otplib = require('otplib');
+
+const CERT_KEY_PATH = 'path/to/your/private-key.pem';
+const CERT_PATH = 'path/to/your/fullchain.pem';
+let server;
+if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
+  server = http.createServer();
+  console.log('Using HTTP server (production or missing certificates)');
+} else {
+  server = https.createServer({
+    key: fs.readFileSync(CERT_KEY_PATH),
+    cert: fs.readFileSync(CERT_PATH)
+  });
+  console.log('Using HTTPS server for local development');
+}
+
+server.on('request', (req, res) => {
+  const proto = req.headers['x-forwarded-proto'];
+  if (proto && proto !== 'https') {
+    res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
+    res.end();
     return;
   }
-
-  // Global send rate limit check (aggregate all types)
-  const now = performance.now();
-  if (now - globalSendRate.startTime >= 60000) {
-    globalSendRate.count = 0;
-    globalSendRate.startTime = now;
-  }
-  if (globalSendRate.count >= 50) {
-    showStatusMessage('Global message rate limit exceeded (50/min). Please wait.');
-    return;
-  }
-
-  // New: Client-side size limit check (mirror server 1MB/min)
-  if (now - globalSizeRate.startTime >= 60000) {
-    globalSizeRate.totalSize = 0;
-    globalSizeRate.startTime = now;
-  }
-  const payloadSize = (content || base64 || '').length * 3 / 4; // Approximate byte size (base64 or text)
-  if (globalSizeRate.totalSize + payloadSize > 1048576) { // 1MB
-    showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
-    return;
-  }
-
-  let dataToSend = content || base64;
-  if (type === 'image' || type === 'file') {
-    if (!features.enableImages) {
-      showStatusMessage('Error: Images/Files are disabled by admin.');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  const fullUrl = new URL(req.url, `http://${req.headers.host}`);
+  let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
       return;
     }
-  } else if (type === 'voice') {
-    if (!features.enableVoice) {
-      showStatusMessage('Error: Voice messages are disabled by admin.');
-      return;
+    let contentType = 'text/plain';
+    if (filePath.endsWith('.html')) {
+      contentType = 'text/html';
+      const nonce = crypto.randomBytes(16).toString('base64');
+      let updatedCSP = "default-src 'self'; " +
+        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}' 'unsafe-hashes' 'sha256-biLFinpqYMtWHmXfkA1BPeCY0/fNt46SAZ+BBk5YUog='; ` +
+        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "media-src 'self' blob: data:; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
+        "object-src 'none'; base-uri 'self';";
+      data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
+        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+      data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
+      data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
+      let clientIdFromCookie;
+      const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [name, value] = cookie.trim().split('=');
+        acc[name] = value;
+        return acc;
+      }, {}) : {};
+      clientIdFromCookie = cookies['clientId'];
+      if (!clientIdFromCookie) {
+        clientIdFromCookie = uuidv4();
+        res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
+      }
+    } else if (filePath.endsWith('.js')) {
+      contentType = 'application/javascript';
     }
-  }
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(data);
+  });
+});
 
-  if (file && file.size > 5 * 1024 * 1024) {
-    showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
+const wss = new WebSocket.Server({ server });
+const rooms = new Map();
+const dailyUsers = new Map();
+const dailyConnections = new Map();
+const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const AUDIT_FILE_BASE = path.join(__dirname, 'audit'); // Base name without extension
+const FEATURES_FILE = path.join('/data', 'features.json');
+const STATS_FILE = path.join('/data', 'stats.json');
+const UPDATE_INTERVAL = 30000;
+const randomCodes = new Set();
+const rateLimits = new Map();
+const allTimeUsers = new Set();
+const ipRateLimits = new Map();
+const ipDailyLimits = new Map();
+const ipFailureCounts = new Map();
+const ipBans = new Map();
+const revokedTokens = new Map();
+const clientTokens = new Map();
+const totpSecrets = new Map();
+const processedMessageIds = new Map();
+const clientSizeLimits = new Map(); // New: Per-client size tracking
+const ADMIN_SECRET = process.env.ADMIN_SECRET;
+if (!ADMIN_SECRET) {
+  throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
+}
+const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
+const secretFile = path.join('/data', 'jwt_secret.txt');
+const previousSecretFile = path.join('/data', 'previous_jwt_secret.txt');
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  if (fs.existsSync(secretFile)) {
+    JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
+  } else {
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(secretFile, JWT_SECRET);
+    console.log('Generated new JWT secret and saved to disk.');
+  }
+}
+if (fs.existsSync(secretFile)) {
+  const stats = fs.statSync(secretFile);
+  const mtime = stats.mtime.getTime();
+  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  if (mtime < thirtyDaysAgo) {
+    const previousSecret = JWT_SECRET;
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(secretFile, JWT_SECRET);
+    fs.writeFileSync(previousSecretFile, previousSecret);
+    console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
+  }
+}
+const TURN_USERNAME = process.env.TURN_USERNAME;
+if (!TURN_USERNAME) {
+  throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
+}
+const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
+if (!TURN_CREDENTIAL) {
+  throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
+}
+const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
+let features = {
+  enableService: true,
+  enableImages: true,
+  enableVoice: true,
+  enableVoiceCalls: true,
+  enableAudioToggle: true,
+  enableGrokBot: true,
+  enableP2P: true,
+  enableRelay: true
+};
+
+if (fs.existsSync(FEATURES_FILE)) {
+  try {
+    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
+    console.log('Loaded features:', features);
+  } catch (err) {
+    console.error('Error loading features file:', err);
+  }
+} else {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+}
+
+let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+
+function saveFeatures() {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+  console.log('Saved features:', features);
+}
+
+function saveAggregatedStats() {
+  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
+  console.log('Saved aggregated stats to disk');
+}
+
+function isValidBase32(str) {
+  return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
+}
+
+function isValidBase64(str) {
+  if (typeof str !== 'string') return false;
+  let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
+  const padding = (4 - sanitized.length % 4) % 4;
+  sanitized += '='.repeat(padding);
+  const base64Regex = /^[A-Za-z0-9+/=]+$/;
+  const isValid = base64Regex.test(sanitized);
+  if (!isValid) console.warn('Invalid base64 detected:', str);
+  return isValid;
+}
+
+function validateMessage(data) {
+  if (typeof data !== 'object' || data === null || !data.type) {
+    return { valid: false, error: 'Invalid message: must be an object with "type" field' };
+  }
+  if (data.token && typeof data.token !== 'string') {
+    return { valid: false, error: 'Invalid token: must be a string' };
+  }
+  if (data.clientId && typeof data.clientId !== 'string') {
+    return { valid: false, error: 'Invalid clientId: must be a string' };
+  }
+  if (data.code && !validateCode(data.code)) {
+    return { valid: false, error: 'Invalid code format' };
+  }
+  if (data.username && !validateUsername(data.username)) {
+    return { valid: false, error: 'Invalid username: 1-16 alphanumeric characters' };
+  }
+  switch (data.type) {
+    case 'connect':
+      if (!data.clientId || typeof data.clientId !== 'string') {
+        return { valid: false, error: 'connect: clientId required as string' };
+      }
+      break;
+    case 'refresh-token':
+      if (!data.refreshToken || typeof data.refreshToken !== 'string') {
+        return { valid: false, error: 'refresh-token: refreshToken required as string' };
+      }
+      break;
+    case 'public-key':
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+        return { valid: false, error: 'public-key: invalid publicKey format or length' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'public-key: code required' };
+      }
+      break;
+    case 'encrypted-room-key':
+      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
+        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey format' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'encrypted-room-key: invalid iv' };
+      }
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+        return { valid: false, error: 'encrypted-room-key: invalid publicKey format or length' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'encrypted-room-key: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'encrypted-room-key: code required' };
+      }
+      break;
+    case 'new-room-key':
+      if (!data.encrypted || !isValidBase64(data.encrypted)) {
+        return { valid: false, error: 'new-room-key: invalid encrypted' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'new-room-key: invalid iv' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'new-room-key: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'new-room-key: code required' };
+      }
+      break;
+    case 'join':
+      if (!data.code) {
+        return { valid: false, error: 'join: code required' };
+      }
+      if (!data.username) {
+        return { valid: false, error: 'join: username required' };
+      }
+      if (data.totpCode && typeof data.totpCode !== 'string') {
+        return { valid: false, error: 'join: totpCode must be a string if provided' };
+      }
+      break;
+    case 'check-totp':
+      if (!data.code) {
+        return { valid: false, error: 'check-totp: code required' };
+      }
+      break;
+    case 'set-max-clients':
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
+        return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'set-max-clients: code required' };
+      }
+      break;
+    case 'offer':
+    case 'answer':
+      if (!data.offer && !data.answer) {
+        return { valid: false, error: data.type + ': offer or answer required' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: data.type + ': targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: data.type + ': code required' };
+      }
+      break;
+    case 'candidate':
+      if (!data.candidate) {
+        return { valid: false, error: 'candidate: candidate required' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'candidate: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'candidate: code required' };
+      }
+      break;
+    case 'kick':
+    case 'ban':
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: `${data.type}: targetId required as string` };
+      }
+      if (!data.signature || !isValidBase64(data.signature)) {
+        return { valid: false, error: `${data.type}: valid signature required` };
+      }
+      if (!data.code) {
+        return { valid: false, error: `${data.type}: code required` };
+      }
+      break;
+    case 'submit-random':
+      if (!data.code) {
+        return { valid: false, error: 'submit-random: code required' };
+      }
+      break;
+    case 'get-random-codes':
+      break;
+    case 'relay-message':
+      if ((!data.content && !data.encryptedContent) || typeof (data.content || data.encryptedContent) !== 'string') {
+        return { valid: false, error: 'relay-message: content or encryptedContent required as string' };
+      }
+      if (data.encryptedContent && !data.iv) {
+        return { valid: false, error: 'relay-message: iv required for encryptedContent' };
+      }
+      if (data.encryptedContent && !data.signature) {
+        return { valid: false, error: 'relay-message: signature required for encryptedContent' };
+      }
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'relay-message: messageId required as string' };
+      }
+      if (!data.timestamp || typeof data.timestamp !== 'number') {
+        return { valid: false, error: 'relay-message: timestamp required as number' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'relay-message: code required' };
+      }
+      break;
+    case 'relay-image':
+    case 'relay-voice':
+    case 'relay-file':
+      if ((!data.data && !data.encryptedData) || !isValidBase64(data.data || data.encryptedData)) {
+        return { valid: false, error: data.type + ': invalid data or encryptedData (base64)' };
+      }
+      if (data.encryptedData && !data.iv) {
+        return { valid: false, error: data.type + ': iv required for encryptedData' };
+      }
+      if (data.encryptedData && !data.signature) {
+        return { valid: false, error: data.type + ': signature required for encryptedData' };
+      }
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: data.type + ': messageId required as string' };
+      }
+      if (!data.timestamp || typeof data.timestamp !== 'number') {
+        return { valid: false, error: data.type + ': timestamp required as number' };
+      }
+      if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string')) {
+        return { valid: false, error: 'relay-file: filename required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: data.type + ': code required' };
+      }
+      break;
+    case 'get-stats':
+    case 'get-features':
+    case 'toggle-feature':
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: data.type + ': secret required as string' };
+      }
+      if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
+        return { valid: false, error: 'toggle-feature: feature required as string' };
+      }
+      break;
+    case 'export-stats-csv': // New
+    case 'export-logs-csv': // New
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: data.type + ': secret required as string' };
+      }
+      break;
+    case 'ping':
+    case 'pong':
+      break;
+    case 'set-totp':
+      if (!data.code) {
+        return { valid: false, error: 'set-totp: code required' };
+      }
+      if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
+        return { valid: false, error: 'set-totp: valid base32 secret required' };
+      }
+      break;
+    default:
+      return { valid: false, error: 'Unknown message type' };
+  }
+  return { valid: true };
+}
+
+if (fs.existsSync(LOG_FILE)) {
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
+  const lines = logContent.split('\n');
+  lines.forEach(line => {
+    const match = line.match(/Client: (\w+)/);
+    if (match) allTimeUsers.add(match[1]);
+  });
+  console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
+}
+
+setInterval(() => {
+  randomCodes.forEach(code => {
+    if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
+      randomCodes.delete(code);
+    }
+  });
+  broadcastRandomCodes();
+  console.log('Auto-cleaned random codes.');
+}, 3600000);
+
+const pingInterval = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 50000);
+
+setInterval(() => {
+  const now = Date.now();
+  revokedTokens.forEach((expiry, token) => {
+    if (expiry < now) {
+      revokedTokens.delete(token);
+    }
+  });
+  processedMessageIds.forEach((messageSet, code) => {
+    const now = Date.now();
+    messageSet.forEach((timestamp, messageId) => {
+      if (now - timestamp > 300000) {
+        messageSet.delete(messageId);
+      }
+    });
+    if (messageSet.size === 0) {
+      processedMessageIds.delete(code);
+    }
+  });
+  console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
+}, 600000); // Changed to every 10 minutes (600000 ms)
+
+wss.on('connection', (ws, req) => {
+  const origin = req.headers.origin;
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    console.warn(`Rejected connection from invalid origin: ${origin}`);
+    ws.close(1008, 'Invalid origin');
     return;
   }
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+  const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress;
+  const hashedIp = hashIp(clientIp);
+  if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) {
+    ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
+    return;
+  }
+  let clientId, code, username;
+  let isAdmin = false;
+  ws.on('message', async (message) => {
+    if (!restrictRate(ws)) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
+      return;
+    }
+    try {
+      const data = JSON.parse(message);
+      const loggedData = { ...data };
+      if (loggedData.secret) {
+        loggedData.secret = '[REDACTED]';
+      }
+      console.log('Received:', loggedData);
+      const validation = validateMessage(data);
+      if (!validation.valid) {
+        ws.send(JSON.stringify({ type: 'error', message: validation.error }));
+        incrementFailure(clientIp);
+        return;
+      }
+      // Skip escaping for specific fields that should remain untouched
+      const skipEscapeFields = [
+        data.type === 'public-key' && 'publicKey',
+        data.type === 'encrypted-room-key' && 'publicKey',
+        data.type === 'encrypted-room-key' && 'encryptedKey',
+        data.type === 'encrypted-room-key' && 'iv',
+        data.type === 'new-room-key' && 'encrypted',
+        data.type === 'new-room-key' && 'iv',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'content',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'data',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature'
+      ];
+      Object.keys(data).forEach(key => {
+        if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
+          data[key] = validator.escape(validator.trim(data[key]));
+        }
+      });
+      if ((data.type === 'public-key' || data.type === 'encrypted-room-key') && data.publicKey) {
+        if (!isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format or length' }));
+          incrementFailure(clientIp);
+          return;
+        }
+      }
+      if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature') {
+        if (data.secret === ADMIN_SECRET) {
+          isAdmin = true;
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+          return;
+        }
+      }
+      if (!features.enableService && !isAdmin && data.type !== 'connect') {
+        ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+        ws.close();
+        return;
+      }
+      if (data.type !== 'connect' && data.type !== 'refresh-token') {
+        if (!data.token) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
+          return;
+        }
+        try {
+          let decoded = jwt.verify(data.token, JWT_SECRET);
+          if (decoded.clientId !== data.clientId) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
+            return;
+          }
+          if (revokedTokens.has(data.token)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
+            return;
+          }
+        } catch (err) {
+          if (fs.existsSync(previousSecretFile)) {
+            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
+            try {
+              let decoded = jwt.verify(data.token, previousSecret);
+              if (decoded.clientId !== data.clientId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
+                return;
+              }
+              if (revokedTokens.has(data.token)) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
+                return;
+              }
+            } catch (previousErr) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+              return;
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+            return;
+          }
+        }
+      }
+      if (data.type === 'connect') {
+        clientId = data.clientId || uuidv4();
+        ws.clientId = clientId;
+        logStats({ clientId, event: 'connect' });
+        const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '10m' });
+        const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
+        clientTokens.set(clientId, { accessToken, refreshToken });
+        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+        return;
+      }
+      if (data.type === 'refresh-token') {
+        if (!data.refreshToken) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Missing refresh token' }));
+          return;
+        }
+        try {
+          const decoded = jwt.verify(data.refreshToken, JWT_SECRET);
+          if (decoded.clientId !== data.clientId) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
+            return;
+          }
+          if (revokedTokens.has(data.refreshToken)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
+            return;
+          }
+          const oldRefreshExpiry = decoded.exp * 1000;
+          revokedTokens.set(data.refreshToken, oldRefreshExpiry);
+          const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
+          const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
+          clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
+          ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
+        } catch (err) {
+          if (fs.existsSync(previousSecretFile)) {
+            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
+            try {
+              const decoded = jwt.verify(data.refreshToken, previousSecret);
+              if (decoded.clientId !== data.clientId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
+                return;
+              }
+              if (revokedTokens.has(data.refreshToken)) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
+                return;
+              }
+              const oldRefreshExpiry = decoded.exp * 1000;
+              revokedTokens.set(data.refreshToken, oldRefreshExpiry);
+              const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
+              const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
+              clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
+              ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
+            } catch (previousErr) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+              return;
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+            return;
+          }
+        }
+        return;
+      }
+      if (data.type === 'public-key') {
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          const initiatorWs = room.clients.get(room.initiator)?.ws;
+          if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
+            initiatorWs.send(JSON.stringify({ type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
+            console.log(`Forwarded public-key from ${data.clientId} to initiator ${room.initiator} for code: ${data.code}`);
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline, cannot exchange keys', code: data.code }));
+          }
+        }
+        return;
+      }
+      if (data.type === 'encrypted-room-key') {
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          const targetWs = room.clients.get(data.targetId)?.ws;
+          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
+            console.log(`Forwarded encrypted-room-key from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Target client not found or offline', code: data.code }));
+          }
+        }
+        return;
+      }
+      if (data.type === 'new-room-key') {
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          const targetWs = room.clients.get(data.targetId)?.ws;
+          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code }));
+            console.log(`Forwarded new-room-key from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Target client not found or offline', code: data.code }));
+          }
+        }
+        return;
+      }
+      if (data.type === 'join') {
+        if (!features.enableService) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.', code: data.code }));
+          return;
+        }
+        if (!restrictIpRate(clientIp, 'join')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (!restrictIpDaily(clientIp, 'join')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        code = data.code;
+        clientId = data.clientId;
+        username = data.username;
+        if (!validateUsername(username)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username: 1-16 alphanumeric characters.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (!validateCode(code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format: xxxx-xxxx-xxxx-xxxx.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        const roomTotpSecret = totpSecrets.get(code);
+        if (roomTotpSecret && !data.totpCode) {
+          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+          return;
+        }
+        if (roomTotpSecret && data.totpCode) {
+          const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
+          if (!isValid) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
+        }
+        if (!rooms.has(code)) {
+          rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
+          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
+          logStats({ clientId, username, code, event: 'init', totalClients: 1 });
+        } else {
+          const room = rooms.get(code);
+          if (room.clients.size >= room.maxClients) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
+          if (room.clients.has(clientId)) {
+            if (room.clients.get(clientId).username === username) {
+              const oldWs = room.clients.get(clientId).ws;
+              setTimeout(() => {
+                oldWs.close();
+              }, 1000);
+              room.clients.delete(clientId);
+              broadcast(code, {
+                type: 'client-disconnected',
+                clientId,
+                totalClients: room.clients.size,
+                isInitiator: clientId === room.initiator
+              });
+            } else {
+              ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
+              incrementFailure(clientIp);
+              return;
+            }
+          } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
+          if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
+          ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
+          logStats({ clientId, username, code, event: 'join', totalClients: room.clients.size + 1 });
+          if (room.clients.size > 0) {
+            room.clients.forEach((_, existingClientId) => {
+              if (existingClientId !== clientId) {
+                logStats({
+                  clientId,
+                  targetId: existingClientId,
+                  code,
+                  event: 'webrtc-connection',
+                  totalClients: room.clients.size + 1
+                });
+              }
+            });
+          }
+        }
+        const room = rooms.get(code);
+        room.clients.set(clientId, { ws, username });
+        ws.code = code;
+        ws.username = username;
+        broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
+        return;
+      }
+      if (data.type === 'check-totp') {
+        if (totpSecrets.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+        } else {
+          ws.send(JSON.stringify({ type: 'totp-not-required', code: data.code }));
+        }
+        return;
+      }
+      if (data.type === 'set-max-clients') {
+        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
+          const room = rooms.get(data.code);
+          room.maxClients = Math.min(data.maxClients, 10);
+          broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
+          logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
+        }
+        return;
+      }
+      if (data.type === 'set-totp') {
+        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
+          totpSecrets.set(data.code, data.secret);
+          broadcast(data.code, { type: 'totp-enabled', code: data.code });
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
+        }
+        return;
+      }
+      if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
+        if (rooms.has(data.code)) {
+          const room = rooms.get(data.code);
+          const target = room.clients.get(data.targetId);
+          if (target && target.ws.readyState === WebSocket.OPEN) {
+            console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
+            target.ws.send(JSON.stringify({ ...data, clientId }));
+          } else {
+            console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
+            ws.send(JSON.stringify({ type: 'error', message: `Target ${data.targetId} not found or offline`, code: data.code }));
+          }
+        }
+        return;
+      }
+      if (data.type === 'submit-random') {
+        if (!restrictIpRate(clientIp, 'submit-random')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (data.code && !rooms.get(data.code)?.clients.size) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (rooms.get(data.code)?.initiator === data.clientId) {
+          randomCodes.add(data.code);
+          broadcastRandomCodes();
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board.', code: data.code }));
+          incrementFailure(clientIp);
+        }
+        return;
+      }
+      if (data.type === 'get-random-codes') {
+        ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+        return;
+      }
+      if (data.type === 'remove-random-code') {
+        if (randomCodes.has(data.code)) {
+          randomCodes.delete(data.code);
+          broadcastRandomCodes();
+          console.log(`Removed code ${data.code} from randomCodes`);
+        }
+        return;
+      }
+      if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') {
+        if (data.type === 'relay-image' && !features.enableImages) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Image messages are disabled.', code: data.code }));
+          return;
+        }
+        if (data.type === 'relay-voice' && !features.enableVoice) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
+          return;
+        }
+        const payloadKey = data.content || data.encryptedContent || data.data || data.encryptedData;
+        if (payloadKey && (typeof payloadKey !== 'string' || (data.encryptedContent || data.encryptedData || data.type !== 'relay-message') && !isValidBase64(payloadKey))) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
+        if (!restrictClientSize(data.clientId, payloadSize)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (payloadKey && payloadKey.length > 9333333) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        const room = rooms.get(data.code);
+        const senderId = data.clientId;
+        if (!room.clients.has(senderId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
+          incrementFailure(clientIp);
+          return;
+        }
+        if (!processedMessageIds.has(data.code)) {
+          processedMessageIds.set(data.code, new Map());
+        }
+        const messageSet = processedMessageIds.get(data.code);
+        if (messageSet.has(data.messageId)) {
+          console.warn(`Duplicate messageId ${data.messageId} in room ${data.code}, ignoring`);
+          return;
+        }
+        const now = Date.now();
+        if (Math.abs(now - data.timestamp) > 300000) { // 5 minutes window
+          console.warn(`Invalid timestamp for messageId ${data.messageId} in room ${data.code}: ${data.timestamp} (now: ${now})`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
+          return;
+        }
+        if (data.timestamp > now) {
+          console.warn(`Future timestamp for messageId ${data.messageId} in room ${data.code}: ${data.timestamp}`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
+          return;
+        }
+        messageSet.set(data.messageId, data.timestamp);
+        room.clients.forEach((client, clientId) => {
+          if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify({
+              type: data.type.replace('relay-', ''),
+              messageId: data.messageId,
+              username: data.username,
+              content: data.content,
+              encryptedContent: data.encryptedContent,
+              data: data.data,
+              encryptedData: data.encryptedData,
+              filename: data.filename,
+              timestamp: data.timestamp,
+              iv: data.iv,
+              signature: data.signature
+            }));
+            console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
+          }
+        });
+        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} to ${room.clients.size - 1} clients`);
+        return;
+      }
+      if (data.type === 'get-stats') {
+        if (data.secret === ADMIN_SECRET) {
+          const now = new Date();
+          const day = now.toISOString().slice(0, 10);
+          let totalClients = 0;
+          rooms.forEach(room => {
+            totalClients += room.clients.size;
+          });
+          let weekly = computeAggregate(7);
+          let monthly = computeAggregate(30);
+          let yearly = computeAggregate(365);
+          ws.send(JSON.stringify({
+            type: 'stats',
+            dailyUsers: dailyUsers.get(day)?.size || 0,
+            dailyConnections: dailyConnections.get(day)?.size || 0,
+            weeklyUsers: weekly.users,
+            weeklyConnections: weekly.connections,
+            monthlyUsers: monthly.users,
+            monthlyConnections: monthly.connections,
+            yearlyUsers: yearly.users,
+            yearlyConnections: yearly.connections,
+            allTimeUsers: allTimeUsers.size,
+            activeRooms: rooms.size,
+            totalClients: totalClients
+          }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+        return;
+      }
+      if (data.type === 'get-features') {
+        if (data.secret === ADMIN_SECRET) {
+          ws.send(JSON.stringify({ type: 'features', ...features }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+        return;
+      }
+      if (data.type === 'toggle-feature') {
+        if (data.secret === ADMIN_SECRET) {
+          const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
+          if (features.hasOwnProperty(featureKey)) {
+            features[featureKey] = !features[featureKey];
+            saveFeatures();
+            const timestamp = new Date().toISOString();
+            fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
+            ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
+            wss.clients.forEach(client => {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'features-update', ...features }));
+                if (data.feature === 'service' && !features.enableService && !client.isAdmin) {
+                  client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+                  client.close();
+                }
+              }
+            });
+            if (data.feature === 'service' && !features.enableService) {
+              // Invalidate all tokens on service toggle off
+              clientTokens.forEach((tokens, clientId) => {
+                revokedTokens.set(tokens.accessToken, Date.now() + 1000); // Immediate revocation
+                if (tokens.refreshToken) {
+                  revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
+                }
+              });
+              clientTokens.clear();
+              console.log('All tokens invalidated due to service disable');
+              rooms.clear();
+              randomCodes.clear();
+              totpSecrets.clear();
+              processedMessageIds.clear();
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
+          }
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+        return;
+      }
+      // New: Handle export requests
+      if (data.type === 'export-stats-csv') {
+        if (data.secret === ADMIN_SECRET) {
+          const csv = generateStatsCSV();
+          ws.send(JSON.stringify({ type: 'export-stats-csv', csv }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+        return;
+      }
+      if (data.type === 'export-logs-csv') {
+        if (data.secret === ADMIN_SECRET) {
+          const csv = generateLogsCSV();
+          ws.send(JSON.stringify({ type: 'export-logs-csv', csv }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+        }
+        return;
+      }
+      if (data.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
+      if (data.type === 'pong') {
+        console.log('Received pong from client');
+        return;
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
+      incrementFailure(clientIp);
+    }
+  });
+  ws.on('close', () => {
+    if (ws.clientId) {
+      const tokens = clientTokens.get(ws.clientId);
+      if (tokens) {
+        try {
+          const decodedAccess = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
+          revokedTokens.set(tokens.accessToken, decodedAccess.exp * 1000);
+          if (tokens.refreshToken) {
+            const decodedRefresh = jwt.verify(tokens.refreshToken, JWT_SECRET, { ignoreExpiration: true });
+            revokedTokens.set(tokens.refreshToken, decodedRefresh.exp * 1000);
+          }
+          clientTokens.delete(ws.clientId);
+          console.log(`Revoked tokens for client ${ws.clientId} on disconnect`);
+        } catch (err) {
+          console.warn(`Failed to revoke tokens for client ${ws.clientId}: ${err.message}`);
+        }
+      }
+    }
+    if (ws.code && rooms.has(ws.code)) {
+      const room = rooms.get(ws.code);
+      const isInitiator = ws.clientId === room.initiator;
+      room.clients.delete(ws.clientId);
+      rateLimits.delete(ws.clientId);
+      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
+      if (room.clients.size === 0 || isInitiator) {
+        rooms.delete(ws.code);
+        randomCodes.delete(ws.code);
+        totpSecrets.delete(ws.code);
+        processedMessageIds.delete(ws.code);
+        broadcast(ws.code, {
+          type: 'client-disconnected',
+          clientId: ws.clientId,
+          totalClients: 0,
+          isInitiator
+        });
+      } else {
+        if (isInitiator) {
+          const newInitiator = room.clients.keys().next().value;
+          if (newInitiator) {
+            room.initiator = newInitiator;
+            broadcast(ws.code, {
+              type: 'initiator-changed',
+              newInitiator,
+              totalClients: room.clients.size
+            });
+          }
+        }
+        broadcast(ws.code, {
+          type: 'client-disconnected',
+          clientId: ws.clientId,
+          totalClients: room.clients.size,
+          isInitiator
+        });
+      }
+    }
+  });
+});
 
-  const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
-  const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
+function restrictRate(ws) {
+  if (ws.isAdmin) return true;
+  if (!ws.clientId) return true;
+  const now = Date.now();
+  const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
     rateLimit.count = 0;
     rateLimit.startTime = now;
   }
   rateLimit.count += 1;
-  rateLimitsMap.set(clientId, rateLimit);
+  rateLimits.set(ws.clientId, rateLimit);
+  if (rateLimit.count > 50) {
+    console.warn(`Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages in 60s`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages\n`);
+    return false;
+  }
+  return true;
+}
+
+// New: Per-client size cap (1MB/min total)
+function restrictClientSize(clientId, size) {
+  const now = Date.now();
+  const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
+  if (now - sizeLimit.startTime >= 60000) {
+    sizeLimit.totalSize = 0;
+    sizeLimit.startTime = now;
+  }
+  sizeLimit.totalSize += size;
+  clientSizeLimits.set(clientId, sizeLimit);
+  if (sizeLimit.totalSize > 1048576) { // 1MB
+    console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
+    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
+    return false;
+  }
+  return true;
+}
+
+function restrictIpRate(ip, action) {
+  const hashedIp = hashIp(ip);
+  const now = Date.now();
+  const key = `${hashedIp}:${action}`;
+  const rateLimit = ipRateLimits.get(key) || { count: 0, startTime: now };
+  if (now - rateLimit.startTime >= 60000) {
+    rateLimit.count = 0;
+    rateLimit.startTime = now;
+  }
+  rateLimit.count += 1;
+  ipRateLimits.set(key, rateLimit);
   if (rateLimit.count > 5) {
-    showStatusMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} rate limit reached (5/min). Please wait.`);
-    return;
+    console.warn(`IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count} in 60s`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count}\n`);
+    return false;
   }
-
-  if (file && type === 'image') {
-    const maxWidth = 640;
-    const maxHeight = 360;
-    let quality = 0.4;
-    if (file.size > 3 * 1024 * 1024) quality = 0.3;
-    else if (file.size > 1 * 1024 * 1024) quality = 0.35;
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-    img.src = URL.createObjectURL(file);
-    await new Promise(resolve => img.onload = resolve);
-    let width = img.width;
-    let height = img.height;
-    if (width > height) {
-      if (width > maxWidth) {
-        height = Math.round((height * maxWidth) / width);
-        width = maxWidth;
-      }
-    } else {
-      if (height > maxHeight) {
-        width = Math.round((width * maxHeight) / height);
-        height = maxHeight;
-      }
-    }
-    canvas.width = width;
-    canvas.height = height;
-    ctx.drawImage(img, 0, 0, width, height);
-    const format = await isWebPSupported() ? 'image/webp' : 'image/jpeg';
-    dataToSend = canvas.toDataURL(format, quality);
-    URL.revokeObjectURL(img.src);
-  } else if (file) {
-    dataToSend = await new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(file);
-    });
-  }
-
-  const messageId = generateMessageId();
-  const timestamp = Date.now();
-  const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
-  const jitteredTimestamp = timestamp + jitter * 1000;
-  const sanitizedContent = content ? sanitizeMessage(content) : null;
-  const messageKey = await deriveMessageKey();
-  let rawData = dataToSend || sanitizedContent;
-  // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
-  const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
-  rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
-  const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + jitteredTimestamp;
-  const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, username, timestamp: jitteredTimestamp, type, iv, signature };
-  if (dataToSend) {
-    payload.encryptedData = encrypted;
-    payload.filename = file?.name;
-  } else {
-    payload.encryptedContent = encrypted;
-  }
-
-  const jsonString = JSON.stringify(payload);
-  if (useRelay) {
-    sendRelayMessage(`relay-${type}`, payload);
-  } else if (dataChannels.size > 0) {
-    if (jsonString.length > CHUNK_SIZE) {
-      const chunkId = generateMessageId();
-      const chunks = [];
-      for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
-        chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
-      }
-      for (const dataChannel of dataChannels.values()) {
-        if (dataChannel.readyState === 'open') {
-          for (let index = 0; index < chunks.length; index++) {
-            const chunk = chunks[index];
-            dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
-            await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
-          }
-        }
-      }
-    } else {
-      for (const dataChannel of dataChannels.values()) {
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(jsonString);
-        }
-      }
-    }
-  } else {
-    showStatusMessage('Error: No connections.');
-    return;
-  }
-
-  // Increment global count and size after successful send
-  globalSendRate.count += 1;
-  globalSizeRate.totalSize += payloadSize;
-
-  const messagesElement = document.getElementById('messages');
-  const messageDiv = document.createElement('div');
-  messageDiv.className = 'message-bubble self';
-  const timeSpan = document.createElement('span');
-  timeSpan.className = 'timestamp';
-  timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
-  messageDiv.appendChild(timeSpan);
-  messageDiv.appendChild(document.createTextNode(`${username}: `));
-
-  if (type === 'image' || type === 'voice' || type === 'file') {
-    let element;
-    if (type === 'image') {
-      element = document.createElement('img');
-      element.dataset.src = dataToSend;
-      element.style.maxWidth = '100%';
-      element.style.borderRadius = '0.5rem';
-      element.style.cursor = 'pointer';
-      element.setAttribute('alt', 'Sent image');
-      element.addEventListener('click', () => createImageModal(dataToSend, `${type}Button`));
-      lazyObserver.observe(element);
-    } else if (type === 'voice') {
-      element = document.createElement('audio');
-      element.dataset.src = dataToSend;
-      element.controls = true;
-      element.setAttribute('alt', 'Sent voice message');
-      element.addEventListener('click', () => createAudioModal(dataToSend, `${type}Button`));
-      lazyObserver.observe(element);
-    } else {
-      element = document.createElement('a');
-      element.href = dataToSend;
-      element.download = file.name;
-      element.textContent = `Download ${file.name}`;
-      element.setAttribute('alt', 'Sent file');
-    }
-    messageDiv.appendChild(element);
-  } else {
-    messageDiv.appendChild(document.createTextNode(sanitizedContent));
-  }
-
-  messagesElement.prepend(messageDiv);
-  messagesElement.scrollTop = 0;
-  processedMessageIds.add(messageId);
-  messageCount++;
-  if (isInitiator && messageCount % 100 === 0) {
-    await triggerRatchet();
-  }
+  return true;
 }
 
-async function sendMessage(content) {
-  if (!content) return;
-  if (grokBotActive && content.startsWith('/grok ')) {
-    const query = content.slice(6).trim();
-    if (query) await sendToGrok(query);
-  } else if (content === '/ratchet' && isInitiator) {
-    await triggerRatchet();
-    showStatusMessage('Key ratchet triggered manually.');
-  } else {
-    await prepareAndSendMessage({ content });
+function restrictIpDaily(ip, action) {
+  const hashedIp = hashIp(ip);
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${hashedIp}:${action}:${day}`;
+  const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
+  dailyLimit.count += 1;
+  ipDailyLimits.set(key, dailyLimit);
+  if (dailyLimit.count > 100) {
+    console.warn(`Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count} in day ${day}`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count}\n`);
+    return false;
   }
-  const messageInput = document.getElementById('messageInput');
-  messageInput.value = '';
-  messageInput.style.height = '2.5rem';
-  messageInput?.focus();
+  return true;
 }
 
-async function sendMedia(file, type) {
-  const validTypes = {
-    image: ['image/jpeg', 'image/png'],
-    voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
-  };
-  if (type !== 'file' && !validTypes[type]?.includes(file.type)) {
-    showStatusMessage(`Error: Invalid file type for ${type}.`);
-    return;
+function incrementFailure(ip) {
+  const hashedIp = hashIp(ip);
+  const failure = ipFailureCounts.get(hashedIp) || { count: 0, banLevel: 0 };
+  failure.count += 1;
+  ipFailureCounts.set(hashedIp, failure);
+  if (failure.count % 5 === 0) {
+    console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
+    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - High failure anomaly for hashed IP ${hashedIp}: ${failure.count} failures\n`);
   }
-  await prepareAndSendMessage({ type, file });
-  document.getElementById(`${type}Button`)?.focus();
-}
-
-// Rest of the code remains the same...
-async function startPeerConnection(targetId, isOfferer) {
-  console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
-  if (!features.enableP2P) {
-    console.log('P2P disabled by admin, forcing relay mode');
-    useRelay = true;
-    const privacyStatus = document.getElementById('privacyStatus');
-    if (privacyStatus) {
-      privacyStatus.textContent = 'Relay Mode (E2EE)';
-      privacyStatus.classList.remove('hidden');
-    }
-    isConnected = true;
-    inputContainer.classList.remove('hidden');
-    messages.classList.remove('waiting');
-    updateMaxClientsUI();
-    return;
-  }
-  if (peerConnections.has(targetId)) {
-    console.log(`Cleaning up existing connection with ${targetId}`);
-    cleanupPeerConnection(targetId);
-  }
-  const peerConnection = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.relay.metered.ca:80" },
-      {
-        urls: "turn:global.relay.metered.ca:80",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turn:global.relay.metered.ca:80?transport=tcp",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turn:global.relay.metered.ca:443",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turns:global.relay.metered.ca:443?transport=tcp",
-        username: turnUsername,
-        credential: turnCredential
-      }
-    ],
-    iceTransportPolicy: 'all'
-  });
-  peerConnections.set(targetId, peerConnection);
-  candidatesQueues.set(targetId, []);
-  let dataChannel;
-  if (isOfferer) {
-    dataChannel = peerConnection.createDataChannel('chat');
-    console.log(`Created data channel for ${targetId}`);
-    setupDataChannel(dataChannel, targetId);
-    dataChannels.set(targetId, dataChannel);
-  }
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      console.log(`Sending ICE candidate to ${targetId} for code: ${code}`);
-      sendSignalingMessage('candidate', { candidate: event.candidate, targetId });
-    }
-  };
-  peerConnection.onicecandidateerror = (event) => {
-    console.error(`ICE candidate error for ${targetId}: ${event.errorText}, code=${event.errorCode}`);
-    if (event.errorCode !== 701) {
-      const retryCount = retryCounts.get(targetId) || 0;
-      if (retryCount < maxRetries) {
-        retryCounts.set(targetId, retryCount + 1);
-        console.log(`Retrying connection with ${targetId}, attempt ${retryCount + 1}`);
-        startPeerConnection(targetId, isOfferer);
-      }
-    } else {
-      console.log(`Ignoring ICE 701 error for ${targetId}, continuing connection`);
-    }
-  };
-  peerConnection.onicegatheringstatechange = () => {
-    console.log(`ICE gathering state for ${targetId}: ${peerConnection.iceGatheringState}`);
-  };
-  peerConnection.onconnectionstatechange = () => {
-    console.log(`Connection state for ${targetId}: ${peerConnection.connectionState}`);
-    if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
-      console.log(`Connection failed with ${targetId}`);
-      // Removed showStatusMessage to suppress transient error
-      cleanupPeerConnection(targetId);
-      const retryCount = retryCounts.get(targetId) || 0;
-      if (retryCount < maxRetries) {
-        retryCounts.set(targetId, retryCount + 1);
-        console.log(`Retrying connection attempt ${retryCount + 1} with ${targetId}`);
-        startPeerConnection(targetId, isOfferer);
-      }
-    } else if (peerConnection.connectionState === 'connected') {
-      console.log(`WebRTC connection established with ${targetId} for code: ${code}`);
-      isConnected = true;
-      retryCounts.delete(targetId);
-      clearTimeout(connectionTimeouts.get(targetId));
-      updateMaxClientsUI();
-      const privacyStatus = document.getElementById('privacyStatus');
-      if (privacyStatus) {
-        privacyStatus.textContent = 'E2E Encrypted (P2P)';
-        privacyStatus.classList.remove('hidden');
-      }
-    }
-  };
-  peerConnection.ontrack = (event) => {
-    console.log(`Received remote track from ${targetId}`);
-    if (!remoteAudios.has(targetId)) {
-      const audio = document.createElement('audio');
-      audio.srcObject = event.streams[0];
-      audio.autoplay = true;
-      audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-      audio.play().catch(error => console.error('Error playing remote audio:', error));
-      remoteAudios.set(targetId, audio);
-      document.getElementById('remoteAudioContainer').appendChild(audio);
-      document.getElementById('remoteAudioContainer').classList.remove('hidden');
-      setAudioOutput(audio, targetId);
-    }
-  };
-  peerConnection.ondatachannel = (event) => {
-    console.log(`Received data channel from ${targetId}`);
-    if (dataChannels.has(targetId)) {
-      console.log(`Closing existing data channel for ${targetId}`);
-      const existingChannel = dataChannels.get(targetId);
-      existingChannel.close();
-    }
-    dataChannel = event.channel;
-    setupDataChannel(dataChannel, targetId);
-    dataChannels.set(targetId, dataChannel);
-  };
-  peerConnection.onsignalingstatechange = () => {
-    console.log(`Signaling state for ${targetId}: ${peerConnection.signalingState}`);
-  };
-  if (isOfferer) {
-    peerConnection.createOffer().then(offer => {
-      return peerConnection.setLocalDescription(offer);
-    }).then(() => {
-      console.log(`Sending offer to ${targetId} for code: ${code}`);
-      sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
-    }).catch(error => {
-      console.error(`Error creating offer for ${targetId}:`, error);
-      // Removed showStatusMessage to suppress transient error
-    });
-  }
-  const timeout = setTimeout(() => {
-    if (!dataChannels.get(targetId) || dataChannels.get(targetId).readyState !== 'open') {
-      console.log(`P2P failed with ${targetId}, checking relay availability`);
-      if (features.enableRelay) {
-        useRelay = true;
-        // Removed showStatusMessage to suppress transient error; user sees final connection status
-        const privacyStatus = document.getElementById('privacyStatus');
-        if (privacyStatus) {
-          privacyStatus.textContent = 'Relay Mode (E2EE)';
-          privacyStatus.classList.remove('hidden');
-        }
-        isConnected = true;
-        inputContainer.classList.remove('hidden');
-        messages.classList.remove('waiting');
+  if (failure.count >= 10) {
+    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+    failure.banLevel = Math.min(failure.banLevel + 1, 2);
+    const duration = banDurations[failure.banLevel];
+    const expiry = Date.now() + duration;
+    ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
+    const timestamp = new Date().toISOString();
+    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+    fs.appendFileSync(LOG_FILE, banLogEntry, (err) => {
+      if (err) {
+        console.error('Error appending ban log:', err);
       } else {
-        showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
-        cleanupPeerConnection(targetId);
+        console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
       }
-    }
-  }, 10000);
-  connectionTimeouts.set(targetId, timeout);
+    });
+    ipFailureCounts.delete(hashedIp);
+  }
 }
 
-function setupDataChannel(dataChannel, targetId) {
-  console.log('setupDataChannel initialized for targetId:', targetId);
-  dataChannel.onopen = () => {
-    console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
-    isConnected = true;
-    initialContainer.classList.add('hidden');
-    usernameContainer.classList.add('hidden');
-    connectContainer.classList.add('hidden');
-    chatContainer.classList.remove('hidden');
-    newSessionButton.classList.remove('hidden');
-    inputContainer.classList.remove('hidden');
-    messages.classList.remove('waiting');
-    clearTimeout(connectionTimeouts.get(targetId));
-    retryCounts.delete(targetId);
-    updateMaxClientsUI();
-    document.getElementById('messageInput')?.focus();
-    if (features.enableVoiceCalls && features.enableAudioToggle) {
-      document.getElementById('audioOutputButton').classList.remove('hidden');
-    } else {
-      document.getElementById('audioOutputButton').classList.add('hidden');
-    }
+function validateUsername(username) {
+  const regex = /^[a-zA-Z0-9]{1,16}$/;
+  return username && regex.test(username);
+}
+
+function validateCode(code) {
+  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+  return code && regex.test(code);
+}
+
+function logStats(data) {
+  const timestamp = new Date().toISOString();
+  const day = timestamp.slice(0, 10);
+  const stats = {
+    clientId: validator.escape(data.clientId || ''), // Escape all strings
+    username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
+    targetId: validator.escape(data.targetId || ''),
+    code: validator.escape(data.code || ''),
+    event: validator.escape(data.event || ''),
+    totalClients: data.totalClients || 0,
+    isInitiator: data.isInitiator || false,
+    timestamp,
+    day
   };
-  dataChannel.onmessage = async (event) => {
-    const now = performance.now();
-    const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
-    if (now - rateLimit.startTime >= 1000) {
-      rateLimit.count = 0;
-      rateLimit.startTime = now;
+  if (data.event === 'connect' || data.event === 'join' || data.event === 'webrtc-connection') {
+    if (!dailyUsers.has(day)) {
+      dailyUsers.set(day, new Set());
     }
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch (e) {
-      console.error(`Invalid message from ${targetId}:`, e);
-      showStatusMessage('Invalid message received.');
-      return;
+    if (!dailyConnections.has(day)) {
+      dailyConnections.set(day, new Set());
     }
-    if (data.chunk) {
-      // Don't count chunks toward rate limit
-      const { chunkId, index, total, data: chunkData } = data;
-      if (!chunkBuffers.has(chunkId)) {
-        chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
-      }
-      const buffer = chunkBuffers.get(chunkId);
-      buffer.chunks[index] = chunkData;
-      buffer.received++;
-      if (buffer.received === total) {
-        const fullMessage = buffer.chunks.join('');
-        chunkBuffers.delete(chunkId);
-        // Process the reassembled message
-        try {
-          data = JSON.parse(fullMessage);
-        } catch (e) {
-          console.error(`Invalid reassembled message from ${targetId}:`, e);
-          return;
-        }
-        await processReceivedMessage(data, targetId);
-      }
-      return;
-    }
-    // Count non-chunk messages
-    rateLimit.count += 1;
-    messageRateLimits.set(targetId, rateLimit);
-    if (rateLimit.count > 10) {
-      console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
-      showStatusMessage('Message rate limit reached, please slow down.');
-      return;
-    }
-    await processReceivedMessage(data, targetId);
-  };
-  dataChannel.onerror = (error) => {
-    console.error(`Data channel error with ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
-  };
-  dataChannel.onclose = () => {
-    console.log(`Data channel closed with ${targetId}`);
-    // Removed showStatusMessage to suppress transient error
-    cleanupPeerConnection(targetId);
-    messageRateLimits.delete(targetId);
-    imageRateLimits.delete(targetId);
-    voiceRateLimits.delete(targetId);
-    if (remoteAudios.has(targetId)) {
-      const audio = remoteAudios.get(targetId);
-      audio.remove();
-      remoteAudios.delete(targetId);
-      if (remoteAudios.size === 0) {
-        document.getElementById('remoteAudioContainer').classList.add('hidden');
-      }
-    }
-    if (dataChannels.size === 0) {
-      inputContainer.classList.add('hidden');
-      messages.classList.add('waiting');
-      document.getElementById('audioOutputButton').classList.add('hidden');
-    }
-  };
-}
-
-async function processReceivedMessage(data, targetId) {
-  if (data.type === 'voice-call-start') {
-    if (!voiceCallActive) {
-      startVoiceCall();
-    }
-    return;
-  }
-  if (data.type === 'voice-call-end') {
-    if (voiceCallActive) {
-      stopVoiceCall();
-    }
-    return;
-  }
-  if (data.type === 'kick' || data.type === 'ban') {
-    if (data.targetId === clientId) {
-      showStatusMessage(`You have been ${data.type}ed from the room.`);
-      socket.close();
-      window.location.reload();
-    }
-    return;
-  }
-  if (!data.messageId || !data.username || (!data.content && !data.data && !data.encryptedContent && !data.encryptedData)) {
-    console.log(`Invalid message format from ${targetId}:`, data);
-    return;
-  }
-  if (processedMessageIds.has(data.messageId)) {
-    console.log(`Duplicate message ${data.messageId} from ${targetId}`);
-    return;
-  }
-  processedMessageIds.add(data.messageId);
-  const senderUsername = usernames.get(targetId) || data.username;
-  const messages = document.getElementById('messages');
-  const isSelf = senderUsername === username;
-  const messageDiv = document.createElement('div');
-  messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
-  const timeSpan = document.createElement('span');
-  timeSpan.className = 'timestamp';
-  timeSpan.textContent = new Date(data.timestamp).toLocaleTimeString();
-  messageDiv.appendChild(timeSpan);
-  messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-  let contentOrData = data.content || data.data;
-  if (data.encryptedContent || data.encryptedData) {
-    try {
-      const messageKey = await deriveMessageKey();
-      const encrypted = data.encryptedContent || data.encryptedData;
-      const iv = data.iv;
-      contentOrData = await decryptRaw(messageKey, encrypted, iv);
-      const toVerify = contentOrData + data.timestamp;
-      const valid = await verifyMessage(signingKey, data.signature, toVerify);
-      if (!valid) {
-        console.warn(`Invalid signature for message from ${targetId}`);
-        showStatusMessage('Invalid message signature detected.');
-        return;
-      }
-      if (data.type === 'message') {
-        contentOrData = contentOrData.trimEnd(); // Trim trailing padding spaces for text
-      }
-    } catch (error) {
-      console.error(`Decryption/verification failed for message from ${targetId}:`, error);
-      showStatusMessage('Failed to decrypt/verify message.');
-      return;
+    dailyUsers.get(day).add(stats.clientId);
+    allTimeUsers.add(stats.clientId);
+    if (data.event === 'webrtc-connection' && data.targetId) {
+      dailyUsers.get(day).add(stats.targetId);
+      allTimeUsers.add(stats.targetId);
+      const connectionKey = `${stats.clientId}-${stats.targetId}-${stats.code}`;
+      dailyConnections.get(day).add(connectionKey);
     }
   }
-  if (data.type === 'image') {
-    const img = document.createElement('img');
-    img.src = contentOrData;
-    img.style.maxWidth = '100%';
-    img.style.borderRadius = '0.5rem';
-    img.style.cursor = 'pointer';
-    img.setAttribute('alt', 'Received image');
-    img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
-    messageDiv.appendChild(img);
-  } else if (data.type === 'voice') {
-    const audio = document.createElement('audio');
-    audio.src = contentOrData;
-    audio.controls = true;
-    audio.setAttribute('alt', 'Received voice message');
-    audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
-    messageDiv.appendChild(audio);
-  } else if (data.type === 'file') {
-    const link = document.createElement('a');
-    link.href = contentOrData;
-    link.download = data.filename || 'file';
-    link.textContent = `Download ${data.filename || 'file'}`;
-    link.setAttribute('alt', 'Received file');
-    messageDiv.appendChild(link);
-  } else {
-    messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
-  }
-  messages.prepend(messageDiv);
-  messages.scrollTop = 0;
-  if (isInitiator) {
-    dataChannels.forEach((dc, id) => {
-      if (id !== targetId && dc.readyState === 'open') {
-        dc.send(event.data);
-      }
-    });
-  }
-}
-
-async function handleOffer(offer, targetId) {
-  console.log(`Handling offer from ${targetId} for code: ${code}`);
-  if (offer.type !== 'offer') {
-    console.error(`Invalid offer type from ${targetId}:`, offer.type);
-    return;
-  }
-  if (!peerConnections.has(targetId)) {
-    console.log(`No existing peer connection for ${targetId}, starting new one`);
-    startPeerConnection(targetId, false);
-  }
-  const peerConnection = peerConnections.get(targetId);
-  try {
-    if (peerConnection.signalingState === 'have-local-offer') {
-      console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
-      await peerConnection.setLocalDescription({type: 'rollback'});
-    }
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
-    // Process queued candidates asynchronously
-    const queue = candidatesQueues.get(targetId) || [];
-    await processCandidateQueue(peerConnection, queue);
-    candidatesQueues.set(targetId, []);
-  } catch (error) {
-    console.error(`Error handling offer from ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
-  }
-}
-
-async function handleAnswer(answer, targetId) {
-  console.log(`Handling answer from ${targetId} for code: ${code}`);
-  if (!peerConnections.has(targetId)) {
-    console.log(`No peer connection for ${targetId}, starting new one and queuing answer`);
-    startPeerConnection(targetId, false);
-    candidatesQueues.get(targetId).push({ type: 'answer', answer });
-    return;
-  }
-  const peerConnection = peerConnections.get(targetId);
-  if (answer.type !== 'answer') {
-    console.error(`Invalid answer type from ${targetId}:`, answer.type);
-    return;
-  }
-  if (peerConnection.signalingState !== 'have-local-offer') {
-    console.log(`Queuing answer from ${targetId}`);
-    candidatesQueues.get(targetId).push({ type: 'answer', answer });
-    return;
-  }
-  try {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    // Process queued items asynchronously
-    const queue = candidatesQueues.get(targetId) || [];
-    await processCandidateQueue(peerConnection, queue);
-    candidatesQueues.set(targetId, []);
-  } catch (error) {
-    console.error(`Error handling answer from ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
-  }
-}
-
-async function handleCandidate(candidate, targetId) {
-  console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
-  if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
-    console.warn(`Ignoring invalid ICE candidate from ${targetId}: both sdpMid and sdpMLineIndex null`);
-    return;
-  }
-  const peerConnection = peerConnections.get(targetId);
-  if (peerConnection && peerConnection.remoteDescription) {
-    try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (error) {
-      console.error(`Error adding ICE candidate from ${targetId}:`, error);
-      // Removed showStatusMessage to suppress transient error
-    }
-  } else {
-    const queue = candidatesQueues.get(targetId) || [];
-    queue.push({ type: 'candidate', candidate });
-    candidatesQueues.set(targetId, queue);
-  }
-}
-
-// New helper to process queue with Promises for efficiency
-async function processCandidateQueue(peerConnection, queue) {
-  for (const item of queue) {
-    if (item.type === 'answer') {
-      try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer));
-      } catch (error) {
-        console.error(`Error applying queued answer:`, error);
-        // Removed showStatusMessage to suppress transient error
-      }
-    } else if (item.type === 'candidate') {
-      try {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(item.candidate));
-      } catch (error) {
-        console.error(`Error adding queued ICE candidate:`, error);
-        // Removed showStatusMessage to suppress transient error
-      }
-    }
-  }
-}
-
-async function toggleVoiceCall() {
-  if (!features.enableVoiceCalls) {
-    showStatusMessage('Voice calls are disabled by admin.');
-    return;
-  }
-  if (voiceCallActive) {
-    stopVoiceCall();
-    broadcastVoiceCallEvent('voice-call-end');
-  } else {
-    startVoiceCall();
-    broadcastVoiceCallEvent('voice-call-start');
-  }
-}
-
-async function startVoiceCall() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showStatusMessage('Microphone not supported.');
-    return;
-  }
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    peerConnections.forEach((peerConnection, targetId) => {
-      localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-      });
-      renegotiate(targetId);
-    });
-    voiceCallActive = true;
-    document.getElementById('voiceCallButton').classList.add('active');
-    document.getElementById('voiceCallButton').title = 'End Voice Call';
-    document.getElementById('audioOutputButton').classList.remove('hidden');
-    showStatusMessage('Voice call started.');
-  } catch (error) {
-    console.error('Error starting voice call:', error);
-    showStatusMessage('Failed to access microphone for voice call.');
-  }
-}
-
-function stopVoiceCall() {
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
-    localStream = null;
-  }
-  peerConnections.forEach((peerConnection, targetId) => {
-    peerConnection.getSenders().forEach(sender => {
-      if (sender.track && sender.track.kind === 'audio') {
-        peerConnection.removeTrack(sender);
-      }
-    });
-    renegotiate(targetId);
-  });
-  voiceCallActive = false;
-  document.getElementById('voiceCallButton').classList.remove('active');
-  document.getElementById('voiceCallButton').title = 'Start Voice Call';
-  document.getElementById('audioOutputButton').classList.add('hidden');
-  showStatusMessage('Voice call ended.');
-}
-
-async function renegotiate(targetId) {
-  const peerConnection = peerConnections.get(targetId);
-  if (peerConnection) {
-    // Check renegotiation limit
-    const count = renegotiationCounts.get(targetId) || 0;
-    if (count >= maxRenegotiations) {
-      console.warn(`Max renegotiations reached for ${targetId} (${maxRenegotiations}), aborting.`);
-      cleanupPeerConnection(targetId);
-      return;
-    }
-    renegotiationCounts.set(targetId, count + 1);
-
-    if (!negotiationQueues.has(targetId)) {
-      negotiationQueues.set(targetId, Promise.resolve());
-    }
-    negotiationQueues.set(targetId, negotiationQueues.get(targetId).then(async () => {
-      if (renegotiating.get(targetId)) {
-        console.log(`Renegotiation already in progress for ${targetId}, skipping.`);
-        return;
-      }
-      if (peerConnection.signalingState !== 'stable') {
-        console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}. Queuing.`);
-        return renegotiate(targetId); // Recurse to queue again
-      }
-      renegotiating.set(targetId, true);
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
-      } catch (error) {
-        console.error(`Error renegotiating with ${targetId}:`, error);
-        // Removed showStatusMessage to suppress transient error
-      } finally {
-        renegotiating.set(targetId, false);
-      }
-    }).catch(error => {
-      console.error(`Negotiation queue error for ${targetId}:`, error);
-    }));
-  } else {
-    console.log(`No peer connection for ${targetId}, cannot renegotiate.`);
-  }
-}
-
-function sendSignalingMessage(type, additionalData) {
-  if (!token || refreshingToken) {
-    console.log('Token missing or refresh in progress, queuing signaling message');
-    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
-    signalingQueue.get('global').push({ type, additionalData });
-    if (!refreshingToken) refreshAccessToken();
-    return;
-  }
-  const message = { type, ...additionalData, code, clientId, token };
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(message));
-  } else {
-    console.log('Socket not open, queuing signaling message');
-    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
-    signalingQueue.get('global').push({ type, additionalData });
-  }
-}
-
-function broadcastVoiceCallEvent(eventType) {
-  dataChannels.forEach((dataChannel) => {
-    if (dataChannel.readyState === 'open') {
-      dataChannel.send(JSON.stringify({ type: eventType }));
+  const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
+  fs.appendFileSync(LOG_FILE, logEntry, (err) => {
+    if (err) {
+      console.error('Error appending to log file:', err);
     }
   });
 }
 
-function sendRelayMessage(type, additionalData) {
-  if (!token || refreshingToken) {
-    console.log('Token missing or refresh in progress, queuing relay message');
-    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
-    signalingQueue.get('global').push({ type, additionalData });
-    if (!refreshingToken) refreshAccessToken();
-    return;
-  }
-  const message = { type, ...additionalData, code, clientId, token };
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(message));
-  } else {
-    console.log('Socket not open, queuing relay message');
-    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
-    signalingQueue.get('global').push({ type, additionalData });
-  }
-}
+// New: Audit log rotation function
+function rotateAuditLog() {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const currentFile = `${AUDIT_FILE_BASE}.log`;
+  const rotatedFile = `${AUDIT_FILE_BASE}-${today}.log`;
 
-function processSignalingQueue() {
-  signalingQueue.forEach((queue, key) => {
-    while (queue.length > 0) {
-      const { type, additionalData } = queue.shift();
-      if (type.startsWith('relay-')) {
-        sendRelayMessage(type, additionalData);
-      } else {
-        sendSignalingMessage(type, additionalData);
-      }
+  if (fs.existsSync(currentFile)) {
+    fs.renameSync(currentFile, rotatedFile);
+    console.log(`Rotated audit log to ${rotatedFile}`);
+  }
+
+  // Delete files older than 7 days
+  const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
+  files.forEach(file => {
+    const fileDate = file.match(/audit-(\d{4}-\d{2}-\d{2})\.log/)[1];
+    const fileTime = new Date(fileDate).getTime();
+    if (now.getTime() - fileTime > 7 * 24 * 60 * 60 * 1000) {
+      fs.unlinkSync(path.join(__dirname, file));
+      console.log(`Deleted old audit log: ${file}`);
     }
   });
-  signalingQueue.clear();
+
+  // Create new current file
+  fs.writeFileSync(currentFile, '');
 }
 
-async function autoConnect(codeParam) {
-  console.log('autoConnect running with code:', codeParam);
-  code = codeParam;
-  initialContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  usernameContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  if (validateCode(codeParam)) {
-    if (validateUsername(username)) {
-      console.log('Valid username and code, joining chat');
-      codeDisplayElement.textContent = `Using code: ${code}`;
-      codeDisplayElement.classList.remove('hidden');
-      copyCodeButton.classList.remove('hidden');
-      messages.classList.add('waiting');
-      statusElement.textContent = 'Waiting for connection...';
-      if (socket.readyState === WebSocket.OPEN) {
-        console.log('Sending check-totp');
-        socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
-      } else {
-        console.log('WebSocket not open, waiting for open event to send check-totp');
-        socket.addEventListener('open', () => {
-          console.log('WebSocket opened, sending check-totp');
-          socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
-        }, { once: true });
-      }
-      document.getElementById('messageInput')?.focus();
-      updateFeaturesUI();
+// Call rotation on startup and every 24 hours
+rotateAuditLog();
+setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
+
+function updateLogFile() {
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  const userCount = dailyUsers.get(day)?.size || 0;
+  const connectionCount = dailyConnections.get(day)?.size || 0;
+  const allTimeUserCount = allTimeUsers.size;
+  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
+  fs.appendFileSync(LOG_FILE, logEntry, (err) => {
+    if (err) {
+      console.error('Error writing to log file:', err);
     } else {
-      console.log('No valid username, prompting for username');
-      usernameContainer.classList.remove('hidden');
-      chatContainer.classList.add('hidden');
-      statusElement.textContent = 'Please enter a username to join the chat';
-      document.getElementById('usernameInput').value = username || '';
-      document.getElementById('usernameInput')?.focus();
-      document.getElementById('joinWithUsernameButton').onclick = () => {
-        const usernameInput = document.getElementById('usernameInput').value.trim();
-        if (!validateUsername(usernameInput)) {
-          showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-          document.getElementById('usernameInput')?.focus();
-          return;
-        }
-        username = usernameInput;
-        localStorage.setItem('username', username);
-        usernameContainer.classList.add('hidden');
-        chatContainer.classList.remove('hidden');
-        codeDisplayElement.textContent = `Using code: ${code}`;
-        codeDisplayElement.classList.remove('hidden');
-        copyCodeButton.classList.remove('hidden');
-        messages.classList.add('waiting');
-        statusElement.textContent = 'Waiting for connection...';
-        socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
-        document.getElementById('messageInput')?.focus();
-        updateFeaturesUI();
-      };
+      console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
     }
-  } else {
-    console.log('Invalid code, showing initial container');
-    initialContainer.classList.remove('hidden');
-    usernameContainer.classList.add('hidden');
-    chatContainer.classList.add('hidden');
-    showStatusMessage('Invalid code format. Please enter a valid code.');
-    document.getElementById('connectToggleButton')?.focus();
-  }
-}
-
-function updateFeaturesUI() {
-  const imageButton = document.getElementById('imageButton');
-  const voiceButton = document.getElementById('voiceButton');
-  const voiceCallButton = document.getElementById('voiceCallButton');
-  const audioOutputButton = document.getElementById('audioOutputButton');
-  const grokButton = document.getElementById('grokButton');
-  if (imageButton) {
-    imageButton.classList.toggle('hidden', !features.enableImages);
-    imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
-  }
-  if (voiceButton) {
-    voiceButton.classList.toggle('hidden', !features.enableVoice);
-    voiceButton.title = features.enableVoice ? 'Record Voice' : 'Voice disabled by admin';
-  }
-  if (voiceCallButton) {
-    voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
-    voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
-    if (!features.enableVoiceCalls && voiceCallActive) {
-      stopVoiceCall();
-    }
-  }
-  if (audioOutputButton) {
-    const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
-    audioOutputButton.classList.toggle('hidden', shouldHide);
-    if (shouldHide && voiceCallActive) {
-      stopVoiceCall();
-    }
-    audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
-    audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
-    audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
-  }
-  if (grokButton) {
-    grokButton.classList.toggle('hidden', !features.enableGrokBot);
-    grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
-  }
-  if (!features.enableService) {
-    showStatusMessage('Service disabled by admin. Disconnecting...');
-    socket.close();
-  }
-  if (!features.enableP2P && !features.enableRelay) {
-    showStatusMessage('Both P2P and relay disabled. Messaging unavailable.');
-    inputContainer.classList.add('hidden');
-  } else if (!features.enableP2P && features.enableRelay && isConnected) {
-    inputContainer.classList.remove('hidden');
-    messages.classList.remove('waiting');
-  }
-}
-
-async function sendToGrok(query) {
-  if (!grokApiKey) {
-    showStatusMessage('Error: xAI API key not set. Enter it in the Grok bot settings.');
-    return;
-  }
-  try {
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${grokApiKey}`
-      },
-      body: JSON.stringify({
-        model: 'grok-4',
-        messages: [{ role: 'user', content: query }]
-      })
-    });
-    if (!response.ok) {
-      throw new Error(`API error: ${response.statusText}`);
-    }
-    const data = await response.json();
-    const botResponse = data.choices[0].message.content;
-    const messages = document.getElementById('messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message-bubble other';
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'timestamp';
-    timeSpan.textContent = new Date().toLocaleTimeString();
-    messageDiv.appendChild(timeSpan);
-    messageDiv.appendChild(document.createTextNode(`Grok Bot: ${sanitizeMessage(botResponse)}`));
-    messages.prepend(messageDiv);
-    messages.scrollTop = 0;
-  } catch (error) {
-    console.error('Grok API error:', error);
-    showStatusMessage('Error querying Grok: ' + error.message + '. Check your API key or visit https://x.ai/api for details.');
-  }
-}
-
-function toggleGrokBot() {
-  grokBotActive = !grokBotActive;
-  const grokButton = document.getElementById('grokButton');
-  const grokKeyContainer = document.getElementById('grokKeyContainer');
-  grokButton.classList.toggle('active', grokBotActive);
-  grokKeyContainer.classList.toggle('active', grokBotActive && !grokApiKey);
-  if (grokBotActive) {
-    if (!grokApiKey) {
-      showStatusMessage('Grok bot enabled. Enter your xAI API key below. For details, visit https://x.ai/api.');
-    } else {
-      showStatusMessage('Grok bot enabled. Use /grok <query> to ask questions.');
-    }
-  } else {
-    showStatusMessage('Grok bot disabled.');
-  }
-}
-
-function saveGrokKey() {
-  const keyInput = document.getElementById('grokApiKey');
-  grokApiKey = keyInput.value.trim();
-  if (grokApiKey) {
-    localStorage.setItem('grokApiKey', grokApiKey);
-    document.getElementById('grokKeyContainer').classList.remove('active');
-    showStatusMessage('API key saved. Use /grok <query> to ask Grok.');
-    keyInput.value = '';
-  } else {
-    showStatusMessage('Error: Enter a valid API key.');
-  }
-}
-
-async function setAudioOutput(audioElement, targetId) {
-  try {
-    if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
-      if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker' 
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
-          : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
-        if (targetDevice) {
-          await audioElement.setSinkId(targetDevice.deviceId);
-          console.log(`Set audio output for ${targetId} to ${targetDevice.label}`);
-        } else {
-          console.warn(`No suitable ${audioOutputMode} device found for ${targetId}, using default`);
-          audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-        }
-      } else {
-        console.warn(`No audio output devices available for ${targetId}`);
-        audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-      }
-    } else {
-      console.log(`setSinkId not supported, using volume adjustment for ${targetId}`);
-      audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-    }
-  } catch (error) {
-    console.error(`Error setting audio output for ${targetId}:`, error);
-    audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-  }
-}
-
-function toggleAudioOutput() {
-  audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
-  console.log(`Toggling audio output to ${audioOutputMode}`);
-  remoteAudios.forEach((audio, targetId) => {
-    setAudioOutput(audio, targetId);
   });
-  const audioOutputButton = document.getElementById('audioOutputButton');
-  audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
-  audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
-  audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
-  showStatusMessage(`Audio output set to ${audioOutputMode}`);
+  if (!aggregatedStats.daily) aggregatedStats.daily = {};
+  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
+  saveAggregatedStats();
 }
 
-async function startTotpRoom(serverGenerated) {
-  const usernameInput = document.getElementById('totpUsernameInput').value.trim();
-  if (!validateUsername(usernameInput)) {
-    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-    return;
+fs.writeFileSync(LOG_FILE, '', (err) => {
+  if (err) console.error('Error creating log file:', err);
+  else {
+    updateLogFile();
+    setInterval(updateLogFile, UPDATE_INTERVAL);
   }
-  username = usernameInput;
-  localStorage.setItem('username', username);
-  let totpSecret;
-  if (serverGenerated) {
-    totpSecret = generateTotpSecret();
-  } else {
-    totpSecret = document.getElementById('customTotpSecret').value.trim();
-    const base32Regex = /^[A-Z2-7]+=*$/i;
-    if (!base32Regex.test(totpSecret) || totpSecret.length < 16) {
-      showStatusMessage('Invalid custom TOTP secret format (base32, min 16 chars).');
-      return;
+});
+
+function computeAggregate(days) {
+  const now = new Date();
+  let users = 0, connections = 0;
+  for (let i = 0; i < days; i++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    if (aggregatedStats.daily[key]) {
+      users += aggregatedStats.daily[key].users;
+      connections += aggregatedStats.daily[key].connections;
     }
   }
-  let secretToSend = totpSecret.toUpperCase().replace(/=+$/, '');
-  const len = secretToSend.length;
-  const paddingLen = (8 - len % 8) % 8;
-  secretToSend += '='.repeat(paddingLen);
-  totpEnabled = true;
-  code = generateCode();
-  pendingTotpSecret = { display: totpSecret, send: secretToSend };
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-  document.getElementById('totpOptionsModal').classList.remove('active');
-  codeDisplayElement.textContent = `Your code: ${code}`;
-  codeDisplayElement.classList.remove('hidden');
-  copyCodeButton.classList.remove('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  initialContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  messages.classList.add('waiting');
-  statusElement.textContent = 'Waiting for connection...';
-  document.getElementById('messageInput')?.focus();
+  return { users, connections };
 }
 
-function showTotpSecretModal(secret) {
-  console.log('Showing TOTP modal with secret:', secret);
-  document.getElementById('totpSecretDisplay').textContent = secret;
-  const qrCanvas = document.getElementById('qrCodeCanvas');
-  qrCanvas.innerHTML = '';
-  new QRCode(qrCanvas, generateTotpUri(code, secret));
-  document.getElementById('totpSecretModal').classList.add('active');
+// New: Generate CSV for stats
+function generateStatsCSV() {
+  let csv = 'Period,Users,Connections\n';
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  csv += `Daily,${dailyUsers.get(day)?.size || 0},${dailyConnections.get(day)?.size || 0}\n`;
+  const weekly = computeAggregate(7);
+  csv += `Weekly,${weekly.users},${weekly.connections}\n`;
+  const monthly = computeAggregate(30);
+  csv += `Monthly,${monthly.users},${monthly.connections}\n`;
+  const yearly = computeAggregate(365);
+  csv += `Yearly,${yearly.users},${yearly.connections}\n`;
+  csv += `All-Time,${allTimeUsers.size},N/A\n`;
+  return csv;
 }
 
-async function joinWithTotp(code, totpCode) {
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
+// New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
+function generateLogsCSV() {
+  let csv = 'Timestamp,Event\n';
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
+  logContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  const auditContent = fs.readFileSync(`${AUDIT_FILE_BASE}.log`, 'utf8');
+  auditContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  return csv;
 }
 
-function startVoiceRecording() {
-  if (!features.enableVoice) {
-    showStatusMessage('Voice messages are disabled by admin.');
-    return;
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showStatusMessage('Microphone not supported.');
-    return;
-  }
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-    const mimeTypes = [
-      'audio/mp4',
-      'audio/webm;codecs=opus',
-      'audio/ogg;codecs=opus',
-      'audio/webm',
-      'audio/ogg'
-    ];
-    const mimeType = mimeTypes.find(MediaRecorder.isTypeSupported) || 'audio/webm';
-    if (!mimeType) {
-      showStatusMessage('Voice recording not supported in this browser.');
-      return;
-    }
-    console.log('Using mimeType for recording:', mimeType);
-    mediaRecorder = new MediaRecorder(stream, { mimeType });
-    voiceChunks = [];
-    mediaRecorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) {
-        voiceChunks.push(event.data);
-        console.log('Data available, chunk size:', event.data.size);
-      } else {
-        console.warn('Empty data chunk received');
+function broadcast(code, message) {
+  const room = rooms.get(code);
+  if (room) {
+    room.clients.forEach(client => {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify(message));
       }
     });
-    mediaRecorder.addEventListener('stop', async () => {
-      console.log('Recorder stopped, chunks length:', voiceChunks.length);
-      const audioBlob = new Blob(voiceChunks, { type: mimeType });
-      console.log('Audio blob created, size:', audioBlob.size, 'type:', mimeType);
-      if (audioBlob.size === 0) {
-        showStatusMessage('No audio recorded. Speak louder or check microphone.');
-        return;
-      }
-      await prepareAndSendMessage({ type: 'voice', file: audioBlob });
-      stream.getTracks().forEach(track => track.stop());
-      mediaRecorder = null;
-      voiceChunks = [];
-      document.getElementById('voiceButton').classList.remove('recording');
-      document.getElementById('voiceTimer').style.display = 'none';
-      document.getElementById('voiceTimer').textContent = '';
-      clearInterval(voiceTimerInterval);
-    });
-    mediaRecorder.start(1000);
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceTimer').style.display = 'flex';
-    let time = 0;
-    voiceTimerInterval = setInterval(() => {
-      time++;
-      document.getElementById('voiceTimer').textContent = `00:${time < 10 ? '0' + time : time}`;
-      if (time >= 30) {
-        stopVoiceRecording();
-      }
-    }, 1000);
-  }).catch(error => {
-    console.error('Error starting voice recording:', error);
-    showStatusMessage('Failed to access microphone for voice message.');
-  });
-}
-
-function stopVoiceRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
+    console.log(`Broadcasted ${message.type} to ${room.clients.size} clients in code ${code}`);
+  } else {
+    console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
 
-async function isWebPSupported() {
-  const elem = document.createElement('canvas');
-  if (!!(elem.getContext && elem.getContext('2d'))) {
-    return elem.toDataURL('image/webp').indexOf('data:image/webp') === 0;
-  }
-  return false;
+function broadcastRandomCodes() {
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+    }
+  });
+  console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
 }
 
-async function generateThumbnail(dataURL, width = 100, height = 100) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.src = dataURL;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', 0.5));
-    };
-    img.onerror = () => resolve(dataURL); // Fallback to full if error
-  });
+function hashIp(ip) {
+  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
+
+server.listen(process.env.PORT || 10000, () => {
+  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});

@@ -529,6 +529,13 @@ socket.onmessage = async (event) => {
       }
       return;
     }
+    if (message.type === 'ratchet-request') {
+      if (isInitiator) {
+        await triggerRatchet();
+        showStatusMessage(`Ratchet requested by ${message.from}, triggering ratchet.`);
+      }
+      return;
+    }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);

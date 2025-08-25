@@ -83,6 +83,12 @@ async function importPublicKey(base64) {
     if (y2 !== right) {
       throw new Error('Public key point not on P-384 curve');
     }
+
+    // Additional full validation with noble-curves
+    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const point = window.p384.ProjectivePoint.fromHex(hex);
+    point.assertValidity();
+
     const key = await window.crypto.subtle.importKey(
       'raw',
       buffer,

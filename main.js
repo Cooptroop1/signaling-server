@@ -128,19 +128,18 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const nonce = crypto.randomUUID();  // New: Generate nonce
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
-  let rawData = dataToSend || sanitizedContent;
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type });  // New: Metadata JSON
+  let rawData = metadata + (dataToSend || sanitizedContent);  // New: Prepend metadata
   // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + jitteredTimestamp + nonce;  // New: Include nonce in signature
+  const toSign = rawData + nonce;  // New: Sign rawData + nonce (timestamp is inside rawData)
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, username, timestamp: jitteredTimestamp, nonce, type, iv, signature };  // New: Add nonce
-  if (dataToSend) {
-    payload.encryptedData = encrypted;
+  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };  // New: Use encryptedBlob instead
+
+  if (dataToSend && type === 'file') {
     payload.filename = file?.name;
-  } else {
-    payload.encryptedContent = encrypted;
   }
 
   const jsonString = JSON.stringify(payload);
@@ -540,7 +539,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || !data.username || (!data.content && !data.data && !data.encryptedContent && !data.encryptedData)) {
+  if (!data.messageId || (!data.encryptedBlob)) {  // New: Check for encryptedBlob
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -554,40 +553,48 @@ async function processReceivedMessage(data, targetId) {
   }
   processedMessageIds.add(data.messageId);
   processedNonces.add(data.nonce);  // New: Add nonce
-  const senderUsername = usernames.get(targetId) || data.username;
+  let senderUsername, timestamp, contentType, contentOrData;
+  try {
+    const messageKey = await deriveMessageKey();
+    const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
+    const toVerify = rawData + data.nonce;  // New: Verify on rawData + nonce
+    const valid = await verifyMessage(signingKey, data.signature, toVerify);
+    if (!valid) {
+      console.warn(`Invalid signature for message from ${targetId}`);
+      showStatusMessage('Invalid message signature detected.');
+      return;
+    }
+    // New: Parse metadata from rawData
+    const metadataEnd = rawData.indexOf('{', 1);  // Assuming JSON starts after first char or something; better to use length prefix if possible
+    // Wait, since metadata is JSON string prepended, find end of JSON
+    let metadataStr;
+    try {
+      metadataStr = rawData.substring(0, rawData.indexOf('}') + 1);
+      const metadata = JSON.parse(metadataStr);
+      senderUsername = metadata.username;
+      timestamp = metadata.timestamp;
+      contentType = metadata.type;
+      contentOrData = rawData.substring(metadataStr.length).trimEnd();  // Content after metadata, trim padding
+    } catch (error) {
+      console.error('Failed to parse metadata:', error);
+      showStatusMessage('Invalid message metadata.');
+      return;
+    }
+  } catch (error) {
+    console.error(`Decryption/verification failed for message from ${targetId}:`, error);
+    showStatusMessage('Failed to decrypt/verify message.');
+    return;
+  }
   const messages = document.getElementById('messages');
   const isSelf = senderUsername === username;
   const messageDiv = document.createElement('div');
   messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
   const timeSpan = document.createElement('span');
   timeSpan.className = 'timestamp';
-  timeSpan.textContent = new Date(data.timestamp).toLocaleTimeString();
+  timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-  let contentOrData = data.content || data.data;
-  if (data.encryptedContent || data.encryptedData) {
-    try {
-      const messageKey = await deriveMessageKey();
-      const encrypted = data.encryptedContent || data.encryptedData;
-      const iv = data.iv;
-      contentOrData = await decryptRaw(messageKey, encrypted, iv);
-      const toVerify = contentOrData + data.timestamp + data.nonce;  // New: Include nonce in verification
-      const valid = await verifyMessage(signingKey, data.signature, toVerify);
-      if (!valid) {
-        console.warn(`Invalid signature for message from ${targetId}`);
-        showStatusMessage('Invalid message signature detected.');
-        return;
-      }
-      if (data.type === 'message') {
-        contentOrData = contentOrData.trimEnd(); // Trim trailing padding spaces for text
-      }
-    } catch (error) {
-      console.error(`Decryption/verification failed for message from ${targetId}:`, error);
-      showStatusMessage('Failed to decrypt/verify message.');
-      return;
-    }
-  }
-  if (data.type === 'image') {
+  if (contentType === 'image') {
     const img = document.createElement('img');
     img.src = contentOrData;
     img.style.maxWidth = '100%';
@@ -596,14 +603,14 @@ async function processReceivedMessage(data, targetId) {
     img.setAttribute('alt', 'Received image');
     img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
     messageDiv.appendChild(img);
-  } else if (data.type === 'voice') {
+  } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
     audio.src = contentOrData;
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
     messageDiv.appendChild(audio);
-  } else if (data.type === 'file') {
+  } else if (contentType === 'file') {
     const link = document.createElement('a');
     link.href = contentOrData;
     link.download = data.filename || 'file';

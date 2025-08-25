@@ -1,4 +1,3 @@
-// server.js
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -1112,7 +1111,7 @@ function restrictClientSize(clientId, size) {
   clientSizeLimits.set(clientId, sizeLimit);
   if (sizeLimit.totalSize > 1048576) { // 1MB
     console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
-    fs.appendFileSync(AUDIT_FILE, `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
+    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
     return false;
   }
   return true;
@@ -1159,7 +1158,7 @@ function incrementFailure(ip) {
   ipFailureCounts.set(hashedIp, failure);
   if (failure.count % 5 === 0) {
     console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
-    fs.appendFileSync(AUDIT_FILE, `${new Date().toISOString()} - High failure anomaly for hashed IP ${hashedIp}: ${failure.count} failures\n`);
+    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - High failure anomaly for hashed IP ${hashedIp}: ${failure.count} failures\n`);
   }
   if (failure.count >= 10) {
     const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];

@@ -138,7 +138,7 @@ async function deriveSharedKey(privateKey, publicKey) {
     const sharedBits = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: publicKey },
       privateKey,
-      384  // P-384 provides 192-bit security, but derive 384 bits for safety
+      256
     );
     const key = await window.crypto.subtle.importKey(
       "raw",

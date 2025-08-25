@@ -986,30 +986,33 @@ function updateDots() {
   const userDots = document.getElementById('userDots');
   if (!userDots) return;
   userDots.innerHTML = '';
-  const greenCount = Math.min(totalClients, maxClients);
+  const greenCount = totalClients;
   const redCount = maxClients - greenCount;
-  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId); // Exclude self
-  for (let i = 0; i < greenCount; i++) {
+  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId);
+  // Add self dot (no menu)
+  const selfDot = document.createElement('div');
+  selfDot.className = 'user-dot online';
+  userDots.appendChild(selfDot);
+  // Add other users' dots with menu if initiator
+  otherClientIds.forEach(targetId => {
     const dot = document.createElement('div');
     dot.className = 'user-dot online';
-    if (isInitiator && i > 0) { // Skip self (first dot)
-      const targetId = otherClientIds[i - 1]; // Since i=0 is self, i=1 is first other
-      if (targetId) {
-        const menu = document.createElement('div');
-        menu.className = 'user-menu';
-        const kickButton = document.createElement('button');
-        kickButton.textContent = 'Kick';
-        kickButton.onclick = () => kickUser(targetId);
-        const banButton = document.createElement('button');
-        banButton.textContent = 'Ban';
-        banButton.onclick = () => banUser(targetId);
-        menu.appendChild(kickButton);
-        menu.appendChild(banButton);
-        dot.appendChild(menu);
-      }
+    if (isInitiator) {
+      const menu = document.createElement('div');
+      menu.className = 'user-menu';
+      const kickButton = document.createElement('button');
+      kickButton.textContent = 'Kick';
+      kickButton.onclick = () => kickUser(targetId);
+      const banButton = document.createElement('button');
+      banButton.textContent = 'Ban';
+      banButton.onclick = () => banUser(targetId);
+      menu.appendChild(kickButton);
+      menu.appendChild(banButton);
+      dot.appendChild(menu);
     }
     userDots.appendChild(dot);
-  }
+  });
+  // Add offline (red) dots
   for (let i = 0; i < redCount; i++) {
     const dot = document.createElement('div');
     dot.className = 'user-dot offline';
@@ -1018,14 +1021,16 @@ function updateDots() {
 }
 
 async function kickUser(targetId) {
-  if (!isInitiator) return;
+  if (!isInitiator || !targetId) return;
+  console.log('Kicking user', targetId);
   const toSign = targetId + 'kick' + code;
   const signature = await signMessage(signingKey, toSign);
   socket.send(JSON.stringify({ type: 'kick', targetId, code, clientId, token, signature }));
 }
 
 async function banUser(targetId) {
-  if (!isInitiator) return;
+  if (!isInitiator || !targetId) return;
+  console.log('Banning user', targetId);
   const toSign = targetId + 'ban' + code;
   const signature = await signMessage(signingKey, toSign);
   socket.send(JSON.stringify({ type: 'ban', targetId, code, clientId, token, signature }));

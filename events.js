@@ -36,6 +36,8 @@ let features = { enableService: true, enableImages: true, enableVoice: true, ena
 let keyPair;
 let roomMaster;
 let signingKey;
+let signingSalt;
+let messageSalt;
 let remoteAudios = new Map();
 let refreshingToken = false;
 let signalingQueue = new Map();
@@ -318,10 +320,12 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
-        // Generate initial roomMaster and signingKey for E2EE
+        // Generate initial roomMaster and salts for E2EE
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
-        signingKey = await deriveSigningKey(roomMaster);
-        console.log('Generated initial roomMaster and signingKey for initiator.');
+        signingSalt = window.crypto.getRandomValues(new Uint8Array(16));
+        messageSalt = window.crypto.getRandomValues(new Uint8Array(16));
+        signingKey = await deriveSigningKey();
+        console.log('Generated initial roomMaster, signingSalt, messageSalt, and signingKey for initiator.');
         isConnected = true;
         if (pendingTotpSecret) {
           socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
@@ -348,7 +352,7 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
-      updateRecentCodes(code);  // Save to recent
+      updateRecentCodes(code); // Save to recent
       return;
     }
     if (message.type === 'initiator-changed') {
@@ -380,7 +384,7 @@ socket.onmessage = async (event) => {
         messages.classList.remove('waiting');
         updateMaxClientsUI();
       }
-      updateRecentCodes(code);  // Update on join notify
+      updateRecentCodes(code); // Update on join notify
       return;
     }
     if (message.type === 'client-disconnected') {
@@ -433,7 +437,13 @@ socket.onmessage = async (event) => {
         clientPublicKeys.set(message.clientId, message.publicKey);
         const joinerPublic = await importPublicKey(message.publicKey);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, joinerPublic);
-        const { encrypted, iv } = await encryptBytes(sharedKey, roomMaster);
+        const payload = {
+          roomMaster: arrayBufferToBase64(roomMaster),
+          signingSalt: arrayBufferToBase64(signingSalt),
+          messageSalt: arrayBufferToBase64(messageSalt)
+        };
+        const payloadStr = JSON.stringify(payload);
+        const { encrypted, iv } = await encryptRaw(sharedKey, payloadStr);
         const myPublic = await exportPublicKey(keyPair.publicKey);
         socket.send(JSON.stringify({
           type: 'encrypted-room-key',
@@ -457,10 +467,13 @@ socket.onmessage = async (event) => {
         initiatorPublic = message.publicKey;
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
-        const roomMasterBuffer = await decryptBytes(sharedKey, message.encryptedKey, message.iv);
-        roomMaster = new Uint8Array(roomMasterBuffer);
-        signingKey = await deriveSigningKey(roomMaster);
-        console.log('Room master successfully imported.');
+        const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv);
+        const payload = JSON.parse(decryptedStr);
+        roomMaster = base64ToArrayBuffer(payload.roomMaster);
+        signingSalt = base64ToArrayBuffer(payload.signingSalt);
+        messageSalt = base64ToArrayBuffer(payload.messageSalt);
+        signingKey = await deriveSigningKey();
+        console.log('Room master, salts successfully imported.');
         if (useRelay) {
           isConnected = true;
           const privacyStatus = document.getElementById('privacyStatus');
@@ -486,11 +499,14 @@ socket.onmessage = async (event) => {
       try {
         const importedInitiatorPublic = await importPublicKey(initiatorPublic);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
-        const newRoomMasterBuffer = await decryptBytes(shared, message.encrypted, message.iv);
-        roomMaster = new Uint8Array(newRoomMasterBuffer);
-        signingKey = await deriveSigningKey(roomMaster);
+        const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv);
+        const payload = JSON.parse(decryptedStr);
+        roomMaster = base64ToArrayBuffer(payload.roomMaster);
+        signingSalt = base64ToArrayBuffer(payload.signingSalt);
+        messageSalt = base64ToArrayBuffer(payload.messageSalt);
+        signingKey = await deriveSigningKey();
         keyVersion = message.version;
-        console.log(`New room master received and set for PFS (version ${keyVersion}).`);
+        console.log(`New room master and salts received and set for PFS (version ${keyVersion}).`);
       } catch (error) {
         console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
@@ -531,7 +547,7 @@ socket.onmessage = async (event) => {
       let contentOrData = payload.content || payload.data;
       if (payload.encryptedContent || payload.encryptedData) {
         try {
-          const messageKey = await deriveMessageKey(roomMaster);
+          const messageKey = await deriveMessageKey();
           const encrypted = payload.encryptedContent || payload.encryptedData;
           const iv = payload.iv;
           contentOrData = await decryptRaw(messageKey, encrypted, iv);
@@ -607,6 +623,8 @@ async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
   keyVersion++; // Increment version
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
+  const newSigningSalt = window.crypto.getRandomValues(new Uint8Array(16));
+  const newMessageSalt = window.crypto.getRandomValues(new Uint8Array(16));
   let success = 0;
   let failures = [];
   for (const cId of connectedClients) {
@@ -620,7 +638,13 @@ async function triggerRatchet() {
     try {
       const importedPublic = await importPublicKey(publicKey);
       const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
-      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      const payload = {
+        roomMaster: arrayBufferToBase64(newRoomMaster),
+        signingSalt: arrayBufferToBase64(newSigningSalt),
+        messageSalt: arrayBufferToBase64(newMessageSalt)
+      };
+      const payloadStr = JSON.stringify(payload);
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion }));
       success++;
     } catch (error) {
@@ -630,11 +654,13 @@ async function triggerRatchet() {
   }
   if (success > 0) {
     roomMaster = newRoomMaster;
-    signingKey = await deriveSigningKey(roomMaster);
-    console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster set.`);
+    signingSalt = newSigningSalt;
+    messageSalt = newMessageSalt;
+    signingKey = await deriveSigningKey();
+    console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster and salts set.`);
     if (failures.length > 0) {
       console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
-      triggerRatchetPartial(failures, newRoomMaster, keyVersion, 1); // Start retry with count 1
+      triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, keyVersion, 1); // Start retry with count 1
     }
   } else {
     console.warn(`PFS ratchet failed (version ${keyVersion}): No keys available to send to any clients.`);
@@ -643,7 +669,7 @@ async function triggerRatchet() {
 }
 
 // Updated: Function to retry ratchet for failed clients with backoff and max retries
-async function triggerRatchetPartial(failures, newRoomMaster, version, retryCount) {
+async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
     return;
@@ -664,7 +690,13 @@ async function triggerRatchetPartial(failures, newRoomMaster, version, retryCoun
     try {
       const importedPublic = await importPublicKey(publicKey);
       const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
-      const { encrypted, iv } = await encryptBytes(shared, newRoomMaster);
+      const payload = {
+        roomMaster: arrayBufferToBase64(newRoomMaster),
+        signingSalt: arrayBufferToBase64(newSigningSalt),
+        messageSalt: arrayBufferToBase64(newMessageSalt)
+      };
+      const payloadStr = JSON.stringify(payload);
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version }));
       retrySuccess++;
     } catch (error) {
@@ -677,7 +709,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, version, retryCoun
   }
   if (newFailures.length > 0) {
     console.warn(`Still failures after retry ${retryCount}: ${newFailures.join(', ')}. Trying again...`);
-    triggerRatchetPartial(newFailures, newRoomMaster, version, retryCount + 1);
+    triggerRatchetPartial(newFailures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount + 1);
   } else {
     console.log(`All partial ratchet retries complete for version ${version}.`);
   }
@@ -861,7 +893,7 @@ document.getElementById('backButton').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing chat';
+  statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
 };
@@ -873,7 +905,7 @@ document.getElementById('backButtonConnect').onclick = () => {
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
   copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing chat';
+  statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
 };

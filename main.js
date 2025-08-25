@@ -524,6 +524,14 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
+  if (data.type === 'kick' || data.type === 'ban') {
+    if (data.targetId === clientId) {
+      showStatusMessage(`You have been ${data.type}ed from the room.`);
+      socket.close();
+      window.location.reload();
+    }
+    return;
+  }
   if (!data.messageId || !data.username || (!data.content && !data.data && !data.encryptedContent && !data.encryptedData)) {
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
@@ -564,25 +572,21 @@ async function processReceivedMessage(data, targetId) {
     }
   }
   if (data.type === 'image') {
-    const thumbnail = await generateThumbnail(contentOrData);
     const img = document.createElement('img');
-    img.src = thumbnail;
-    img.dataset.fullSrc = contentOrData;
+    img.src = contentOrData;
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
     img.setAttribute('alt', 'Received image');
     img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
     messageDiv.appendChild(img);
-    lazyObserver.observe(img);
   } else if (data.type === 'voice') {
     const audio = document.createElement('audio');
-    audio.dataset.src = contentOrData;
+    audio.src = contentOrData;
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
     messageDiv.appendChild(audio);
-    lazyObserver.observe(audio);
   } else if (data.type === 'file') {
     const link = document.createElement('a');
     link.href = contentOrData;

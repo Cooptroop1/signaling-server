@@ -67,8 +67,6 @@ function cleanupPeerConnection(targetId) {
   connectionTimeouts.delete(targetId);
   retryCounts.delete(targetId);
   messageRateLimits.delete(targetId);
-  imageRateLimits.delete(targetId);
-  voiceRateLimits.delete(targetId);
   if (remoteAudios.has(targetId)) {
     const audio = remoteAudios.get(targetId);
     audio.remove();

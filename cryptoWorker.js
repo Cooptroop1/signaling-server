@@ -87,31 +87,31 @@ self.onmessage = async (e) => {
     let result;
     switch (action) {
       case 'deriveSharedKey':
-        const privateKey = await self.crypto.subtle.importKey('jwk', params.privateJwk, { name: 'ECDH', namedCurve: 'P-384' }, false, ['deriveBits']);
+        const privateKey = await self.crypto.subtle.importKey('jwk', params.privateJwk, { name: 'ECDH', namedCurve: 'P-384' }, true, ['deriveBits']);
         const publicKey = await importPublicKey(params.publicBase64);
         const sharedBits = await self.crypto.subtle.deriveBits({ name: 'ECDH', public: publicKey }, privateKey, 256);
         result = arrayBufferToBase64(sharedBits);
         break;
       case 'encryptRaw':
-        const keyEncrypt = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), 'AES-GCM', false, ['encrypt']);
-        const ivEncrypt = window.crypto.getRandomValues(new Uint8Array(12));
+        const keyEncrypt = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), 'AES-GCM', true, ['encrypt']);
+        const ivEncrypt = self.crypto.getRandomValues(new Uint8Array(12));
         const encoded = new TextEncoder().encode(params.data);
         const encrypted = await self.crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivEncrypt }, keyEncrypt, encoded);
         result = { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(ivEncrypt) };
         break;
       case 'decryptRaw':
-        const keyDecrypt = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), 'AES-GCM', false, ['decrypt']);
+        const keyDecrypt = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), 'AES-GCM', true, ['decrypt']);
         const decrypted = await self.crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToArrayBuffer(params.iv) }, keyDecrypt, base64ToArrayBuffer(params.encrypted));
         result = new TextDecoder().decode(decrypted);
         break;
       case 'signMessage':
-        const keySign = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        const keySign = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']);
         const encodedSign = new TextEncoder().encode(params.data);
         const signature = await self.crypto.subtle.sign({ name: 'HMAC' }, keySign, encodedSign);
         result = arrayBufferToBase64(signature);
         break;
       case 'verifyMessage':
-        const keyVerify = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+        const keyVerify = await self.crypto.subtle.importKey('raw', base64ToArrayBuffer(params.keyBase64), { name: 'HMAC', hash: 'SHA-256' }, true, ['verify']);
         const encodedVerify = new TextEncoder().encode(params.data);
         result = await self.crypto.subtle.verify({ name: 'HMAC' }, keyVerify, base64ToArrayBuffer(params.signature), encodedVerify);
         break;

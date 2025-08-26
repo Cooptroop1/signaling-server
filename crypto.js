@@ -36,7 +36,7 @@ async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
     const base64 = arrayBufferToBase64(exported);
-    if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
+    if (base64.length < 128 || base64.length > 132) { // Raw P-384 ~128 chars
       throw new Error(`Invalid public key length: ${base64.length} chars`);
     }
     console.log('Exported public key:', base64);
@@ -57,7 +57,7 @@ async function importPublicKey(base64) {
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
     } else if (buffer.byteLength !== 97) {
-      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384 for P-384)`);
+      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
     }
     // Validate point on curve
     const bytes = new Uint8Array(buffer);

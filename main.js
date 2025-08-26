@@ -1,4 +1,3 @@
-
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -126,18 +125,18 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
   const jitteredTimestamp = timestamp + jitter * 1000;
-  const nonce = crypto.randomUUID();  // New: Generate nonce
+  const nonce = crypto.randomUUID(); // New: Generate nonce
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
-  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type });  // New: Metadata JSON
-  let rawData = metadata + (dataToSend || sanitizedContent);  // New: Prepend metadata
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type }); // New: Metadata JSON
+  let rawData = metadata + (dataToSend || sanitizedContent); // New: Prepend metadata
   // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + nonce;  // New: Sign rawData + nonce (timestamp is inside rawData)
+  const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };  // New: Use encryptedBlob instead
+  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
 
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
@@ -220,7 +219,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
-  processedNonces.set(nonce, Date.now());  // Changed to Map: nonce -> timestamp
+  processedNonces.set(nonce, Date.now()); // Changed to Map: nonce -> timestamp
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
     await triggerRatchet();
@@ -540,7 +539,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedBlob)) {  // New: Check for encryptedBlob
+  if (!data.messageId || (!data.encryptedBlob)) { // New: Check for encryptedBlob
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -548,22 +547,22 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate message ${data.messageId} from ${targetId}`);
     return;
   }
-  if (processedNonces.has(data.nonce)) {  // New: Check nonce
+  if (processedNonces.has(data.nonce)) { // New: Check nonce
     console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
     return;
   }
   const now = Date.now();
-  if (Math.abs(now - data.timestamp) > 300000) {  // New: Anti-replay window ±5min
+  if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
     console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
     return;
   }
   processedMessageIds.add(data.messageId);
-  processedNonces.set(data.nonce, Date.now());  // Changed to Map: nonce -> timestamp
+  processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     const messageKey = await deriveMessageKey();
     const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
-    const toVerify = rawData + data.nonce;  // New: Verify on rawData + nonce
+    const toVerify = rawData + data.nonce; // New: Verify on rawData + nonce
     const valid = await verifyMessage(signingKey, data.signature, toVerify);
     if (!valid) {
       console.warn(`Invalid signature for message from ${targetId}`);
@@ -583,7 +582,7 @@ async function processReceivedMessage(data, targetId) {
     senderUsername = metadata.username;
     timestamp = metadata.timestamp;
     contentType = metadata.type;
-    contentOrData = rawData.substring(metadataStr.length).trimEnd();  // Content after metadata, trim padding
+    contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
@@ -600,21 +599,21 @@ async function processReceivedMessage(data, targetId) {
   messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
   if (contentType === 'image') {
     const img = document.createElement('img');
-    img.dataset.src = contentOrData;  // Lazy load
+    img.dataset.src = contentOrData; // Lazy load
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
     img.setAttribute('alt', 'Received image');
     img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
-    lazyObserver.observe(img);  // Observe for lazy loading
+    lazyObserver.observe(img); // Observe for lazy loading
     messageDiv.appendChild(img);
   } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
-    audio.dataset.src = contentOrData;  // Lazy load
+    audio.dataset.src = contentOrData; // Lazy load
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
-    lazyObserver.observe(audio);  // Observe for lazy loading
+    lazyObserver.observe(audio); // Observe for lazy loading
     messageDiv.appendChild(audio);
   } else if (contentType === 'file') {
     const link = document.createElement('a');
@@ -1283,3 +1282,20 @@ setInterval(() => {
   }
   console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
 }, 300000); // 5min
+
+// New: Claim username handler (in socket.onmessage or separate)
+document.getElementById('claimSubmitButton').onclick = async () => {
+  const name = document.getElementById('claimUsernameInput').value.trim();
+  const pass = document.getElementById('claimPasswordInput').value;
+  if (name && pass) {
+    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
+  }
+};
+
+// New: Search user handler
+document.getElementById('searchSubmitButton').onclick = () => {
+  const name = document.getElementById('searchUsernameInput').value.trim();
+  if (name) {
+    socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
+  }
+};

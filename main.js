@@ -22,6 +22,22 @@ const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
+const cryptoWorker = new Worker('cryptoWorker.js');
+
+function cryptoCall(action, params) {
+  return new Promise((resolve, reject) => {
+    const id = crypto.randomUUID();
+    const listener = (e) => {
+      if (e.data.id === id) {
+        cryptoWorker.removeEventListener('message', listener);
+        if (e.data.error) reject(new Error(e.data.error));
+        else resolve(e.data.result);
+      }
+    };
+    cryptoWorker.addEventListener('message', listener);
+    cryptoWorker.postMessage({ action, params, id });
+  });
+}
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -125,18 +141,22 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
   const jitteredTimestamp = timestamp + jitter * 1000;
-  const nonce = crypto.randomUUID();  // New: Generate nonce
+  const nonce = crypto.randomUUID(); // New: Generate nonce
   const sanitizedContent = content ? sanitizeMessage(content) : null;
-  const messageKey = await deriveMessageKey();
-  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type });  // New: Metadata JSON
-  let rawData = metadata + (dataToSend || sanitizedContent);  // New: Prepend metadata
+  const messageKeyRaw = await cryptoCall('deriveMessageKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), messageSaltBase64: arrayBufferToBase64(messageSalt) });
+  const messageKey = await importAesKey(messageKeyRaw);
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type }); // New: Metadata JSON
+  let rawData = metadata + (dataToSend || sanitizedContent); // New: Prepend metadata
   // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
-  const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + nonce;  // New: Sign rawData + nonce (timestamp is inside rawData)
-  const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };  // New: Use encryptedBlob instead
+  const messageKeyBase64 = await exportKeyRaw(messageKey);
+  const encryptResult = await cryptoCall('encryptRaw', { keyBase64: messageKeyBase64, data: rawData });
+  const { encrypted, iv } = encryptResult;
+  const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
+  const signingKeyBase64 = await exportKeyRaw(signingKey);
+  const signature = await cryptoCall('signMessage', { keyBase64: signingKeyBase64, data: toSign });
+  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
 
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
@@ -219,7 +239,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
-  processedNonces.set(nonce, Date.now());  // Changed to Map: nonce -> timestamp
+  processedNonces.set(nonce, Date.now()); // Changed to Map: nonce -> timestamp
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
     await triggerRatchet();
@@ -539,7 +559,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedBlob)) {  // New: Check for encryptedBlob
+  if (!data.messageId || (!data.encryptedBlob)) { // New: Check for encryptedBlob
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -547,23 +567,25 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate message ${data.messageId} from ${targetId}`);
     return;
   }
-  if (processedNonces.has(data.nonce)) {  // New: Check nonce
+  if (processedNonces.has(data.nonce)) { // New: Check nonce
     console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
     return;
   }
   const now = Date.now();
-  if (Math.abs(now - data.timestamp) > 300000) {  // New: Anti-replay window ±5min
+  if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
     console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
     return;
   }
   processedMessageIds.add(data.messageId);
-  processedNonces.set(data.nonce, Date.now());  // Changed to Map: nonce -> timestamp
+  processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
   let senderUsername, timestamp, contentType, contentOrData;
   try {
-    const messageKey = await deriveMessageKey();
-    const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
-    const toVerify = rawData + data.nonce;  // New: Verify on rawData + nonce
-    const valid = await verifyMessage(signingKey, data.signature, toVerify);
+    const messageKeyRaw = await cryptoCall('deriveMessageKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), messageSaltBase64: arrayBufferToBase64(messageSalt) });
+    const messageKey = await importAesKey(messageKeyRaw);
+    const rawData = await cryptoCall('decryptRaw', { keyBase64: await exportKeyRaw(messageKey), encrypted: data.encryptedBlob, iv: data.iv });
+    const toVerify = rawData + data.nonce; // New: Verify on rawData + nonce
+    const signingKeyBase64 = await exportKeyRaw(signingKey);
+    const valid = await cryptoCall('verifyMessage', { keyBase64: signingKeyBase64, signature: data.signature, data: toVerify });
     if (!valid) {
       console.warn(`Invalid signature for message from ${targetId}`);
       showStatusMessage('Invalid message signature detected.');
@@ -582,7 +604,7 @@ async function processReceivedMessage(data, targetId) {
     senderUsername = metadata.username;
     timestamp = metadata.timestamp;
     contentType = metadata.type;
-    contentOrData = rawData.substring(metadataStr.length).trimEnd();  // Content after metadata, trim padding
+    contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
@@ -599,21 +621,21 @@ async function processReceivedMessage(data, targetId) {
   messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
   if (contentType === 'image') {
     const img = document.createElement('img');
-    img.dataset.src = contentOrData;  // Lazy load
+    img.dataset.src = contentOrData; // Lazy load
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
     img.setAttribute('alt', 'Received image');
     img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
-    lazyObserver.observe(img);  // Observe for lazy loading
+    lazyObserver.observe(img);
     messageDiv.appendChild(img);
   } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
-    audio.dataset.src = contentOrData;  // Lazy load
+    audio.dataset.src = contentOrData; // Lazy load
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
-    lazyObserver.observe(audio);  // Observe for lazy loading
+    lazyObserver.observe(audio);
     messageDiv.appendChild(audio);
   } else if (contentType === 'file') {
     const link = document.createElement('a');

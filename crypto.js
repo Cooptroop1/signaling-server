@@ -36,7 +36,7 @@ async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
     const base64 = arrayBufferToBase64(exported);
-    if (base64.length < 128 || base64.length > 132) { // Raw P-384 ~128 chars base64
+    if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
       throw new Error(`Invalid public key length: ${base64.length} chars`);
     }
     console.log('Exported public key:', base64);
@@ -57,7 +57,7 @@ async function importPublicKey(base64) {
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
     } else if (buffer.byteLength !== 97) {
-      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
+      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384 for P-384)`);
     }
     // Validate point on curve
     const bytes = new Uint8Array(buffer);
@@ -105,9 +105,57 @@ async function exportKeyRaw(key) {
 }
 
 async function importAesKey(rawBase64) {
-  return await window.crypto.subtle.importKey("raw", base64ToArrayBuffer(rawBase64), "AES-GCM", false, ["encrypt", "decrypt"]);
+  return await window.crypto.subtle.importKey("raw", base64ToArrayBuffer(rawBase64), "AES-GCM", true, ["encrypt", "decrypt"]);
 }
 
 async function importHmacKey(rawBase64) {
-  return await window.crypto.subtle.importKey("raw", base64ToArrayBuffer(rawBase64), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+  return await window.crypto.subtle.importKey("raw", base64ToArrayBuffer(rawBase64), { name: 'HMAC', hash: 'SHA-256' }, true, ['sign', 'verify']);
+}
+
+async function deriveSigningKey() {
+  try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      roomMaster,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt: signingSalt, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'HMAC', hash: 'SHA-256' },
+      true,
+      ['sign', 'verify']
+    );
+    console.log('deriveSigningKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveSigningKey error:', error);
+    throw new Error('Signing key derivation failed');
+  }
+}
+
+async function deriveMessageKey() {
+  try {
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
+      roomMaster,
+      { name: 'HKDF' },
+      false,
+      ['deriveKey']
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      { name: 'HKDF', salt: messageSalt, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt', 'decrypt']
+    );
+    console.log('deriveMessageKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveMessageKey error:', error);
+    throw new Error('Message key derivation failed');
+  }
 }

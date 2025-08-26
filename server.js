@@ -435,7 +435,7 @@ setInterval(() => {
   });
   processedMessageIds.forEach((messageSet, code) => {
     const now = Date.now();
-    messageSet.forEach((timestamp, nonce) => {  // Changed from messageId to nonce
+    messageSet.forEach((timestamp, nonce) => { // Changed from messageId to nonce
       if (now - timestamp > 300000) {
         messageSet.delete(nonce);
       }
@@ -459,8 +459,12 @@ wss.on('connection', (ws, req) => {
     ws.isAlive = true;
   });
   const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress;
+  const userAgent = req.headers['user-agent'] || 'unknown';
+  ws.userAgent = userAgent;
   const hashedIp = hashIp(clientIp);
-  if (ipBans.has(hashedIp) && ipBans.get(hashedIp).expiry > Date.now()) {
+  const hashedUa = hashUa(userAgent);
+  const compositeKey = hashedIp + ':' + hashedUa;
+  if (ipBans.has(compositeKey) && ipBans.get(compositeKey).expiry > Date.now()) {
     ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
     return;
   }
@@ -481,7 +485,7 @@ wss.on('connection', (ws, req) => {
       const validation = validateMessage(data);
       if (!validation.valid) {
         ws.send(JSON.stringify({ type: 'error', message: validation.error }));
-        incrementFailure(clientIp);
+        incrementFailure(clientIp, ws.userAgent);
         return;
       }
       // Skip escaping for specific fields that should remain untouched
@@ -507,7 +511,7 @@ wss.on('connection', (ws, req) => {
       if ((data.type === 'public-key' || data.type === 'encrypted-room-key') && data.publicKey) {
         if (!isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format or length' }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
       }
@@ -669,12 +673,12 @@ wss.on('connection', (ws, req) => {
         }
         if (!restrictIpRate(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (!restrictIpDaily(clientIp, 'join')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         code = data.code;
@@ -682,12 +686,12 @@ wss.on('connection', (ws, req) => {
         username = data.username;
         if (!validateUsername(username)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username: 1-16 alphanumeric characters.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (!validateCode(code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format: xxxx-xxxx-xxxx-xxxx.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         const roomTotpSecret = totpSecrets.get(code);
@@ -699,7 +703,7 @@ wss.on('connection', (ws, req) => {
           const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
           if (!isValid) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
-            incrementFailure(clientIp);
+            incrementFailure(clientIp, ws.userAgent);
             return;
           }
         }
@@ -711,7 +715,7 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(code);
           if (room.clients.size >= room.maxClients) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
-            incrementFailure(clientIp);
+            incrementFailure(clientIp, ws.userAgent);
             return;
           }
           if (room.clients.has(clientId)) {
@@ -729,17 +733,17 @@ wss.on('connection', (ws, req) => {
               });
             } else {
               ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
-              incrementFailure(clientIp);
+              incrementFailure(clientIp, ws.userAgent);
               return;
             }
           } else if (Array.from(room.clients.values()).some(c => c.username === username)) {
             ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
-            incrementFailure(clientIp);
+            incrementFailure(clientIp, ws.userAgent);
             return;
           }
           if (!room.clients.has(room.initiator) && room.initiator !== clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
-            incrementFailure(clientIp);
+            incrementFailure(clientIp, ws.userAgent);
             return;
           }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: false, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
@@ -808,12 +812,12 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'submit-random') {
         if (!restrictIpRate(clientIp, 'submit-random')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (data.code && !rooms.get(data.code)?.clients.size) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (rooms.get(data.code)?.initiator === data.clientId) {
@@ -821,7 +825,7 @@ wss.on('connection', (ws, req) => {
           broadcastRandomCodes();
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
         }
         return;
       }
@@ -849,37 +853,37 @@ wss.on('connection', (ws, req) => {
         const payloadKey = data.content || data.encryptedContent || data.data || data.encryptedData;
         if (payloadKey && (typeof payloadKey !== 'string' || (data.encryptedContent || data.encryptedData || data.type !== 'relay-message') && !isValidBase64(payloadKey))) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
         if (!restrictClientSize(data.clientId, payloadSize)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (payloadKey && payloadKey.length > 9333333) {
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (!rooms.has(data.code)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         const room = rooms.get(data.code);
         const senderId = data.clientId;
         if (!room.clients.has(senderId)) {
           ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
-          incrementFailure(clientIp);
+          incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (!processedMessageIds.has(data.code)) {
           processedMessageIds.set(data.code, new Map());
         }
         const messageSet = processedMessageIds.get(data.code);
-        if (messageSet.has(data.nonce)) {  // Changed to check nonce instead of messageId
+        if (messageSet.has(data.nonce)) { // Changed to check nonce instead of messageId
           console.warn(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
           return;
         }
@@ -894,7 +898,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
           return;
         }
-        messageSet.set(data.nonce, data.timestamp);  // Changed to set nonce
+        messageSet.set(data.nonce, data.timestamp); // Changed to set nonce
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
@@ -909,7 +913,7 @@ wss.on('connection', (ws, req) => {
               timestamp: data.timestamp,
               iv: data.iv,
               signature: data.signature,
-              nonce: data.nonce  // Forward nonce
+              nonce: data.nonce // Forward nonce
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
           }
@@ -1026,7 +1030,7 @@ wss.on('connection', (ws, req) => {
     } catch (error) {
       console.error('Error processing message:', error);
       ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
-      incrementFailure(clientIp);
+      incrementFailure(clientIp, ws.userAgent);
     }
   });
   ws.on('close', () => {
@@ -1034,8 +1038,8 @@ wss.on('connection', (ws, req) => {
       const tokens = clientTokens.get(ws.clientId);
       if (tokens) {
         try {
-          const decodedAccess = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
-          revokedTokens.set(tokens.accessToken, decodedAccess.exp * 1000);
+          const decoded = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
+          revokedTokens.set(tokens.accessToken, decoded.exp * 1000);
           if (tokens.refreshToken) {
             const decodedRefresh = jwt.verify(tokens.refreshToken, JWT_SECRET, { ignoreExpiration: true });
             revokedTokens.set(tokens.refreshToken, decodedRefresh.exp * 1000);
@@ -1088,8 +1092,6 @@ wss.on('connection', (ws, req) => {
 });
 
 function restrictRate(ws) {
-  if (ws.isAdmin) return true;
-  if (ws.clientId) return true;
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
@@ -1158,31 +1160,33 @@ function restrictIpDaily(ip, action) {
   return true;
 }
 
-function incrementFailure(ip) {
+function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
-  const failure = ipFailureCounts.get(hashedIp) || { count: 0, banLevel: 0 };
+  const hashedUa = hashUa(ua);
+  const key = hashedIp + ':' + hashedUa;
+  const failure = ipFailureCounts.get(key) || { count: 0, banLevel: 0 };
   failure.count += 1;
-  ipFailureCounts.set(hashedIp, failure);
+  ipFailureCounts.set(key, failure);
   if (failure.count % 5 === 0) {
-    console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
-    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - High failure anomaly for hashed IP ${hashedIp}: ${failure.count} failures\n`);
+    console.warn(`High failure rate for key ${key}: ${failure.count} failures`);
+    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - High failure anomaly for key ${key}: ${failure.count} failures\n`);
   }
   if (failure.count >= 10) {
     const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
     failure.banLevel = Math.min(failure.banLevel + 1, 2);
     const duration = banDurations[failure.banLevel];
     const expiry = Date.now() + duration;
-    ipBans.set(hashedIp, { expiry, banLevel: failure.banLevel });
+    ipBans.set(key, { expiry, banLevel: failure.banLevel });
     const timestamp = new Date().toISOString();
-    const banLogEntry = `${timestamp} - Hashed IP Banned: ${hashedIp}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+    const banLogEntry = `${timestamp} - Key Banned: ${key}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
     fs.appendFileSync(LOG_FILE, banLogEntry, (err) => {
       if (err) {
         console.error('Error appending ban log:', err);
       } else {
-        console.warn(`Hashed IP ${hashedIp} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+        console.warn(`Key ${key} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
       }
     });
-    ipFailureCounts.delete(hashedIp);
+    ipFailureCounts.delete(key);
   }
 }
 
@@ -1362,6 +1366,10 @@ function broadcastRandomCodes() {
 
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+}
+
+function hashUa(ua) {
+  return crypto.createHmac('sha256', IP_SALT).update(ua).digest('hex');
 }
 
 server.listen(process.env.PORT || 10000, () => {

@@ -1,3 +1,4 @@
+
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -5,6 +6,7 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   const base64 = window.btoa(binary);
+  // Strict validation: Check if it's valid base64
   if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
     throw new Error('Invalid base64 generated');
   }
@@ -12,6 +14,7 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
+  // Strict validation: Check if input is valid base64
   if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
     throw new Error('Invalid base64 input');
   }
@@ -36,7 +39,7 @@ async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
     const base64 = arrayBufferToBase64(exported);
-    if (base64.length < 128 || base64.length > 132) { // Raw P-384 ~128 chars
+    if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
       throw new Error(`Invalid public key length: ${base64.length} chars`);
     }
     console.log('Exported public key:', base64);
@@ -57,7 +60,7 @@ async function importPublicKey(base64) {
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
     } else if (buffer.byteLength !== 97) {
-      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
+      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384 for P-384)`);
     }
     // Validate point on curve
     const bytes = new Uint8Array(buffer);
@@ -96,20 +99,129 @@ async function importPublicKey(base64) {
   }
 }
 
-async function exportPrivateKey(key) {
-  return await window.crypto.subtle.exportKey('jwk', key);
+async function encryptBytes(key, data) {
+  try {
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      data
+    );
+    const result = {
+      encrypted: arrayBufferToBase64(encrypted),
+      iv: arrayBufferToBase64(iv)
+    };
+    console.log('encryptBytes result:', result);
+    return result;
+  } catch (error) {
+    console.error('encryptBytes error:', error);
+    throw new Error('Byte encryption failed');
+  }
 }
 
-async function exportKeyRaw(key) {
-  return arrayBufferToBase64(await window.crypto.subtle.exportKey('raw', key));
+async function decryptBytes(key, encrypted, iv) {
+  try {
+    const result = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+      key,
+      base64ToArrayBuffer(encrypted)
+    );
+    console.log('decryptBytes successful');
+    return result;
+  } catch (error) {
+    console.error('decryptBytes error:', error, 'Encrypted:', encrypted, 'IV:', iv);
+    throw new Error('Byte decryption failed');
+  }
 }
 
-async function importAesKey(rawBase64) {
-  return await window.crypto.subtle.importKey("raw", base64ToArrayBuffer(rawBase64), "AES-GCM", true, ["encrypt", "decrypt"]);
+async function deriveSharedKey(privateKey, publicKey) {
+  try {
+    const sharedBits = await window.crypto.subtle.deriveBits(
+      { name: 'ECDH', public: publicKey },
+      privateKey,
+      256
+    );
+    const key = await window.crypto.subtle.importKey(
+      "raw",
+      sharedBits,
+      "AES-GCM",
+      false,
+      ["encrypt", "decrypt"]
+    );
+    console.log('deriveSharedKey successful');
+    return key;
+  } catch (error) {
+    console.error('deriveSharedKey error:', error);
+    throw new Error('Shared key derivation failed');
+  }
 }
 
-async function importHmacKey(rawBase64) {
-  return await window.crypto.subtle.importKey("raw", base64ToArrayBuffer(rawBase64), { name: 'HMAC', hash: 'SHA-256' }, true, ['sign', 'verify']);
+async function encryptRaw(key, data) {
+  try {
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    const encrypted = await window.crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      encoded
+    );
+    const result = {
+      encrypted: arrayBufferToBase64(encrypted),
+      iv: arrayBufferToBase64(iv)
+    };
+    console.log('encryptRaw result:', result);
+    return result;
+  } catch (error) {
+    console.error('encryptRaw error:', error);
+    throw new Error('Raw encryption failed');
+  }
+}
+
+async function decryptRaw(key, encrypted, iv) {
+  try {
+    const decoded = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+      key,
+      base64ToArrayBuffer(encrypted)
+    );
+    return new TextDecoder().decode(decoded);
+  } catch (error) {
+    console.error('decryptRaw error:', error, 'Encrypted:', encrypted, 'IV:', iv);
+    throw new Error('Raw decryption failed');
+  }
+}
+
+async function signMessage(signingKey, data) {
+  try {
+    const encoded = new TextEncoder().encode(data);
+    const signature = arrayBufferToBase64(await window.crypto.subtle.sign(
+      { name: 'HMAC' },
+      signingKey,
+      encoded
+    ));
+    console.log('signMessage successful, signature:', signature);
+    return signature;
+  } catch (error) {
+    console.error('signMessage error:', error);
+    throw new Error('Message signing failed');
+  }
+}
+
+async function verifyMessage(signingKey, signature, data) {
+  try {
+    const encoded = new TextEncoder().encode(data);
+    const result = await window.crypto.subtle.verify(
+      { name: 'HMAC' },
+      signingKey,
+      base64ToArrayBuffer(signature),
+      encoded
+    );
+    console.log('verifyMessage result:', result);
+    return result;
+  } catch (error) {
+    console.error('verifyMessage error:', error);
+    return false;
+  }
 }
 
 async function deriveSigningKey() {
@@ -125,7 +237,7 @@ async function deriveSigningKey() {
       { name: 'HKDF', salt: signingSalt, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'HMAC', hash: 'SHA-256' },
-      true,
+      false,
       ['sign', 'verify']
     );
     console.log('deriveSigningKey successful');
@@ -149,7 +261,7 @@ async function deriveMessageKey() {
       { name: 'HKDF', salt: messageSalt, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
-      true,
+      false,
       ['encrypt', 'decrypt']
     );
     console.log('deriveMessageKey successful');

@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
   (async () => {
     keyPair = await window.crypto.subtle.generateKey(
       { name: 'ECDH', namedCurve: 'P-384' },
-      true,
+      true, // Non-extractable
       ['deriveKey', 'deriveBits']
     );
   })();
@@ -439,7 +439,7 @@ socket.onmessage = async (event) => {
         const myPrivateJwk = await exportPrivateKey(keyPair.privateKey);
         const sharedBitsBase64 = await cryptoCall('deriveSharedKey', { privateJwk: myPrivateJwk, publicBase64: message.publicKey });
         const sharedRaw = base64ToArrayBuffer(sharedBitsBase64);
-        const sharedKey = await importAesKey(sharedRaw);
+        const sharedKey = await importAesKey(sharedBitsBase64);
         const payload = {
           roomMaster: arrayBufferToBase64(roomMaster),
           signingSalt: arrayBufferToBase64(signingSalt),
@@ -473,7 +473,7 @@ socket.onmessage = async (event) => {
         const myPrivateJwk = await exportPrivateKey(keyPair.privateKey);
         const sharedBitsBase64 = await cryptoCall('deriveSharedKey', { privateJwk: myPrivateJwk, publicBase64: message.publicKey });
         const sharedRaw = base64ToArrayBuffer(sharedBitsBase64);
-        const sharedKey = await importAesKey(sharedRaw);
+        const sharedKey = await importAesKey(sharedBitsBase64);
         const sharedKeyBase64 = await exportKeyRaw(sharedKey);
         const decryptedStr = await cryptoCall('decryptRaw', { keyBase64: sharedKeyBase64, encrypted: message.encryptedKey, iv: message.iv });
         const payload = JSON.parse(decryptedStr);
@@ -508,7 +508,7 @@ socket.onmessage = async (event) => {
         const myPrivateJwk = await exportPrivateKey(keyPair.privateKey);
         const sharedBitsBase64 = await cryptoCall('deriveSharedKey', { privateJwk: myPrivateJwk, publicBase64: initiatorPublic });
         const sharedRaw = base64ToArrayBuffer(sharedBitsBase64);
-        const sharedKey = await importAesKey(sharedRaw);
+        const sharedKey = await importAesKey(sharedBitsBase64);
         const sharedKeyBase64 = await exportKeyRaw(sharedKey);
         const decryptedStr = await cryptoCall('decryptRaw', { keyBase64: sharedKeyBase64, encrypted: message.encrypted, iv: message.iv });
         const payload = JSON.parse(decryptedStr);
@@ -638,6 +638,7 @@ async function triggerRatchet() {
   const newMessageSalt = window.crypto.getRandomValues(new Uint8Array(16));
   let success = 0;
   let failures = [];
+  const myPrivateJwk = await exportPrivateKey(keyPair.privateKey);
   for (const cId of connectedClients) {
     if (cId === clientId) continue;
     const publicKey = clientPublicKeys.get(cId);
@@ -647,15 +648,18 @@ async function triggerRatchet() {
       continue;
     }
     try {
-      const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const sharedBitsBase64 = await cryptoCall('deriveSharedKey', { privateJwk: myPrivateJwk, publicBase64: publicKey });
+      const sharedRaw = base64ToArrayBuffer(sharedBitsBase64);
+      const sharedKey = await importAesKey(sharedRaw);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
+      const sharedKeyBase64 = await exportKeyRaw(sharedKey);
+      const encryptResult = await cryptoCall('encryptRaw', { keyBase64: sharedKeyBase64, data: payloadStr });
+      const { encrypted, iv } = encryptResult;
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion }));
       success++;
     } catch (error) {
@@ -667,7 +671,8 @@ async function triggerRatchet() {
     roomMaster = newRoomMaster;
     signingSalt = newSigningSalt;
     messageSalt = newMessageSalt;
-    signingKey = await deriveSigningKey();
+    const signingKeyRaw = await cryptoCall('deriveSigningKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), signingSaltBase64: arrayBufferToBase64(signingSalt) });
+    signingKey = await importHmacKey(signingKeyRaw);
     console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster and salts set.`);
     if (failures.length > 0) {
       console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
@@ -692,6 +697,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
 
   let retrySuccess = 0;
   let newFailures = [];
+  const myPrivateJwk = await exportPrivateKey(keyPair.privateKey);
   for (const cId of failures) {
     const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
@@ -699,15 +705,18 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
       continue;
     }
     try {
-      const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const sharedBitsBase64 = await cryptoCall('deriveSharedKey', { privateJwk: myPrivateJwk, publicBase64: publicKey });
+      const sharedRaw = base64ToArrayBuffer(sharedBitsBase64);
+      const sharedKey = await importAesKey(sharedRaw);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
+      const sharedKeyBase64 = await exportKeyRaw(sharedKey);
+      const encryptResult = await cryptoCall('encryptRaw', { keyBase64: sharedKeyBase64, data: payloadStr });
+      const { encrypted, iv } = encryptResult;
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version }));
       retrySuccess++;
     } catch (error) {

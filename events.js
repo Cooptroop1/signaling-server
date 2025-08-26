@@ -1279,6 +1279,10 @@ function updateRecentCodes(code) {
 }
 
 // New: Claim username
+document.getElementById('claimUsernameButton').addEventListener('click', () => {
+  document.getElementById('claimUsernameModal').classList.add('active');
+});
+
 document.getElementById('claimSubmitButton').onclick = async () => {
   const name = document.getElementById('claimUsernameInput').value.trim();
   const pass = document.getElementById('claimPasswordInput').value;

@@ -9,6 +9,7 @@ const https = require('https');
 const url = require('url');
 const crypto = require('crypto');
 const otplib = require('otplib');
+const UAParser = require('ua-parser-js');
 
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -1369,7 +1370,11 @@ function hashIp(ip) {
 }
 
 function hashUa(ua) {
-  return crypto.createHmac('sha256', IP_SALT).update(ua).digest('hex');
+  if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
+  const parser = new UAParser(ua);
+  const result = parser.getResult();
+  const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
+  return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
 
 server.listen(process.env.PORT || 10000, () => {

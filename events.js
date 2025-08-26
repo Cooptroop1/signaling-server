@@ -73,7 +73,7 @@ if (typeof window !== 'undefined') {
   (async () => {
     keyPair = await window.crypto.subtle.generateKey(
       { name: 'ECDH', namedCurve: 'P-384' },
-      false, // Non-extractable
+      true,
       ['deriveKey', 'deriveBits']
     );
   })();
@@ -327,7 +327,7 @@ socket.onmessage = async (event) => {
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingSalt = window.crypto.getRandomValues(new Uint8Array(16));
         messageSalt = window.crypto.getRandomValues(new Uint8Array(16));
-        signingKey = await importHmacKey(await cryptoCall('deriveSigningKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), signingSaltBase64: arrayBufferToBase64(signingSalt) }));
+        signingKey = await deriveSigningKey();
         console.log('Generated initial roomMaster, signingSalt, messageSalt, and signingKey for initiator.');
         isConnected = true;
         if (pendingTotpSecret) {
@@ -480,8 +480,7 @@ socket.onmessage = async (event) => {
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
         signingSalt = base64ToArrayBuffer(payload.signingSalt);
         messageSalt = base64ToArrayBuffer(payload.messageSalt);
-        const signingKeyRaw = await cryptoCall('deriveSigningKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), signingSaltBase64: arrayBufferToBase64(signingSalt) });
-        signingKey = await importHmacKey(signingKeyRaw);
+        signingKey = await deriveSigningKey();
         console.log('Room master, salts successfully imported.');
         if (useRelay) {
           isConnected = true;
@@ -516,8 +515,7 @@ socket.onmessage = async (event) => {
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
         signingSalt = base64ToArrayBuffer(payload.signingSalt);
         messageSalt = base64ToArrayBuffer(payload.messageSalt);
-        const signingKeyRaw = await cryptoCall('deriveSigningKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), signingSaltBase64: arrayBufferToBase64(signingSalt) });
-        signingKey = await importHmacKey(signingKeyRaw);
+        signingKey = await deriveSigningKey();
         keyVersion = message.version;
         console.log(`New room master and salts received and set for PFS (version ${keyVersion}).`);
       } catch (error) {
@@ -560,14 +558,12 @@ socket.onmessage = async (event) => {
       let contentOrData = payload.content || payload.data;
       if (payload.encryptedContent || payload.encryptedData) {
         try {
-          const messageKeyRaw = await cryptoCall('deriveMessageKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), messageSaltBase64: arrayBufferToBase64(messageSalt) });
-          const messageKey = await importAesKey(messageKeyRaw);
-          const messageKeyBase64 = await exportKeyRaw(messageKey);
+          const messageKey = await deriveMessageKey();
           const encrypted = payload.encryptedContent || payload.encryptedData;
-          contentOrData = await cryptoCall('decryptRaw', { keyBase64: messageKeyBase64, encrypted, iv: payload.iv });
+          const iv = payload.iv;
+          contentOrData = await decryptRaw(messageKey, encrypted, iv);
           const toVerify = contentOrData + payload.timestamp;
-          const signingKeyBase64 = await exportKeyRaw(signingKey);
-          const valid = await cryptoCall('verifyMessage', { keyBase64: signingKeyBase64, signature: payload.signature, data: toVerify });
+          const valid = await verifyMessage(signingKey, payload.signature, toVerify);
           if (!valid) {
             console.warn(`Invalid signature for relay message`);
             showStatusMessage('Invalid message signature detected.');
@@ -642,7 +638,6 @@ async function triggerRatchet() {
   const newMessageSalt = window.crypto.getRandomValues(new Uint8Array(16));
   let success = 0;
   let failures = [];
-  const myPrivateJwk = await exportPrivateKey(keyPair.privateKey);
   for (const cId of connectedClients) {
     if (cId === clientId) continue;
     const publicKey = clientPublicKeys.get(cId);
@@ -652,18 +647,15 @@ async function triggerRatchet() {
       continue;
     }
     try {
-      const sharedBitsBase64 = await cryptoCall('deriveSharedKey', { privateJwk: myPrivateJwk, publicBase64: publicKey });
-      const sharedRaw = base64ToArrayBuffer(sharedBitsBase64);
-      const sharedKey = await importAesKey(sharedRaw);
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const sharedKeyBase64 = await exportKeyRaw(sharedKey);
-      const encryptResult = await cryptoCall('encryptRaw', { keyBase64: sharedKeyBase64, data: payloadStr });
-      const { encrypted, iv } = encryptResult;
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion }));
       success++;
     } catch (error) {
@@ -675,8 +667,7 @@ async function triggerRatchet() {
     roomMaster = newRoomMaster;
     signingSalt = newSigningSalt;
     messageSalt = newMessageSalt;
-    const signingKeyRaw = await cryptoCall('deriveSigningKey', { roomMasterBase64: arrayBufferToBase64(roomMaster), signingSaltBase64: arrayBufferToBase64(signingSalt) });
-    signingKey = await importHmacKey(signingKeyRaw);
+    signingKey = await deriveSigningKey();
     console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster and salts set.`);
     if (failures.length > 0) {
       console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
@@ -701,7 +692,6 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
 
   let retrySuccess = 0;
   let newFailures = [];
-  const myPrivateJwk = await exportPrivateKey(keyPair.privateKey);
   for (const cId of failures) {
     const publicKey = clientPublicKeys.get(cId);
     if (!publicKey) {
@@ -709,18 +699,15 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
       continue;
     }
     try {
-      const sharedBitsBase64 = await cryptoCall('deriveSharedKey', { privateJwk: myPrivateJwk, publicBase64: publicKey });
-      const sharedRaw = base64ToArrayBuffer(sharedBitsBase64);
-      const sharedKey = await importAesKey(sharedRaw);
+      const importedPublic = await importPublicKey(publicKey);
+      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const sharedKeyBase64 = await exportKeyRaw(sharedKey);
-      const encryptResult = await cryptoCall('encryptRaw', { keyBase64: sharedKeyBase64, data: payloadStr });
-      const { encrypted, iv } = encryptResult;
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version }));
       retrySuccess++;
     } catch (error) {
@@ -1085,8 +1072,7 @@ async function kickUser(targetId) {
   }
   console.log('Kicking user', targetId);
   const toSign = targetId + 'kick' + code;
-  const signingKeyBase64 = await exportKeyRaw(signingKey);
-  const signature = await cryptoCall('signMessage', { keyBase64: signingKeyBase64, data: toSign });
+  const signature = await signMessage(signingKey, toSign);
   const message = { type: 'kick', targetId, code, clientId, token, signature };
   console.log('Sending kick message:', message);
   socket.send(JSON.stringify(message));
@@ -1102,8 +1088,7 @@ async function banUser(targetId) {
   }
   console.log('Banning user', targetId);
   const toSign = targetId + 'ban' + code;
-  const signingKeyBase64 = await exportKeyRaw(signingKey);
-  const signature = await cryptoCall('signMessage', { keyBase64: signingKeyBase64, data: toSign });
+  const signature = await signMessage(signingKey, toSign);
   const message = { type: 'ban', targetId, code, clientId, token, signature };
   console.log('Sending ban message:', message);
   socket.send(JSON.stringify(message));

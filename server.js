@@ -10,6 +10,8 @@ const url = require('url');
 const crypto = require('crypto');
 const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
+const { Pool } = require('pg');
+const bcrypt = require('bcrypt');
 
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -1026,6 +1028,71 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'pong') {
         console.log('Received pong from client');
+        return;
+      }
+      // New: Hash password
+      async function hashPassword(password) {
+        return bcrypt.hash(password, 10);
+      }
+
+      // New: Validate password
+      async function validatePassword(input, hash) {
+        return bcrypt.compare(input, hash);
+      }
+
+      // New message types
+      if (data.type === 'register-username') {
+        const { username, password } = data;
+        if (!validateUsername(username) || !password || typeof password !== 'string' || password.length < 8) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
+          return;
+        }
+        try {
+          const checkRes = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
+          if (checkRes.rows.length > 0) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Username taken.' }));
+            return;
+          }
+          const passwordHash = await hashPassword(password);
+          await dbPool.query(
+            'INSERT INTO users (username, password_hash, client_id) VALUES ($1, $2, $3)',
+            [username, passwordHash, data.clientId]
+          );
+          ws.send(JSON.stringify({ type: 'username-registered', username }));
+        } catch (err) {
+          console.error('DB error registering username:', err);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username.' }));
+        }
+        return;
+      }
+
+      if (data.type === 'find-user') {
+        const { username } = data;
+        try {
+          const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
+          if (res.rows.length === 0) {
+            ws.send(JSON.stringify({ type: 'user-not-found' }));
+            return;
+          }
+          const user = res.rows[0];
+          // Create dynamic room
+          const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 19).match(/.{1,4}/g).join('-'); // Format like xxxx-xxxx-xxxx-xxxx
+          // Notify online user if connected (via ws)
+          const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
+          if (ownerWs) {
+            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
+          } else {
+            // Queue notification
+            await dbPool.query(
+              'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ((SELECT id FROM users WHERE username = $1), $2, $3)',
+              [data.username, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
+            );
+          }
+          ws.send(JSON.stringify({ type: 'user-found', status: user.status, code: dynamicCode }));
+        } catch (err) {
+          console.error('DB error finding user:', err);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user.' }));
+        }
         return;
       }
     } catch (error) {

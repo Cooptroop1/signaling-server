@@ -400,6 +400,20 @@ function validateMessage(data) {
         return { valid: false, error: 'set-totp: valid base32 secret required' };
       }
       break;
+    // New for usernames
+    case 'register-username':
+      if (!data.username) {
+        return { valid: false, error: 'register-username: username required' };
+      }
+      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
+        return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
+      }
+      break;
+    case 'find-user':
+      if (!data.username) {
+        return { valid: false, error: 'find-user: username required' };
+      }
+      break;
     default:
       return { valid: false, error: 'Unknown message type' };
   }

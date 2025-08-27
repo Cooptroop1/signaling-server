@@ -1174,7 +1174,7 @@ wss.on('connection', (ws, req) => {
   [data.username, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
   );
   }
-  ws.send(JSON.stringify({ type: 'user-found', status: user.status, code: dynamicCode }));
+  ws.send(JSON.stringify({ type: 'user-found', status: ownerWs ? 'online' : 'offline', code: dynamicCode }));
   } catch (err) {
   console.error('DB error finding user:', err.message, err.stack);
   ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));

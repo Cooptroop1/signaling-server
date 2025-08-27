@@ -16,17 +16,11 @@
       cursor: default;
       user-select: none;
     }
-    input[type="text"],
-    input[type="number"],
-    input[type="file"],
-    textarea {
+    input[type="text"], input[type="number"], input[type="file"], input[type="password"], textarea {
       cursor: text;
       user-select: text;
     }
-    #codeDisplay {
-      user-select: text;
-    }
-    #totpSecretDisplay {
+    #codeDisplay, #totpSecretDisplay {
       user-select: text;
       cursor: text;
     }
@@ -227,7 +221,7 @@
     .modal.active {
       display: flex;
     }
-    .help-modal, .add-user-modal, .totp-modal {
+    .help-modal, .add-user-modal, .totp-modal, .login-modal, .search-user-modal {
       display: none;
       position: fixed;
       top: 0;
@@ -239,7 +233,7 @@
       align-items: center;
       justify-content: center;
     }
-    .help-modal-content, .add-user-modal-content, .totp-modal-content {
+    .help-modal-content, .add-user-modal-content, .totp-modal-content, .login-modal-content, .search-user-modal-content {
       background-color: white;
       padding: 1.5rem;
       border-radius: 0.5rem;
@@ -248,7 +242,7 @@
       overflow-y: auto;
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     }
-    .help-modal.active, .add-user-modal.active, .totp-modal.active {
+    .help-modal.active, .add-user-modal.active, .totp-modal.active, .login-modal.active, .search-user-modal.active {
       display: flex;
     }
     #chatContainer.hidden {
@@ -680,9 +674,11 @@
       <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Start a new chat or connect to an existing one</div>
       <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">E2E Encrypted (P2P)</div>
       <div id="initialContainer">
-        <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
+        <button id="startAnonChatButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start an anonymous chat">Start Anonymous Chat</button>
+        <button id="startNamedChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start a named chat">Start Named Chat</button>
+        <button id="connectCodeButton" class="bg-green-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-green-600 transition-colors" aria-label="Connect using code">Connect using Code</button>
+        <button id="connectUsernameButton" class="bg-teal-500 text-white px-4 py-2 rounded w-full hover:bg-teal-600 transition-colors" aria-label="Connect using username">Connect using Username</button>
         <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
-        <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
         <button id="connect2FAChatButton" class="bg-teal-500 text-white px-4 py-2 rounded w-full hover:bg-teal-600 transition-colors" aria-label="Connect to 2FA Room">Connect to 2FA Room</button>
         <div id="recentChats" class="mt-4">
           <h2 class="text-xl font-bold mb-2">Recent Chats <button id="toggleRecent" title="Toggle Recent Chats">Show</button></h2>
@@ -816,6 +812,25 @@
       <div id="claimError" class="text-red-500 text-sm mt-2 hidden"></div>
       <button id="claimSubmitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Claim</button>
       <button id="claimCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+    </div>
+  </div>
+  <div id="loginModal" class="totp-modal" role="dialog" aria-label="Login to Create Named Room" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Login for Named Room</h2>
+      <input id="loginUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Username" maxlength="16">
+      <input id="loginPasswordInput" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Password">
+      <div id="loginError" class="text-red-500 text-sm mt-2 hidden"></div>
+      <button id="loginSubmitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Login and Create Room</button>
+      <button id="loginCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+    </div>
+  </div>
+  <div id="searchUserModal" class="totp-modal" role="dialog" aria-label="Search Username to Join" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Search Username to Join Room</h2>
+      <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter username to search">
+      <div id="searchError" class="text-red-500 text-sm mt-2 hidden"></div>
+      <button id="searchSubmitButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Search and Join</button>
+      <button id="searchCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
   <div id="searchUserContainer" class="hidden">

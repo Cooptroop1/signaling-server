@@ -1,3 +1,4 @@
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -15,7 +16,7 @@ const bcrypt = require('bcrypt');
 
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // For Render Postgres
+  ssl: { rejectUnauthorized: false }  // For Render Postgres
 });
 
 // Test DB connection on startup
@@ -68,7 +69,8 @@ server.on('request', (req, res) => {
         "media-src 'self' blob: data:; " +
         "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
         "object-src 'none'; base-uri 'self';";
-      data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+      data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
+        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
       data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
       let clientIdFromCookie;
@@ -417,14 +419,6 @@ function validateMessage(data) {
         return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
       }
       break;
-    case 'login':
-      if (!data.username) {
-        return { valid: false, error: 'login: username required' };
-      }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-        return { valid: false, error: 'login: password required as string (min 8 chars)' };
-      }
-      break;
     case 'find-user':
       if (!data.username) {
         return { valid: false, error: 'find-user: username required' };
@@ -485,9 +479,6 @@ setInterval(() => {
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 600000); // Changed to every 10 minutes (600000 ms)
 
-const onlineUsers = new Map(); // username -> clientId
-const clientRooms = new Map(); // clientId -> code
-
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -509,7 +500,6 @@ wss.on('connection', (ws, req) => {
     ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
     return;
   }
-  ws.username = null; // New: For authenticated username
   let clientId, code, username;
   let isAdmin = false;
   ws.on('message', async (message) => {
@@ -522,9 +512,6 @@ wss.on('connection', (ws, req) => {
       const loggedData = { ...data };
       if (loggedData.secret) {
         loggedData.secret = '[REDACTED]';
-      }
-      if (loggedData.password) {
-        loggedData.password = '[REDACTED]';
       }
       console.log('Received:', loggedData);
       const validation = validateMessage(data);
@@ -546,8 +533,7 @@ wss.on('connection', (ws, req) => {
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
-        data.type === 'login' && 'password' // Skip escape for password (handled by bcrypt)
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature'
       ];
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -712,30 +698,6 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      if (data.type === 'login') {
-        const { username, password } = data;
-        try {
-          const checkRes = await dbPool.query('SELECT password_hash FROM users WHERE username = $1', [username]);
-          if (checkRes.rows.length === 0) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Username not found' }));
-            return;
-          }
-          const hash = checkRes.rows[0].password_hash;
-          const valid = await bcrypt.compare(password, hash);
-          if (valid) {
-            ws.username = username;
-            onlineUsers.set(username, data.clientId);
-            ws.send(JSON.stringify({ type: 'login-success', username }));
-            console.log(`User ${username} logged in with clientId ${data.clientId}`);
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid password' }));
-          }
-        } catch (err) {
-          console.error('DB error during login:', err);
-          ws.send(JSON.stringify({ type: 'error', message: 'Login failed' }));
-        }
-        return;
-      }
       if (data.type === 'join') {
         if (!features.enableService) {
           ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.', code: data.code }));
@@ -779,10 +741,6 @@ wss.on('connection', (ws, req) => {
         }
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
-          clientRooms.set(clientId, code); // New
-          if (ws.username) {
-            rooms.get(code).creatorUsername = ws.username;
-          }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
           logStats({ clientId, username, code, event: 'init', totalClients: 1 });
         } else {
@@ -838,9 +796,8 @@ wss.on('connection', (ws, req) => {
         }
         const room = rooms.get(code);
         room.clients.set(clientId, { ws, username });
-        clientRooms.set(clientId, code); // New
         ws.code = code;
-        ws.username = username; // Note: this is the chat username, ws.username for auth is separate if needed
+        ws.username = username;
         broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
         return;
       }
@@ -1066,8 +1023,6 @@ wss.on('connection', (ws, req) => {
               randomCodes.clear();
               totpSecrets.clear();
               processedMessageIds.clear();
-              onlineUsers.clear(); // New
-              clientRooms.clear(); // New
             }
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
@@ -1104,16 +1059,17 @@ wss.on('connection', (ws, req) => {
         console.log('Received pong from client');
         return;
       }
-      if (data.type === 'set-totp') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          totpSecrets.set(data.code, data.secret);
-          broadcast(data.code, { type: 'totp-enabled', code: data.code });
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
-        }
-        return;
+      // New: Hash password
+      async function hashPassword(password) {
+        return bcrypt.hash(password, 10);
       }
-      // New for usernames
+
+      // New: Validate password
+      async function validatePassword(input, hash) {
+        return bcrypt.compare(input, hash);
+      }
+
+      // New message types
       if (data.type === 'register-username') {
         const { username, password } = data;
         if (!validateUsername(username) || !password || typeof password !== 'string' || password.length < 8) {
@@ -1138,6 +1094,7 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
+
       if (data.type === 'find-user') {
         const { username } = data;
         try {
@@ -1147,23 +1104,8 @@ wss.on('connection', (ws, req) => {
             return;
           }
           const user = res.rows[0];
-          // New: Check if online and has active room
-          if (onlineUsers.has(username)) {
-            const targetClientId = onlineUsers.get(username);
-            const roomCode = clientRooms.get(targetClientId);
-            if (roomCode && rooms.has(roomCode) && rooms.get(roomCode).initiator === targetClientId) {
-              // User online and is initiator of a room, return code
-              ws.send(JSON.stringify({ type: 'user-found', status: 'online', code: roomCode }));
-              // Notify owner
-              const ownerWs = [...wss.clients].find(client => client.clientId === targetClientId);
-              if (ownerWs) {
-                ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: ws.username || 'anonymous', code: roomCode }));
-              }
-              return;
-            }
-          }
-          // Fallback: Create dynamic code and queue notification (as before)
-          const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 16).match(/.{1,4}/g).join('-');
+          // Create dynamic room
+          const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 19).match(/.{1,4}/g).join('-'); // Format like xxxx-xxxx-xxxx-xxxx
           // Notify online user if connected (via ws)
           const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
           if (ownerWs) {
@@ -1175,7 +1117,7 @@ wss.on('connection', (ws, req) => {
               [data.username, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
             );
           }
-          ws.send(JSON.stringify({ type: 'user-found', status: 'offline', code: dynamicCode }));
+          ws.send(JSON.stringify({ type: 'user-found', status: user.status, code: dynamicCode }));
         } catch (err) {
           console.error('DB error finding user:', err.message, err.stack);
           ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));
@@ -1206,48 +1148,44 @@ wss.on('connection', (ws, req) => {
         }
       }
     }
-    if (ws.username) {
-      onlineUsers.delete(ws.username);
-    }
-    clientRooms.delete(ws.clientId);
-  });
-  if (ws.code && rooms.has(ws.code)) {
-    const room = rooms.get(ws.code);
-    const isInitiator = ws.clientId === room.initiator;
-    room.clients.delete(ws.clientId);
-    rateLimits.delete(ws.clientId);
-    logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
-    if (room.clients.size === 0 || isInitiator) {
-      rooms.delete(ws.code);
-      randomCodes.delete(ws.code);
-      totpSecrets.delete(ws.code);
-      processedMessageIds.delete(ws.code);
-      broadcast(ws.code, {
-        type: 'client-disconnected',
-        clientId: ws.clientId,
-        totalClients: 0,
-        isInitiator
-      });
-    } else {
-      if (isInitiator) {
-        const newInitiator = room.clients.keys().next().value;
-        if (newInitiator) {
-          room.initiator = newInitiator;
-          broadcast(ws.code, {
-            type: 'initiator-changed',
-            newInitiator,
-            totalClients: room.clients.size
-          });
+    if (ws.code && rooms.has(ws.code)) {
+      const room = rooms.get(ws.code);
+      const isInitiator = ws.clientId === room.initiator;
+      room.clients.delete(ws.clientId);
+      rateLimits.delete(ws.clientId);
+      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
+      if (room.clients.size === 0 || isInitiator) {
+        rooms.delete(ws.code);
+        randomCodes.delete(ws.code);
+        totpSecrets.delete(ws.code);
+        processedMessageIds.delete(ws.code);
+        broadcast(ws.code, {
+          type: 'client-disconnected',
+          clientId: ws.clientId,
+          totalClients: 0,
+          isInitiator
+        });
+      } else {
+        if (isInitiator) {
+          const newInitiator = room.clients.keys().next().value;
+          if (newInitiator) {
+            room.initiator = newInitiator;
+            broadcast(ws.code, {
+              type: 'initiator-changed',
+              newInitiator,
+              totalClients: room.clients.size
+            });
+          }
         }
+        broadcast(ws.code, {
+          type: 'client-disconnected',
+          clientId: ws.clientId,
+          totalClients: room.clients.size,
+          isInitiator
+        });
       }
-      broadcast(ws.code, {
-        type: 'client-disconnected',
-        clientId: ws.clientId,
-        totalClients: room.clients.size,
-        isInitiator
-      });
     }
-  }
+  });
 });
 
 function restrictRate(ws) {

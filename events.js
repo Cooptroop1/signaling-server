@@ -618,6 +618,12 @@ socket.onmessage = async (event) => {
  }
  return;
  }
+ // New: Handle username registration success
+ if (message.type === 'username-registered') {
+  showStatusMessage(`Username '${message.username}' claimed successfully!`);
+  document.getElementById('claimUsernameModal').classList.remove('active');
+  return;
+ }
  } catch (error) {
  console.error('Error parsing message:', error, 'Raw data:', event.data);
  }

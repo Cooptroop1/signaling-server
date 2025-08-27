@@ -302,6 +302,10 @@ socket.onmessage = async (event) => {
  inputContainer.classList.add('hidden');
  messages.classList.remove('waiting');
  socket.close();
+ } else if (message.message.includes('Username taken')) {
+  document.getElementById('claimError').textContent = 'Username taken, please try another.';
+  document.getElementById('claimError').classList.remove('hidden');
+  return;
  } else {
  showStatusMessage(message.message);
  }
@@ -1286,6 +1290,7 @@ function updateRecentCodes(code) {
 
 // New: Claim username
 document.getElementById('claimUsernameButton').addEventListener('click', () => {
+  document.getElementById('claimError').classList.add('hidden'); // Clear previous errors
   document.getElementById('claimUsernameModal').classList.add('active');
 });
 

@@ -743,6 +743,7 @@
  </div>
  <div class="text-center mt-4 footer-buttons">
  <button id="claimUsernameButton" class="text-blue-500 hover:underline" aria-label="Claim a username">Claim Username</button>
+ <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
  <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
  <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
  </div>
@@ -819,7 +820,18 @@
  <button id="claimCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
  </div>
  </div>
- <div id="searchUserContainer" class="hidden">
+ <div id="loginModal" class="totp-modal hidden" role="dialog" aria-label="Login" tabindex="-1">
+ <div class="totp-modal-content">
+ <h2 class="text-xl font-bold mb-4">Login</h2>
+ <input id="loginUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Username" maxlength="16">
+ <input id="loginPasswordInput" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Password">
+ <div id="loginError" class="text-red-500 mb-2"></div>
+ <div id="loginSuccess" class="text-green-500 mb-2"></div>
+ <button id="loginSubmitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Login</button>
+ <button id="loginCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+ </div>
+ </div>
+ <div id="searchUserContainer">
  <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username">
  <button id="searchSubmitButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Search</button>
  </div>

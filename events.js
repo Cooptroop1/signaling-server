@@ -226,7 +226,7 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'error') {
-      console.log('Server response:', message.message, 'Code:', message.code || 'N/A'); // Changed from console.error to console.log for non-critical like "Username taken."
+      console.error('Server error:', message.message, 'Code:', message.code || 'N/A');
       if (message.message.includes('Username taken')) {
         const claimError = document.getElementById('claimError');
         claimError.textContent = 'Username already taken. Please try another.';
@@ -238,6 +238,18 @@ socket.onmessage = async (event) => {
         document.getElementById('claimPasswordInput').value = '';
         // Keep modal open for retry
         document.getElementById('claimUsernameInput')?.focus();
+        return;
+      }
+      if (message.message.includes('Invalid login credentials')) {
+        const loginError = document.getElementById('loginError');
+        loginError.textContent = 'Invalid username or password. Please try again.';
+        setTimeout(() => {
+          loginError.textContent = '';
+        }, 5000);
+        // Clear fields
+        document.getElementById('loginUsernameInput').value = '';
+        document.getElementById('loginPasswordInput').value = '';
+        document.getElementById('loginUsernameInput')?.focus();
         return;
       }
       if (message.message.includes('Invalid or expired token') || message.message.includes('Missing authentication token')) {
@@ -645,6 +657,33 @@ socket.onmessage = async (event) => {
         copyCodeButton.classList.add('hidden');
         statusElement.textContent = 'Start a new chat or connect to an existing one';
       }, 5000); // Clear and proceed after 5 seconds
+      return;
+    }
+    if (message.type === 'login-success') {
+      username = message.username;
+      localStorage.setItem('username', username);
+      const loginSuccess = document.getElementById('loginSuccess');
+      loginSuccess.textContent = `Logged in as ${username}`;
+      if (message.offlineMessages && message.offlineMessages.length > 0) {
+        message.offlineMessages.forEach(msg => {
+          const messageDiv = document.createElement('div');
+          messageDiv.className = 'message-bubble other';
+          messageDiv.textContent = `Offline request from ${msg.from}: code ${msg.code}`;
+          messages.prepend(messageDiv);
+        });
+        showStatusMessage('Pending offline messages loaded.');
+      }
+      setTimeout(() => {
+        loginSuccess.textContent = '';
+        document.getElementById('loginModal').classList.remove('active');
+        initialContainer.classList.remove('hidden');
+        usernameContainer.classList.add('hidden');
+        connectContainer.classList.add('hidden');
+        chatContainer.classList.add('hidden');
+        codeDisplayElement.classList.add('hidden');
+        copyCodeButton.classList.add('hidden');
+        statusElement.textContent = 'Start a new chat or connect to an existing one';
+      }, 5000);
       return;
     }
   } catch (error) {
@@ -1182,6 +1221,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const isHidden = recentCodesList.classList.toggle('hidden');
     toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
+  // Login modal setup
+  document.getElementById('loginButton').addEventListener('click', () => {
+    document.getElementById('loginModal').classList.add('active');
+  });
+  document.getElementById('loginSubmitButton').onclick = () => {
+    const name = document.getElementById('loginUsernameInput').value.trim();
+    const pass = document.getElementById('loginPasswordInput').value;
+    if (name && pass) {
+      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+    }
+  };
+  document.getElementById('loginCancelButton').onclick = () => {
+    document.getElementById('loginModal').classList.remove('active');
+  };
 });
 
 function setupWaitingForJoin(codeParam) {

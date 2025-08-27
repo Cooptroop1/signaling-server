@@ -227,6 +227,15 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'error') {
       console.error('Server error:', message.message, 'Code:', message.code || 'N/A');
+      if (message.message.includes('Username taken')) {
+        showStatusMessage('Username already taken. Please try another.');
+        // Clear fields
+        document.getElementById('claimUsernameInput').value = '';
+        document.getElementById('claimPasswordInput').value = '';
+        // Keep modal open for retry
+        document.getElementById('claimUsernameInput')?.focus();
+        return;
+      }
       if (message.message.includes('Invalid or expired token') || message.message.includes('Missing authentication token')) {
         if (refreshToken && !refreshingToken) {
           refreshingToken = true;
@@ -378,7 +387,6 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'join-notify' && message.code === code) {
       totalClients = message.totalClients;
-      console.log(`Join-notify received for code: ${code}, client: ${message.clientId}, total: ${totalClients}, username: ${message.username}`);
       if (message.username) {
         usernames.set(message.clientId, message.username);
       }

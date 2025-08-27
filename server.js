@@ -18,6 +18,15 @@ const dbPool = new Pool({
   ssl: { rejectUnauthorized: false }  // For Render Postgres
 });
 
+// Test DB connection on startup
+dbPool.connect((err) => {
+  if (err) {
+    console.error('DB connection error:', err.message, err.stack);
+  } else {
+    console.log('Connected to DB successfully');
+  }
+});
+
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
@@ -1079,8 +1088,8 @@ wss.on('connection', (ws, req) => {
           );
           ws.send(JSON.stringify({ type: 'username-registered', username }));
         } catch (err) {
-          console.error('DB error registering username:', err);
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username.' }));
+          console.error('DB error registering username:', err.message, err.stack);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username. Check server logs for details.' }));
         }
         return;
       }
@@ -1109,14 +1118,14 @@ wss.on('connection', (ws, req) => {
           }
           ws.send(JSON.stringify({ type: 'user-found', status: user.status, code: dynamicCode }));
         } catch (err) {
-          console.error('DB error finding user:', err);
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user.' }));
+          console.error('DB error finding user:', err.message, err.stack);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));
         }
         return;
       }
     } catch (error) {
-      console.error('Error processing message:', error);
-      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again.', code: data.code }));
+      console.error('Error processing message:', error.message, error.stack);
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again. Check server logs.' }));
       incrementFailure(clientIp, ws.userAgent);
     }
   });

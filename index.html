@@ -744,6 +744,7 @@
  <div class="text-center mt-4 footer-buttons">
  <button id="claimUsernameButton" class="text-blue-500 hover:underline" aria-label="Claim a username">Claim Username</button>
  <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
+ <button id="searchUserButton" class="text-blue-500 hover:underline" aria-label="Search for user">Search User</button>
  <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
  <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
  </div>
@@ -766,6 +767,9 @@
  <p><strong>Start Voice Call:</strong> Press to start/stop a voice call</p>
  <p><strong>Toggle Speaker/Earpiece:</strong> Switch between speaker and earpiece for voice calls</p>
  <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
+ <p><strong>Claim Username:</strong> Claim a persistent username for discoverability.</p>
+ <p><strong>Login:</strong> Login with your claimed username to retrieve it on new devices and get offline messages.</p>
+ <p><strong>Search User:</strong> Search for a claimed username to get a dynamic code to connect.</p>
  </div>
  </div>
  <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
@@ -831,9 +835,23 @@
  <button id="loginCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
  </div>
  </div>
- <div id="searchUserContainer">
- <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username">
+ <div id="searchUserModal" class="totp-modal hidden" role="dialog" aria-label="Search User" tabindex="-1">
+ <div class="totp-modal-content">
+ <h2 class="text-xl font-bold mb-4">Search User</h2>
+ <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username" maxlength="16">
+ <div id="searchError" class="text-red-500 mb-2"></div>
+ <div id="searchResult" class="mb-2"></div>
  <button id="searchSubmitButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Search</button>
+ <button id="searchCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+ </div>
+ </div>
+ <div id="incomingConnectionModal" class="totp-modal hidden" role="dialog" aria-label="Incoming Connection Request" tabindex="-1">
+ <div class="totp-modal-content">
+ <h2 class="text-xl font-bold mb-4">Incoming Connection</h2>
+ <p id="incomingMessage"></p>
+ <button id="acceptButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600 mt-2">Accept</button>
+ <button id="denyButton" class="bg-red-500 text-white px-4 py-2 rounded w-full hover:bg-red-600 mt-2">Deny</button>
+ </div>
  </div>
  <script src="crypto.js"></script>
  <script src="utils.js"></script>

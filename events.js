@@ -632,15 +632,19 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'username-registered') {
-      showStatusMessage(`Successfully claimed username: ${message.username}`);
-      document.getElementById('claimUsernameModal').classList.remove('active');
-      initialContainer.classList.remove('hidden');
-      usernameContainer.classList.add('hidden');
-      connectContainer.classList.add('hidden');
-      chatContainer.classList.add('hidden');
-      codeDisplayElement.classList.add('hidden');
-      copyCodeButton.classList.add('hidden');
-      statusElement.textContent = 'Start a new chat or connect to an existing one';
+      const claimSuccess = document.getElementById('claimSuccess');
+      claimSuccess.textContent = `Username claimed successfully: ${message.username}`;
+      setTimeout(() => {
+        claimSuccess.textContent = '';
+        document.getElementById('claimUsernameModal').classList.remove('active');
+        initialContainer.classList.remove('hidden');
+        usernameContainer.classList.add('hidden');
+        connectContainer.classList.add('hidden');
+        chatContainer.classList.add('hidden');
+        codeDisplayElement.classList.add('hidden');
+        copyCodeButton.classList.add('hidden');
+        statusElement.textContent = 'Start a new chat or connect to an existing one';
+      }, 5000); // Clear and proceed after 5 seconds
       return;
     }
   } catch (error) {

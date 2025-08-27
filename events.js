@@ -1,4 +1,65 @@
+// events.js - All event listeners and handlers
 
+document.getElementById('startAnonChatButton').onclick = () => {
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.remove('hidden');
+  document.getElementById('usernameInput').value = username || '';
+  document.getElementById('usernameInput')?.focus();
+  // Use existing joinWithUsernameButton for anonymous (no login)
+};
+
+document.getElementById('startNamedChatButton').onclick = () => {
+  document.getElementById('loginModal').classList.add('active');
+  document.getElementById('loginUsernameInput')?.focus();
+};
+
+document.getElementById('connectCodeButton').onclick = () => {
+  initialContainer.classList.add('hidden');
+  connectContainer.classList.remove('hidden');
+  document.getElementById('usernameConnectInput').value = username || '';
+  document.getElementById('usernameConnectInput')?.focus();
+};
+
+document.getElementById('connectUsernameButton').onclick = () => {
+  document.getElementById('searchUserModal').classList.add('active');
+  document.getElementById('searchUsernameInput')?.focus();
+};
+
+document.getElementById('loginSubmitButton').onclick = () => {
+  const usernameInput = document.getElementById('loginUsernameInput').value.trim();
+  const password = document.getElementById('loginPasswordInput').value;
+  if (!validateUsername(usernameInput) || !password) {
+    document.getElementById('loginError').textContent = 'Invalid username or password.';
+    document.getElementById('loginError').classList.remove('hidden');
+    return;
+  }
+  socket.send(JSON.stringify({ type: 'login', username: usernameInput, password, clientId, token }));
+  // On 'login-success' in socket.onmessage, create room
+};
+
+document.getElementById('loginCancelButton').onclick = () => {
+  document.getElementById('loginModal').classList.remove('active');
+  initialContainer.classList.remove('hidden');
+};
+
+document.getElementById('searchSubmitButton').onclick = () => {
+  const searchUsername = document.getElementById('searchUsernameInput').value.trim();
+  if (!validateUsername(searchUsername)) {
+    document.getElementById('searchError').textContent = 'Invalid username.';
+    document.getElementById('searchError').classList.remove('hidden');
+    return;
+  }
+  socket.send(JSON.stringify({ type: 'find-user', username: searchUsername, clientId, token }));
+  // On 'user-found' in socket.onmessage, if code, autoConnect(code)
+};
+
+document.getElementById('searchCancelButton').onclick = () => {
+  document.getElementById('searchUserModal').classList.remove('active');
+  initialContainer.classList.remove('hidden');
+};
+
+// Existing event listeners remain the same...
+// (Add the rest of your original events.js code here)
 function processSignalingQueue() {
  signalingQueue.forEach((queue, key) => {
  while (queue.length > 0) {

@@ -13,6 +13,16 @@ const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 
+// New: Hash password
+async function hashPassword(password) {
+  return bcrypt.hash(password, 10);
+ }
+
+// New: Validate password
+async function validatePassword(input, hash) {
+  return bcrypt.compare(input, hash);
+ }
+
 const dbPool = new Pool({
  connectionString: process.env.DATABASE_URL,
  ssl: { rejectUnauthorized: false } // For Render Postgres
@@ -206,10 +216,10 @@ function validateMessage(data) {
   return { valid: false, error: 'Invalid message: must be an object with "type" field' };
   }
   if (data.token && typeof data.token !== 'string') {
-  return { valid: false, error: 'Invalid token: must be a string if provided' };
+  return { valid: false, error: 'Invalid token: must be a string' };
   }
   if (data.clientId && typeof data.clientId !== 'string') {
-  return { valid: false, error: 'Invalid clientId: must be a string if provided' };
+  return { valid: false, error: 'Invalid clientId: must be a string' };
   }
   if (data.code && !validateCode(data.code)) {
   return { valid: false, error: 'Invalid code format' };
@@ -420,7 +430,6 @@ function validateMessage(data) {
   return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
   }
   break;
-  // New: Login
   case 'login-username':
   if (!data.username) {
   return { valid: false, error: 'login-username: username required' };
@@ -1103,7 +1112,6 @@ wss.on('connection', (ws, req) => {
   }
   return;
   }
-  // New: Login
   if (data.type === 'login-username') {
   const { username, password } = data;
   if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
@@ -1121,10 +1129,15 @@ wss.on('connection', (ws, req) => {
   }
   // Update client_id
   await dbPool.query('UPDATE users SET client_id = $1 WHERE id = $2', [data.clientId, user.id]);
-  // Fetch offline messages
-  const msgRes = await dbPool.query('SELECT * FROM offline_messages WHERE to_user_id = $1', [user.id]);
+  // Fetch offline messages with from_username
+  const msgRes = await dbPool.query(`
+  SELECT om.*, u.username AS from_username
+  FROM offline_messages om
+  JOIN users u ON om.from_user_id = u.id
+  WHERE om.to_user_id = $1
+  `, [user.id]);
   const offlineMessages = msgRes.rows.map(msg => ({
-  from: msg.from_username, // Assume you join with from_user_id to get username
+  from: msg.from_username,
   code: JSON.parse(msg.message).code
   }));
   // Delete pending messages
@@ -1345,11 +1358,11 @@ function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
-  clientId: validator.escape(validator.trim(data.clientId || '')), // Escape all strings
+  clientId: validator.escape(data.clientId || ''), // Escape all strings
   username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
-  targetId: validator.escape(validator.trim(data.targetId || '')),
-  code: validator.escape(validator.trim(data.code || '')),
-  event: validator.escape(validator.trim(data.event || '')),
+  targetId: validator.escape(data.targetId || ''),
+  code: validator.escape(data.code || ''),
+  event: validator.escape(data.event || ''),
   totalClients: data.totalClients || 0,
   isInitiator: data.isInitiator || false,
   timestamp,

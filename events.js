@@ -226,7 +226,7 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'error') {
-      console.error('Server error:', message.message, 'Code:', message.code || 'N/A');
+      console.log('Server response:', message.message, 'Code:', message.code || 'N/A'); // Changed from console.error to console.log for non-critical like "Username taken."
       if (message.message.includes('Username taken')) {
         const claimError = document.getElementById('claimError');
         claimError.textContent = 'Username already taken. Please try another.';

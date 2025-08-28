@@ -625,6 +625,8 @@ wss.on('connection', (ws, req) => {
   const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
   clientTokens.set(clientId, { accessToken, refreshToken });
   ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+  // Update last_active on connect
+  await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]);
   return;
   }
   if (data.type === 'refresh-token') {
@@ -1162,7 +1164,7 @@ wss.on('connection', (ws, req) => {
   }
   const user = res.rows[0];
   // Create dynamic room
-  const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 19).match(/.{1,4}/g).join('-'); // Format like xxxx-xxxx-xxxx-xxxx
+  const dynamicCode = uuidv4().replace(/-/g, '').substring(0,16).match(/.{1,4}/g).join('-');
   // Notify online user if connected (via ws)
   const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
   if (ownerWs) {
@@ -1174,7 +1176,10 @@ wss.on('connection', (ws, req) => {
   [data.username, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
   );
   }
-  ws.send(JSON.stringify({ type: 'user-found', status: ownerWs ? 'online' : 'offline', code: dynamicCode }));
+  // Use last_active for status
+  const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
+  const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
+  ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode }));
   } catch (err) {
   console.error('DB error finding user:', err.message, err.stack);
   ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));
@@ -1242,6 +1247,8 @@ wss.on('connection', (ws, req) => {
   });
   }
   }
+  // Update last_active on close
+  await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]);
   });
 });
 

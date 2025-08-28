@@ -1192,7 +1192,7 @@ wss.on('connection', (ws, req) => {
   incrementFailure(clientIp, ws.userAgent);
   }
   });
-  ws.on('close', () => {
+  ws.on('close', async () => {
   if (ws.clientId) {
   const tokens = clientTokens.get(ws.clientId);
   if (tokens) {

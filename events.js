@@ -687,8 +687,9 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'user-found') {
+      const searchedUsername = document.getElementById('searchUsernameInput').value.trim();
       const searchResult = document.getElementById('searchResult');
-      searchResult.innerHTML = `User ${data.username} is ${message.status}. Code: `;
+      searchResult.innerHTML = `User ${searchedUsername} is ${message.status}. Code: `;
       const codeLink = document.createElement('a');
       codeLink.href = '#';
       codeLink.textContent = message.code;

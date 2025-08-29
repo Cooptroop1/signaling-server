@@ -1,4 +1,3 @@
-
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -60,7 +59,7 @@ async function importPublicKey(base64) {
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
     } else if (buffer.byteLength !== 97) {
-      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384 for P-384)`);
+      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
     }
     // Validate point on curve
     const bytes = new Uint8Array(buffer);

@@ -885,6 +885,20 @@ function sendRelayMessage(type, additionalData) {
   }
 }
 
+function processSignalingQueue() {
+  signalingQueue.forEach((queue, key) => {
+    while (queue.length > 0) {
+      const { type, additionalData } = queue.shift();
+      if (type.startsWith('relay-')) {
+        sendRelayMessage(type, additionalData);
+      } else {
+        sendSignalingMessage(type, additionalData);
+      }
+    }
+  });
+  signalingQueue.clear();
+}
+
 function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
   code = codeParam;
@@ -1314,26 +1328,36 @@ async function sendOfflineMessage(toUsername, messageText) {
 }
 
 // Override claim/login to generate keys
-document.getElementById('claimSubmitButton').onclick = async () => {
+document.getElementById('claimSubmitButton').onclick = () => {
   const name = document.getElementById('claimUsernameInput').value.trim();
   const pass = document.getElementById('claimPasswordInput').value;
   if (validateUsername(name) && pass.length >= 8) {
-    const publicKey = await generateUserKeypair();
-    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+    generateUserKeypair().then(publicKey => {
+      socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+    }).catch(error => {
+      console.error('Key generation error:', error);
+      showStatusMessage('Failed to generate keys for claim.');
+    });
   } else {
     showStatusMessage('Invalid username or password (min 8 chars).');
   }
 };
 
-document.getElementById('loginSubmitButton').onclick = async () => {
+document.getElementById('loginSubmitButton').onclick = () => {
   const name = document.getElementById('loginUsernameInput').value.trim();
   const pass = document.getElementById('loginPasswordInput').value;
   if (validateUsername(name) && pass.length >= 8) {
     if (!userPrivateKey) {
-      await generateUserKeypair(); // New device, generate new
-      showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+      generateUserKeypair().then(() => {
+        showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+      }).catch(error => {
+        console.error('Key generation error:', error);
+        showStatusMessage('Failed to generate keys for login.');
+      });
+    } else {
+      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
     }
-    socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
   } else {
     showStatusMessage('Invalid username or password (min 8 chars).');
   }
@@ -1345,19 +1369,21 @@ if (message.type === 'login-success') {
   if (message.offlineMessages && message.offlineMessages.length > 0) {
     for (const msg of message.offlineMessages) {
       if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
-        try {
-          const privateKey = await window.crypto.subtle.importKey('jwk', JSON.parse(userPrivateKey), { name: 'ECDH', namedCurve: 'P-384' }, false, ['deriveKey', 'deriveBits']);
-          const ephemeralPublicImported = await importPublicKey(msg.ephemeral_public);
-          const shared = await deriveSharedKey(privateKey, ephemeralPublicImported);
-          const decrypted = await decryptRaw(shared, msg.encrypted, msg.iv);
-          const messageDiv = document.createElement('div');
-          messageDiv.className = 'message-bubble other';
-          messageDiv.textContent = `Offline message from ${msg.from}: ${decrypted}`;
-          messages.prepend(messageDiv);
-        } catch (error) {
-          console.error('Failed to decrypt offline message:', error);
-          showStatusMessage('Failed to decrypt an offline message.');
-        }
+        (async () => {
+          try {
+            const privateKey = await window.crypto.subtle.importKey('jwk', JSON.parse(userPrivateKey), { name: 'ECDH', namedCurve: 'P-384' }, false, ['deriveKey', 'deriveBits']);
+            const ephemeralPublicImported = await importPublicKey(msg.ephemeral_public);
+            const shared = await deriveSharedKey(privateKey, ephemeralPublicImported);
+            const decrypted = await decryptRaw(shared, msg.encrypted, msg.iv);
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message-bubble other';
+            messageDiv.textContent = `Offline message from ${msg.from}: ${decrypted}`;
+            messages.prepend(messageDiv);
+          } catch (error) {
+            console.error('Failed to decrypt offline message:', error);
+            showStatusMessage('Failed to decrypt an offline message.');
+          }
+        })();
       } else if (msg.type === 'connection-request') {
         // Existing handling
       }
@@ -1377,11 +1403,15 @@ if (message.type === 'user-found') {
     textarea.placeholder = 'Send offline message...';
     const sendBtn = document.createElement('button');
     sendBtn.textContent = 'Send';
-    sendBtn.onclick = async () => {
+    sendBtn.onclick = () => {
       const msgText = textarea.value.trim();
       if (msgText) {
-        await sendOfflineMessage(message.username, msgText);
-        textarea.value = '';
+        sendOfflineMessage(message.username, msgText).then(() => {
+          textarea.value = '';
+        }).catch(error => {
+          console.error('Offline send error:', error);
+          showStatusMessage('Failed to send offline message.');
+        });
       }
     };
     offlineMsgContainer.appendChild(textarea);

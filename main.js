@@ -22,6 +22,8 @@ const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
+let userPrivateKey = localStorage.getItem('userPrivateKey'); // New: Persistent private key
+let userPublicKey; // Generated on claim/login
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -605,7 +607,7 @@ async function processReceivedMessage(data, targetId) {
     img.style.cursor = 'pointer';
     img.setAttribute('alt', 'Received image');
     img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
-    lazyObserver.observe(img); // Observe for lazy loading
+    lazyObserver.observe(img);
     messageDiv.appendChild(img);
   } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
@@ -613,7 +615,7 @@ async function processReceivedMessage(data, targetId) {
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
-    lazyObserver.observe(audio); // Observe for lazy loading
+    lazyObserver.observe(audio);
     messageDiv.appendChild(audio);
   } else if (contentType === 'file') {
     const link = document.createElement('a');
@@ -883,21 +885,7 @@ function sendRelayMessage(type, additionalData) {
   }
 }
 
-function processSignalingQueue() {
-  signalingQueue.forEach((queue, key) => {
-    while (queue.length > 0) {
-      const { type, additionalData } = queue.shift();
-      if (type.startsWith('relay-')) {
-        sendRelayMessage(type, additionalData);
-      } else {
-        sendSignalingMessage(type, additionalData);
-      }
-    }
-  });
-  signalingQueue.clear();
-}
-
-async function autoConnect(codeParam) {
+function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
   code = codeParam;
   initialContainer.classList.add('hidden');
@@ -920,7 +908,7 @@ async function autoConnect(codeParam) {
       } else {
         console.log('WebSocket not open, waiting for open event to send check-totp');
         socket.addEventListener('open', () => {
-          console.log('WebSocket opened, sending check-totp');
+          console.log('WebSocket opened, sent check-totp');
           socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
         }, { once: true });
       }
@@ -1283,19 +1271,121 @@ setInterval(() => {
   console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
 }, 300000); // 5min
 
-// New: Claim username handler (in socket.onmessage or separate)
+// New: Generate user keypair on claim/login if none
+async function generateUserKeypair() {
+  const keypair = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    true, // Extractable for storage
+    ['deriveKey', 'deriveBits']
+  );
+  const privateJwk = await window.crypto.subtle.exportKey('jwk', keypair.privateKey);
+  const publicBase64 = await exportPublicKey(keypair.publicKey);
+  localStorage.setItem('userPrivateKey', JSON.stringify(privateJwk));
+  userPrivateKey = privateJwk;
+  userPublicKey = publicBase64;
+  return publicBase64;
+}
+
+// New: Send offline message
+async function sendOfflineMessage(toUsername, messageText) {
+  if (!userPrivateKey) {
+    showStatusMessage('No private key. Please re-claim username on this device.');
+    return;
+  }
+  const ephemeralKeypair = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    false,
+    ['deriveKey', 'deriveBits']
+  );
+  const recipientPublic = await importPublicKey(userPublicKey); // From search response
+  const shared = await deriveSharedKey(ephemeralKeypair.privateKey, recipientPublic);
+  const { encrypted, iv } = await encryptRaw(shared, messageText);
+  const ephemeralPublic = await exportPublicKey(ephemeralKeypair.publicKey);
+  socket.send(JSON.stringify({
+    type: 'send-offline-message',
+    to_username,
+    encrypted,
+    iv,
+    ephemeral_public: ephemeralPublic,
+    clientId,
+    token
+  }));
+  showStatusMessage('Offline message sent.');
+}
+
+// Override claim/login to generate keys
 document.getElementById('claimSubmitButton').onclick = async () => {
   const name = document.getElementById('claimUsernameInput').value.trim();
   const pass = document.getElementById('claimPasswordInput').value;
-  if (name && pass) {
-    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
+  if (validateUsername(name) && pass.length >= 8) {
+    const publicKey = await generateUserKeypair();
+    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+  } else {
+    showStatusMessage('Invalid username or password (min 8 chars).');
   }
 };
 
-// New: Search user handler
-document.getElementById('searchSubmitButton').onclick = () => {
-  const name = document.getElementById('searchUsernameInput').value.trim();
-  if (name) {
-    socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
+document.getElementById('loginSubmitButton').onclick = async () => {
+  const name = document.getElementById('loginUsernameInput').value.trim();
+  const pass = document.getElementById('loginPasswordInput').value;
+  if (validateUsername(name) && pass.length >= 8) {
+    if (!userPrivateKey) {
+      await generateUserKeypair(); // New device, generate new
+      showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+    }
+    socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+  } else {
+    showStatusMessage('Invalid username or password (min 8 chars).');
   }
 };
+
+// In socket.onmessage for login-success, decrypt offline messages
+if (message.type === 'login-success') {
+  // ... existing
+  if (message.offlineMessages && message.offlineMessages.length > 0) {
+    for (const msg of message.offlineMessages) {
+      if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
+        try {
+          const privateKey = await window.crypto.subtle.importKey('jwk', JSON.parse(userPrivateKey), { name: 'ECDH', namedCurve: 'P-384' }, false, ['deriveKey', 'deriveBits']);
+          const ephemeralPublicImported = await importPublicKey(msg.ephemeral_public);
+          const shared = await deriveSharedKey(privateKey, ephemeralPublicImported);
+          const decrypted = await decryptRaw(shared, msg.encrypted, msg.iv);
+          const messageDiv = document.createElement('div');
+          messageDiv.className = 'message-bubble other';
+          messageDiv.textContent = `Offline message from ${msg.from}: ${decrypted}`;
+          messages.prepend(messageDiv);
+        } catch (error) {
+          console.error('Failed to decrypt offline message:', error);
+          showStatusMessage('Failed to decrypt an offline message.');
+        }
+      } else if (msg.type === 'connection-request') {
+        // Existing handling
+      }
+    }
+    messages.scrollTop = 0;
+  }
+}
+
+// In search modal, if offline, show send message UI
+if (message.type === 'user-found') {
+  // ... existing
+  if (message.status === 'offline' && message.public_key) {
+    userPublicKey = message.public_key; // Temp store for encryption
+    const searchResult = document.getElementById('searchResult');
+    const offlineMsgContainer = document.createElement('div');
+    const textarea = document.createElement('textarea');
+    textarea.placeholder = 'Send offline message...';
+    const sendBtn = document.createElement('button');
+    sendBtn.textContent = 'Send';
+    sendBtn.onclick = async () => {
+      const msgText = textarea.value.trim();
+      if (msgText) {
+        await sendOfflineMessage(message.username, msgText);
+        textarea.value = '';
+      }
+    };
+    offlineMsgContainer.appendChild(textarea);
+    offlineMsgContainer.appendChild(sendBtn);
+    searchResult.appendChild(offlineMsgContainer);
+  }
+}

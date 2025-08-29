@@ -41,7 +41,7 @@ const maxRetries = 2;
 let candidatesQueues = new Map();
 let processedMessageIds = new Set();
 let usernames = new Map();
-const messageRateLimits = new Map();
+let messageRateLimits = new Map();
 let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
@@ -91,16 +91,6 @@ if (typeof window !== 'undefined') {
       ['deriveKey', 'deriveBits']
     );
   })();
-  let cycleTimeout;
-  function triggerCycle() {
-    if (cycleTimeout) clearTimeout(cycleTimeout);
-    cornerLogo.classList.add('wink');
-    cycleTimeout = setTimeout(() => {
-      cornerLogo.classList.remove('wink');
-    }, 500);
-    setTimeout(triggerCycle, 60000);
-  }
-  setTimeout(triggerCycle, 60000);
 }
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
@@ -665,12 +655,30 @@ socket.onmessage = async (event) => {
       const loginSuccess = document.getElementById('loginSuccess');
       loginSuccess.textContent = `Logged in as ${username}`;
       if (message.offlineMessages && message.offlineMessages.length > 0) {
-        message.offlineMessages.forEach(msg => {
-          const messageDiv = document.createElement('div');
-          messageDiv.className = 'message-bubble other';
-          messageDiv.textContent = `Offline request from ${msg.from}: code ${msg.code}`;
-          messages.prepend(messageDiv);
-        });
+        for (const msg of message.offlineMessages) {
+          if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
+            (async () => {
+              try {
+                const privateKey = await window.crypto.subtle.importKey('jwk', JSON.parse(userPrivateKey), { name: 'ECDH', namedCurve: 'P-384' }, false, ['deriveKey', 'deriveBits']);
+                const ephemeralPublicImported = await importPublicKey(msg.ephemeral_public);
+                const shared = await deriveSharedKey(privateKey, ephemeralPublicImported);
+                const decrypted = await decryptRaw(shared, msg.encrypted, msg.iv);
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message-bubble other';
+                messageDiv.textContent = `Offline message from ${msg.from}: ${decrypted}`;
+                messages.prepend(messageDiv);
+              } catch (error) {
+                console.error('Failed to decrypt offline message:', error);
+                showStatusMessage('Failed to decrypt an offline message.');
+              }
+            })();
+          } else if (msg.type === 'connection-request') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message-bubble other';
+            messageDiv.textContent = `Offline request from ${msg.from}: code ${msg.code}`;
+            messages.prepend(messageDiv);
+          }
+        }
         showStatusMessage('Pending offline messages loaded.');
       }
       setTimeout(() => {
@@ -699,6 +707,28 @@ socket.onmessage = async (event) => {
         document.getElementById('searchUserModal').classList.remove('active');
       };
       searchResult.appendChild(codeLink);
+      if (message.status === 'offline' && message.public_key) {
+        userPublicKey = message.public_key; // Temp store for encryption
+        const offlineMsgContainer = document.createElement('div');
+        const textarea = document.createElement('textarea');
+        textarea.placeholder = 'Send offline message...';
+        const sendBtn = document.createElement('button');
+        sendBtn.textContent = 'Send';
+        sendBtn.onclick = () => {
+          const msgText = textarea.value.trim();
+          if (msgText) {
+            sendOfflineMessage(message.username, msgText).then(() => {
+              textarea.value = '';
+            }).catch(error => {
+              console.error('Offline send error:', error);
+              showStatusMessage('Failed to send offline message.');
+            });
+          }
+        };
+        offlineMsgContainer.appendChild(textarea);
+        offlineMsgContainer.appendChild(sendBtn);
+        searchResult.appendChild(offlineMsgContainer);
+      }
       return;
     }
     if (message.type === 'incoming-connection') {
@@ -726,10 +756,15 @@ socket.onmessage = async (event) => {
       }, 5000);
       return;
     }
+    if (message.type === 'offline-message-sent') {
+      showStatusMessage('Offline message sent successfully.');
+      return;
+    }
   } catch (error) {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
 };
+
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
@@ -789,7 +824,7 @@ async function triggerRatchet() {
   }
 }
 
-// Updated: Function to retry ratchet for failed clients with backoff and max retries
+// Updated: Function to retry for failed clients with backoff and max retries
 async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
@@ -835,6 +870,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
     console.log(`All partial ratchet retries complete for version ${version}.`);
   }
 }
+
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');
@@ -1413,27 +1449,80 @@ function updateRecentCodes(code) {
   loadRecentCodes(); // Refresh UI
 }
 
-// New: Claim username
-document.getElementById('claimUsernameButton').addEventListener('click', () => {
-  document.getElementById('claimUsernameModal').classList.add('active');
-});
+// New: Generate user keypair on claim/login if none
+async function generateUserKeypair() {
+  const keypair = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    true, // Extractable for storage
+    ['deriveKey', 'deriveBits']
+  );
+  const privateJwk = await window.crypto.subtle.exportKey('jwk', keypair.privateKey);
+  const publicBase64 = await exportPublicKey(keypair.publicKey);
+  localStorage.setItem('userPrivateKey', JSON.stringify(privateJwk));
+  userPrivateKey = privateJwk;
+  userPublicKey = publicBase64;
+  return publicBase64;
+}
 
-document.getElementById('claimSubmitButton').onclick = async () => {
+// New: Send offline message
+async function sendOfflineMessage(toUsername, messageText) {
+  if (!userPrivateKey) {
+    showStatusMessage('No private key. Please re-claim username on this device.');
+    return;
+  }
+  const ephemeralKeypair = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    false,
+    ['deriveKey', 'deriveBits']
+  );
+  const recipientPublic = await importPublicKey(userPublicKey); // From search response
+  const shared = await deriveSharedKey(ephemeralKeypair.privateKey, recipientPublic);
+  const { encrypted, iv } = await encryptRaw(shared, messageText);
+  const ephemeralPublic = await exportPublicKey(ephemeralKeypair.publicKey);
+  socket.send(JSON.stringify({
+    type: 'send-offline-message',
+    to_username,
+    encrypted,
+    iv,
+    ephemeral_public: ephemeralPublic,
+    clientId,
+    token
+  }));
+  showStatusMessage('Offline message sent.');
+}
+
+// Override claim/login to generate keys
+document.getElementById('claimSubmitButton').onclick = () => {
   const name = document.getElementById('claimUsernameInput').value.trim();
   const pass = document.getElementById('claimPasswordInput').value;
-  if (name && pass) {
-    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
+  if (validateUsername(name) && pass.length >= 8) {
+    generateUserKeypair().then(publicKey => {
+      socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+    }).catch(error => {
+      console.error('Key generation error:', error);
+      showStatusMessage('Failed to generate keys for claim.');
+    });
+  } else {
+    showStatusMessage('Invalid username or password (min 8 chars).');
   }
 };
 
-document.getElementById('claimCancelButton').onclick = () => {
-  document.getElementById('claimUsernameModal').classList.remove('active');
-};
-
-// New: Search user
-document.getElementById('searchSubmitButton').onclick = () => {
-  const name = document.getElementById('searchUsernameInput').value.trim();
-  if (name) {
-    socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
+document.getElementById('loginSubmitButton').onclick = () => {
+  const name = document.getElementById('loginUsernameInput').value.trim();
+  const pass = document.getElementById('loginPasswordInput').value;
+  if (validateUsername(name) && pass.length >= 8) {
+    if (!userPrivateKey) {
+      generateUserKeypair().then(() => {
+        showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+      }).catch(error => {
+        console.error('Key generation error:', error);
+        showStatusMessage('Failed to generate keys for login.');
+      });
+    } else {
+      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+    }
+  } else {
+    showStatusMessage('Invalid username or password (min 8 chars).');
   }
 };

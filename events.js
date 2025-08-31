@@ -1,3 +1,19 @@
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
+function setCookie(name, value, days) {
+  let expires = '';
+  if (days) {
+    const date = new Date();
+    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    expires = '; expires=' + date.toUTCString();
+  }
+  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
+}
 
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
@@ -884,7 +900,6 @@ document.getElementById('startChatToggleButton').onclick = () => {
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
 };
-
 document.getElementById('connectToggleButton').onclick = () => {
   console.log('Connect toggle clicked');
   initialContainer.classList.add('hidden');
@@ -897,7 +912,6 @@ document.getElementById('connectToggleButton').onclick = () => {
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
 };
-
 document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.add('active');
   document.getElementById('totpUsernameInput').value = username || '';
@@ -905,7 +919,6 @@ document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('customTotpSecretContainer').classList.add('hidden');
   document.querySelector('input[name="totpType"][value="server"]').checked = true;
 };
-
 document.getElementById('connect2FAChatButton').onclick = () => {
   initialContainer.classList.add('hidden');
   usernameContainer.classList.add('hidden');
@@ -936,27 +949,22 @@ document.getElementById('connect2FAChatButton').onclick = () => {
     showTotpInputModal(code);
   };
 };
-
 document.querySelectorAll('input[name="totpType"]').forEach(radio => {
   radio.addEventListener('change', () => {
     document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');
   });
 });
-
 document.getElementById('createTotpRoomButton').onclick = () => {
   const serverGenerated = document.querySelector('input[name="totpType"]:checked').value === 'server';
   startTotpRoom(serverGenerated);
 };
-
 document.getElementById('cancelTotpButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
-
 document.getElementById('closeTotpSecretButton').onclick = () => {
   document.getElementById('totpSecretModal').classList.remove('active');
 };
-
 document.getElementById('submitTotpCodeButton').onclick = () => {
   const totpCode = document.getElementById('totpCodeInput').value.trim();
   const codeParam = document.getElementById('totpInputModal').dataset.code;
@@ -967,12 +975,10 @@ document.getElementById('submitTotpCodeButton').onclick = () => {
   joinWithTotp(codeParam, totpCode);
   document.getElementById('totpInputModal').classList.remove('active');
 };
-
 document.getElementById('cancelTotpInputButton').onclick = () => {
   document.getElementById('totpInputModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
-
 document.getElementById('joinWithUsernameButton').onclick = () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -1010,7 +1016,6 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   }
   document.getElementById('messageInput')?.focus();
 };
-
 document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
   const inputCode = document.getElementById('codeInput').value.trim();
@@ -1201,6 +1206,94 @@ cornerLogo.addEventListener('click', () => {
   processedMessageIds.clear();
   showStatusMessage('Chat history cleared locally.');
 });
+
+function updateDots() {
+  const userDots = document.getElementById('userDots');
+  if (!userDots) return;
+  userDots.innerHTML = '';
+  const greenCount = totalClients;
+  const redCount = maxClients - greenCount;
+  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId);
+  // Add self dot (no menu)
+  const selfDot = document.createElement('div');
+  selfDot.className = 'user-dot online';
+  userDots.appendChild(selfDot);
+  // Add other users' dots with menu if initiator
+  otherClientIds.forEach((targetId, index) => {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot online';
+    dot.dataset.targetId = targetId;
+    if (isInitiator) {
+      const menu = document.createElement('div');
+      menu.className = 'user-menu';
+      const kickButton = document.createElement('button');
+      kickButton.textContent = 'Kick';
+      kickButton.onclick = () => kickUser(targetId);
+      const banButton = document.createElement('button');
+      banButton.textContent = 'Ban';
+      banButton.onclick = () => banUser(targetId);
+      menu.appendChild(kickButton);
+      menu.appendChild(banButton);
+      dot.appendChild(menu);
+    }
+    userDots.appendChild(dot);
+  });
+  // Add offline (red) dots
+  for (let i = 0; i < redCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot offline';
+    userDots.appendChild(dot);
+  }
+}
+
+async function kickUser(targetId) {
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for kick:', targetId);
+    showStatusMessage('Invalid target user for kick.');
+    return;
+  }
+  console.log('Kicking user', targetId);
+  const toSign = targetId + 'kick' + code;
+  const signature = await signMessage(signingKey, toSign);
+  const message = { type: 'kick', targetId, code, clientId, token, signature };
+  console.log('Sending kick message:', message);
+  socket.send(JSON.stringify(message));
+  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
+}
+
+async function banUser(targetId) {
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for ban:', targetId);
+    showStatusMessage('Invalid target user for ban.');
+    return;
+  }
+  console.log('Banning user', targetId);
+  const toSign = targetId + 'ban' + code;
+  const signature = await signMessage(signingKey, toSign);
+  const message = { type: 'ban', targetId, code, clientId, token, signature };
+  console.log('Sending ban message:', message);
+  socket.send(JSON.stringify(message));
+  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
+}
+
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
+function setCookie(name, value, days) {
+  let expires = '';
+  if (days) {
+    const date = new Date();
+    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    expires = '; expires=' + date.toUTCString();
+  }
+  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);

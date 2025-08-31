@@ -1,3 +1,209 @@
+function showStatusMessage(message, duration = 3000) {
+  if (typeof statusElement !== 'undefined' && statusElement) {
+    statusElement.textContent = message;
+    statusElement.setAttribute('aria-live', 'assertive');
+    setTimeout(() => {
+      statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
+      statusElement.setAttribute('aria-live', 'polite');
+    }, duration);
+  }
+}
+function sanitizeMessage(content) {
+  // Switch to DOMPurify for better sanitization
+  return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); // Plain text only, no HTML
+}
+function generateMessageId() {
+  return Math.random().toString(36).substr(2, 9);
+}
+function validateUsername(username) {
+  const regex = /^[a-zA-Z0-9]{1,16}$/;
+  return username && regex.test(username);
+}
+function validateCode(code) {
+  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+  return code && regex.test(code);
+}
+function cleanupPeerConnection(targetId) {
+  const peerConnection = peerConnections.get(targetId);
+  const dataChannel = dataChannels.get(targetId);
+  if (dataChannel && dataChannel.readyState === 'open') {
+    log('info', `Skipping cleanup for ${targetId}: data channel is open`);
+    return;
+  }
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnections.delete(targetId);
+  }
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannels.delete(targetId);
+  }
+  candidatesQueues.delete(targetId);
+  clearTimeout(connectionTimeouts.get(targetId));
+  connectionTimeouts.delete(targetId);
+  retryCounts.delete(targetId);
+  messageRateLimits.delete(targetId);
+  if (remoteAudios.has(targetId)) {
+    const audio = remoteAudios.get(targetId);
+    audio.remove();
+    remoteAudios.delete(targetId);
+    if (remoteAudios.size === 0) {
+      document.getElementById('remoteAudioContainer').classList.add('hidden');
+    }
+  }
+  isConnected = dataChannels.size > 0;
+  updateMaxClientsUI();
+  if (!isConnected) {
+    if (inputContainer) inputContainer.classList.add('hidden');
+    if (messages) messages.classList.add('waiting');
+  }
+}
+function initializeMaxClientsUI() {
+  log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
+  const addUserText = document.getElementById('addUserText');
+  const addUserModal = document.getElementById('addUserModal');
+  const addUserRadios = document.getElementById('addUserRadios');
+  if (addUserText && addUserModal && addUserRadios) {
+    addUserText.classList.toggle('hidden', !isInitiator);
+    if (isInitiator) {
+      log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
+      addUserRadios.innerHTML = '';
+      for (let n = 2; n <= 10; n++) {
+        const button = document.createElement('button');
+        button.textContent = n;
+        button.setAttribute('aria-label', `Set maximum users to ${n}`);
+        button.className = n === maxClients ? 'active' : '';
+        button.disabled = !isInitiator;
+        button.addEventListener('click', () => {
+          if (isInitiator) {
+            log('info', `Button clicked for maxClients: ${n}`);
+            setMaxClients(n);
+            document.querySelectorAll('#addUserRadios button').forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            addUserModal.classList.remove('active');
+          }
+        });
+        addUserRadios.appendChild(button);
+      }
+      log('info', 'Buttons appended to addUserRadios');
+    } else {
+      log('info', 'Hiding addUserText for non-initiator');
+    }
+  } else {
+    log('error', 'Add user modal elements not found');
+    showStatusMessage('Error: UI initialization failed. Please refresh.');
+  }
+}
+function updateMaxClientsUI() {
+  log('info', `updateMaxClientsUI called, maxClients: ${maxClients}, isInitiator: ${isInitiator}`);
+  if (statusElement) {
+    statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
+  }
+  const addUserText = document.getElementById('addUserText');
+  if (addUserText) {
+    addUserText.classList.toggle('hidden', !isInitiator);
+  }
+  const buttons = document.querySelectorAll('#addUserRadios button');
+  log('info', `Found buttons in modal: ${buttons.length}`);
+  buttons.forEach(button => {
+    const value = parseInt(button.textContent);
+    button.classList.toggle('active', value === maxClients);
+    button.disabled = !isInitiator;
+  });
+  if (messages) {
+    if (!isConnected) {
+      messages.classList.add('waiting');
+    } else {
+      messages.classList.remove('waiting');
+    }
+  }
+}
+function setMaxClients(n) {
+  if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
+    maxClients = Math.min(n, 10);
+    log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);
+    socket.send(JSON.stringify({ type: 'set-max-clients', maxClients: maxClients, code, clientId, token }));
+    updateMaxClientsUI();
+  } else {
+    log('warn', 'setMaxClients failed: not initiator, no token, or socket not open');
+  }
+}
+function log(level, ...msg) {
+  const timestamp = new Date().toISOString();
+  const fullMsg = `[${timestamp}] ${msg.join(' ')}`;
+  if (level === 'error') {
+    console.error(fullMsg);
+  } else if (level === 'warn') {
+    console.warn(fullMsg);
+  } else {
+    console.log(fullMsg);
+  }
+}
+function createImageModal(base64, focusId) {
+  let modal = document.getElementById('imageModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'imageModal';
+    modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Image viewer');
+    modal.setAttribute('tabindex', '-1');
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '';
+  const modalImg = document.createElement('img');
+  modalImg.src = base64;
+  modalImg.setAttribute('alt', 'Enlarged image');
+  modal.appendChild(modalImg);
+  modal.classList.add('active');
+  modal.focus();
+  modal.addEventListener('click', () => {
+    modal.classList.remove('active');
+    document.getElementById(focusId)?.focus();
+  });
+  modal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      modal.classList.remove('active');
+      document.getElementById(focusId)?.focus();
+    }
+  });
+}
+function createAudioModal(base64, focusId) {
+  let modal = document.getElementById('audioModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'audioModal';
+    modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Audio player');
+    modal.setAttribute('tabindex', '-1');
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '';
+  const audio = document.createElement('audio');
+  audio.src = base64;
+  audio.controls = true;
+  audio.setAttribute('alt', 'Voice message');
+  modal.appendChild(audio);
+  modal.classList.add('active');
+  modal.focus();
+  modal.addEventListener('click', () => {
+    modal.classList.remove('active');
+    document.getElementById(focusId)?.focus();
+  });
+  modal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      modal.classList.remove('active');
+      document.getElementById(focusId)?.focus();
+    }
+  });
+}
+function generateTotpSecret() {
+  return otplib.authenticator.generateSecret(32);
+}
+function generateTotpUri(roomCode, secret) {
+  return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
+}
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -11,7 +217,6 @@ function processSignalingQueue() {
   });
   signalingQueue.clear();
 }
-
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -563,6 +768,12 @@ socket.onmessage = async (event) => {
         showStatusMessage('Invalid message received.');
         return;
       }
+      const payloadSize = (payload.content || payload.encryptedContent || payload.data || payload.encryptedData || '').length * 3 / 4;
+      if (globalSizeRate.totalSize + payloadSize > 1048576) {
+        console.warn('Incoming size limit exceeded, ignoring message');
+        return;
+      }
+      globalSizeRate.totalSize += payloadSize;
       const senderUsername = payload.username;
       const messages = document.getElementById('messages');
       const isSelf = senderUsername === username;
@@ -679,92 +890,92 @@ socket.onmessage = async (event) => {
             messages.prepend(messageDiv);
           }
         }
-        showStatusMessage('Pending offline messages loaded.');
       }
-      setTimeout(() => {
-        loginSuccess.textContent = '';
-        document.getElementById('loginModal').classList.remove('active');
-        initialContainer.classList.remove('hidden');
-        usernameContainer.classList.add('hidden');
-        connectContainer.classList.add('hidden');
-        chatContainer.classList.add('hidden');
-        codeDisplayElement.classList.add('hidden');
-        copyCodeButton.classList.add('hidden');
-        statusElement.textContent = 'Start a new chat or connect to an existing one';
-      }, 5000);
-      return;
+      showStatusMessage('Pending offline messages loaded.');
     }
-    if (message.type === 'user-found') {
-      const searchedUsername = document.getElementById('searchUsernameInput').value.trim();
-      const searchResult = document.getElementById('searchResult');
-      searchResult.innerHTML = `User ${searchedUsername} is ${message.status}. Code: `;
-      const codeLink = document.createElement('a');
-      codeLink.href = '#';
-      codeLink.textContent = message.code;
-      codeLink.onclick = (e) => {
-        e.preventDefault();
-        autoConnect(message.code);
-        document.getElementById('searchUserModal').classList.remove('active');
-      };
-      searchResult.appendChild(codeLink);
-      if (message.status === 'offline' && message.public_key) {
-        userPublicKey = message.public_key; // Temp store for encryption
-        const offlineMsgContainer = document.createElement('div');
-        const textarea = document.createElement('textarea');
-        textarea.placeholder = 'Send offline message...';
-        const sendBtn = document.createElement('button');
-        sendBtn.textContent = 'Send';
-        sendBtn.onclick = () => {
-          const msgText = textarea.value.trim();
-          if (msgText) {
-            sendOfflineMessage(message.username, msgText).then(() => {
-              textarea.value = '';
-            }).catch(error => {
-              console.error('Offline send error:', error);
-              showStatusMessage('Failed to send offline message.');
-            });
-          }
-        };
-        offlineMsgContainer.appendChild(textarea);
-        offlineMsgContainer.appendChild(sendBtn);
-        searchResult.appendChild(offlineMsgContainer);
-      }
-      return;
-    }
-    if (message.type === 'incoming-connection') {
-      document.getElementById('incomingMessage').textContent = `${message.from} wants to connect. Accept?`;
-      document.getElementById('acceptButton').onclick = () => {
-        socket.send(JSON.stringify({ type: 'connection-accepted', code: message.code, clientId, token }));
-        autoConnect(message.code);
-        document.getElementById('incomingConnectionModal').classList.remove('active');
-      };
-      document.getElementById('denyButton').onclick = () => {
-        socket.send(JSON.stringify({ type: 'connection-denied', code: message.code, clientId, token }));
-        document.getElementById('incomingConnectionModal').classList.remove('active');
-      };
-      document.getElementById('incomingConnectionModal').classList.add('active');
-      return;
-    }
-    if (message.type === 'connection-denied') {
-      showStatusMessage(`Connection request denied by ${message.from}`);
-      return;
-    }
-    if (message.type === 'user-not-found') {
-      document.getElementById('searchError').textContent = 'User not found.';
-      setTimeout(() => {
-        document.getElementById('searchError').textContent = '';
-      }, 5000);
-      return;
-    }
-    if (message.type === 'offline-message-sent') {
-      showStatusMessage('Offline message sent successfully.');
-      return;
-    }
-  } catch (error) {
-    console.error('Error parsing message:', error, 'Raw data:', event.data);
+    setTimeout(() => {
+      loginSuccess.textContent = '';
+      document.getElementById('loginModal').classList.remove('active');
+      initialContainer.classList.remove('hidden');
+      usernameContainer.classList.add('hidden');
+      connectContainer.classList.add('hidden');
+      chatContainer.classList.add('hidden');
+      codeDisplayElement.classList.add('hidden');
+      copyCodeButton.classList.add('hidden');
+      statusElement.textContent = 'Start a new chat or connect to an existing one';
+    }, 5000);
+    return;
   }
+  if (message.type === 'user-found') {
+    const searchedUsername = document.getElementById('searchUsernameInput').value.trim();
+    const searchResult = document.getElementById('searchResult');
+    searchResult.innerHTML = `User ${searchedUsername} is ${message.status}. Code: `;
+    const codeLink = document.createElement('a');
+    codeLink.href = '#';
+    codeLink.textContent = message.code;
+    codeLink.onclick = (e) => {
+      e.preventDefault();
+      autoConnect(message.code);
+      document.getElementById('searchUserModal').classList.remove('active');
+    };
+    searchResult.appendChild(codeLink);
+    if (message.status === 'offline' && message.public_key) {
+      userPublicKey = message.public_key; // Temp store for encryption
+      const offlineMsgContainer = document.createElement('div');
+      const textarea = document.createElement('textarea');
+      textarea.placeholder = 'Send offline message...';
+      const sendBtn = document.createElement('button');
+      sendBtn.textContent = 'Send';
+      sendBtn.onclick = () => {
+        const msgText = textarea.value.trim();
+        if (msgText) {
+          sendOfflineMessage(message.username, msgText).then(() => {
+            textarea.value = '';
+          }).catch(error => {
+            console.error('Offline send error:', error);
+            showStatusMessage('Failed to send offline message.');
+          });
+        }
+      };
+      offlineMsgContainer.appendChild(textarea);
+      offlineMsgContainer.appendChild(sendBtn);
+      searchResult.appendChild(offlineMsgContainer);
+    }
+    return;
+  }
+  if (message.type === 'incoming-connection') {
+    document.getElementById('incomingMessage').textContent = `${message.from} wants to connect. Accept?`;
+    document.getElementById('acceptButton').onclick = () => {
+      socket.send(JSON.stringify({ type: 'connection-accepted', code: message.code, clientId, token }));
+      autoConnect(message.code);
+      document.getElementById('incomingConnectionModal').classList.remove('active');
+    };
+    document.getElementById('denyButton').onclick = () => {
+      socket.send(JSON.stringify({ type: 'connection-denied', code: message.code, clientId, token }));
+      document.getElementById('incomingConnectionModal').classList.remove('active');
+    };
+    document.getElementById('incomingConnectionModal').classList.add('active');
+    return;
+  }
+  if (message.type === 'connection-denied') {
+    showStatusMessage(`Connection request denied by ${message.from}`);
+    return;
+  }
+  if (message.type === 'user-not-found') {
+    document.getElementById('searchError').textContent = 'User not found.';
+    setTimeout(() => {
+      document.getElementById('searchError').textContent = '';
+    }, 5000);
+    return;
+  }
+  if (message.type === 'offline-message-sent') {
+    showStatusMessage('Offline message sent successfully.');
+    return;
+  }
+} catch (error) {
+  console.error('Error parsing message:', error, 'Raw data:', event.data);
+}
 };
-
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
@@ -774,7 +985,6 @@ function refreshAccessToken() {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
   }
 }
-
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
   keyVersion++; // Increment version
@@ -823,7 +1033,6 @@ async function triggerRatchet() {
     keyVersion--; // Revert version on full failure
   }
 }
-
 // Updated: Function to retry for failed clients with backoff and max retries
 async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
@@ -870,7 +1079,6 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
     console.log(`All partial ratchet retries complete for version ${version}.`);
   }
 }
-
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');
@@ -1297,6 +1505,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const isHidden = recentCodesList.classList.toggle('hidden');
     toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
+  // Claim modal setup
+  document.getElementById('claimUsernameButton').addEventListener('click', () => {
+    document.getElementById('claimUsernameModal').classList.add('active');
+  });
+  document.getElementById('claimSubmitButton').onclick = () => {
+    const name = document.getElementById('claimUsernameInput').value.trim();
+    const pass = document.getElementById('claimPasswordInput').value;
+    if (validateUsername(name) && pass.length >= 8) {
+      generateUserKeypair().then(publicKey => {
+        socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+      }).catch(error => {
+        console.error('Key generation error:', error);
+        showStatusMessage('Failed to generate keys for claim.');
+      });
+    } else {
+      showStatusMessage('Invalid username or password (min 8 chars).');
+    }
+  };
+  document.getElementById('claimCancelButton').onclick = () => {
+    document.getElementById('claimUsernameModal').classList.remove('active');
+  };
   // Login modal setup
   document.getElementById('loginButton').addEventListener('click', () => {
     document.getElementById('loginModal').classList.add('active');
@@ -1304,8 +1533,20 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('loginSubmitButton').onclick = () => {
     const name = document.getElementById('loginUsernameInput').value.trim();
     const pass = document.getElementById('loginPasswordInput').value;
-    if (name && pass) {
-      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+    if (validateUsername(name) && pass.length >= 8) {
+      if (!userPrivateKey) {
+        generateUserKeypair().then(() => {
+          showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+          socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+        }).catch(error => {
+          console.error('Key generation error:', error);
+          showStatusMessage('Failed to generate keys for login.');
+        });
+      } else {
+        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+      }
+    } else {
+      showStatusMessage('Invalid username or password (min 8 chars).');
     }
   };
   document.getElementById('loginCancelButton').onclick = () => {
@@ -1420,7 +1661,7 @@ function setupLazyObserver() {
 }
 
 function loadRecentCodes() {
-  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   const recentCodesList = document.getElementById('recentCodesList');
   recentCodesList.innerHTML = '';
   if (recentCodes.length > 0) {

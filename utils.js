@@ -1,3 +1,4 @@
+
 function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
@@ -10,7 +11,8 @@ function showStatusMessage(message, duration = 3000) {
 }
 
 function sanitizeMessage(content) {
-  return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+  // Switch to DOMPurify for better sanitization
+  return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); // Plain text only, no HTML
 }
 
 function generateMessageId() {
@@ -35,7 +37,7 @@ function startKeepAlive() {
       socket.send(JSON.stringify({ type: 'ping', clientId, token }));
       log('info', 'Sent keepalive ping');
     }
-  }, 50000);
+  }, 50000); // Adjusted to 50 seconds
 }
 
 function stopKeepAlive() {
@@ -234,55 +236,4 @@ function generateTotpSecret() {
 
 function generateTotpUri(roomCode, secret) {
   return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
-}
-
-async function generateUserKeypair() {
-  try {
-    const keypair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
-      true,
-      ['deriveKey', 'deriveBits']
-    );
-    const privateJwk = await window.crypto.subtle.exportKey('jwk', keypair.privateKey);
-    const publicBase64 = await exportPublicKey(keypair.publicKey);
-    localStorage.setItem('userPrivateKey', JSON.stringify(privateJwk));
-    userPrivateKey = privateJwk;
-    userPublicKey = publicBase64;
-    return publicBase64;
-  } catch (error) {
-    console.error('Key generation error:', error);
-    showStatusMessage('Failed to generate keys.');
-    throw error;
-  }
-}
-
-async function sendOfflineMessage(toUsername, messageText) {
-  if (!userPrivateKey) {
-    showStatusMessage('No private key. Please re-claim username on this device.');
-    return;
-  }
-  try {
-    const ephemeralKeypair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
-      false,
-      ['deriveKey', 'deriveBits']
-    );
-    const recipientPublic = await importPublicKey(userPublicKey);
-    const shared = await deriveSharedKey(ephemeralKeypair.privateKey, recipientPublic);
-    const { encrypted, iv } = await encryptRaw(shared, messageText);
-    const ephemeralPublic = await exportPublicKey(ephemeralKeypair.publicKey);
-    socket.send(JSON.stringify({
-      type: 'send-offline-message',
-      to_username: toUsername,
-      encrypted,
-      iv,
-      ephemeral_public: ephemeralPublic,
-      clientId,
-      token
-    }));
-    showStatusMessage('Offline message sent.');
-  } catch (error) {
-    console.error('Offline send error:', error);
-    showStatusMessage('Failed to send offline message.');
-  }
 }

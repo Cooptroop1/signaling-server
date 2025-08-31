@@ -76,6 +76,8 @@ let connectedClients = new Set();
 let clientPublicKeys = new Map();
 let initiatorPublic;
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
+let lazyObserver;
+
 if (typeof window !== 'undefined') {
   socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
   console.log('WebSocket created');
@@ -109,20 +111,24 @@ if (typeof window !== 'undefined') {
     );
   })();
 }
+
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
   helpModal.focus();
 });
+
 helpModal.addEventListener('click', () => {
   helpModal.classList.remove('active');
   helpText.focus();
 });
+
 helpModal.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     helpModal.classList.remove('active');
     helpText.focus();
   }
 });
+
 const addUserText = document.getElementById('addUserText');
 const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', () => {
@@ -131,21 +137,25 @@ addUserText.addEventListener('click', () => {
     addUserModal.focus();
   }
 });
+
 addUserModal.addEventListener('click', () => {
   addUserModal.classList.remove('active');
   addUserText.focus();
 });
+
 addUserModal.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     addUserModal.classList.remove('active');
     addUserText.focus();
   }
 });
+
 let pendingCode = null;
 let pendingJoin = null;
 const maxReconnectAttempts = 5;
 let refreshFailures = 0;
 let refreshBackoff = 1000;
+
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -165,14 +175,15 @@ socket.onopen = () => {
     copyCodeButton.classList.add('hidden');
   }
 };
+
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
 };
+
 socket.onclose = () => {
   console.log('WebSocket closed');
-  // Removed showStatusMessage to suppress transient error
   stopKeepAlive();
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
@@ -188,6 +199,7 @@ socket.onclose = () => {
     socket.onmessage = socket.onmessage;
   }, delay);
 };
+
 socket.onmessage = async (event) => {
   console.log('Received WebSocket message:', event.data);
   try {
@@ -220,7 +232,6 @@ socket.onmessage = async (event) => {
       token = message.accessToken;
       refreshToken = message.refreshToken;
       console.log('Received new tokens:', { accessToken: token, refreshToken });
-      // Removed showStatusMessage to suppress transient error
       refreshFailures = 0;
       refreshBackoff = 1000;
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
@@ -233,17 +244,15 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'error') {
-      console.log('Server response:', message.message, 'Code:', message.code || 'N/A'); // Changed from console.error to console.log for non-critical like "Username taken."
+      console.log('Server response:', message.message, 'Code:', message.code || 'N/A');
       if (message.message.includes('Username taken')) {
         const claimError = document.getElementById('claimError');
         claimError.textContent = 'Username already taken. Please try another.';
         setTimeout(() => {
           claimError.textContent = '';
-        }, 5000); // Clear after 5 seconds
-        // Clear fields
+        }, 5000);
         document.getElementById('claimUsernameInput').value = '';
         document.getElementById('claimPasswordInput').value = '';
-        // Keep modal open for retry
         document.getElementById('claimUsernameInput')?.focus();
         return;
       }
@@ -253,7 +262,6 @@ socket.onmessage = async (event) => {
         setTimeout(() => {
           loginError.textContent = '';
         }, 5000);
-        // Clear fields
         document.getElementById('loginUsernameInput').value = '';
         document.getElementById('loginPasswordInput').value = '';
         document.getElementById('loginUsernameInput')?.focus();
@@ -281,8 +289,7 @@ socket.onmessage = async (event) => {
           refreshBackoff = 1000;
           socket.close();
         } else {
-          // Exponential backoff with jitter (1-5s random delay)
-          const jitter = Math.random() * 4000 + 1000; // 1-5s
+          const jitter = Math.random() * 4000 + 1000;
           const delay = Math.min(refreshBackoff + jitter, 8000);
           setTimeout(() => {
             if (refreshToken && !refreshingToken) {
@@ -292,7 +299,6 @@ socket.onmessage = async (event) => {
           }, delay);
           refreshBackoff = Math.min(refreshBackoff * 2, 8000);
         }
-        // Removed showStatusMessage to suppress transient error
       } else if (message.message.includes('Rate limit exceeded')) {
         showStatusMessage('Rate limit exceeded. Waiting before retrying...');
         setTimeout(() => {
@@ -300,9 +306,9 @@ socket.onmessage = async (event) => {
             socket.send(JSON.stringify({ type: 'connect', clientId }));
           }
         }, 60000);
-      } else if (message.message.includes('Chat is full') || 
-        message.message.includes('Username already taken') || 
-        message.message.includes('Initiator offline') || 
+      } else if (message.message.includes('Chat is full') ||
+        message.message.includes('Username already taken') ||
+        message.message.includes('Initiator offline') ||
         message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
         showStatusMessage(`Failed to join chat: ${message.message}`);
@@ -366,7 +372,6 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
-        // Generate initial roomMaster and salts for E2EE
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingSalt = window.crypto.getRandomValues(new Uint8Array(16));
         messageSalt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -398,7 +403,7 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
-      updateRecentCodes(code); // Save to recent
+      updateRecentCodes(code);
       return;
     }
     if (message.type === 'initiator-changed') {
@@ -430,7 +435,7 @@ socket.onmessage = async (event) => {
         messages.classList.remove('waiting');
         updateMaxClientsUI();
       }
-      updateRecentCodes(code); // Update on join notify
+      updateRecentCodes(code);
       return;
     }
     if (message.type === 'client-disconnected') {
@@ -562,7 +567,7 @@ socket.onmessage = async (event) => {
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
-      console.log('Received relay message:', message); // Debug
+      console.log('Received relay message:', message);
       const payload = {
         messageId: message.messageId,
         username: message.username,
@@ -571,7 +576,7 @@ socket.onmessage = async (event) => {
         data: message.data,
         encryptedData: message.encryptedData,
         filename: message.filename,
-        timestamp: Number(message.timestamp) || Date.now(), // Ensure valid timestamp
+        timestamp: Number(message.timestamp) || Date.now(),
         iv: message.iv,
         signature: message.signature
       };
@@ -663,7 +668,7 @@ socket.onmessage = async (event) => {
         codeDisplayElement.classList.add('hidden');
         copyCodeButton.classList.add('hidden');
         statusElement.textContent = 'Start a new chat or connect to an existing one';
-      }, 5000); // Clear and proceed after 5 seconds
+      }, 5000);
       return;
     }
     if (message.type === 'login-success') {
@@ -725,7 +730,7 @@ socket.onmessage = async (event) => {
       };
       searchResult.appendChild(codeLink);
       if (message.status === 'offline' && message.public_key) {
-        userPublicKey = message.public_key; // Temp store for encryption
+        userPublicKey = message.public_key;
         const offlineMsgContainer = document.createElement('div');
         const textarea = document.createElement('textarea');
         textarea.placeholder = 'Send offline message...';
@@ -794,7 +799,7 @@ function refreshAccessToken() {
 
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
-  keyVersion++; // Increment version
+  keyVersion++;
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
   const newSigningSalt = window.crypto.getRandomValues(new Uint8Array(16));
   const newMessageSalt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -833,21 +838,20 @@ async function triggerRatchet() {
     console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster and salts set.`);
     if (failures.length > 0) {
       console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
-      triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, keyVersion, 1); // Start retry with count 1
+      triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, keyVersion, 1);
     }
   } else {
     console.warn(`PFS ratchet failed (version ${keyVersion}): No keys available to send to any clients.`);
-    keyVersion--; // Revert version on full failure
+    keyVersion--;
   }
 }
 
-// Updated: Function to retry for failed clients with backoff and max retries
 async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
     return;
   }
-  const backoffTimes = [10000, 30000, 60000]; // 10s, 30s, 60s
+  const backoffTimes = [10000, 30000, 60000];
   const delay = backoffTimes[retryCount - 1];
   console.log(`Scheduling retry ${retryCount} in ${delay / 1000}s for version ${version}`);
   await new Promise(resolve => setTimeout(resolve, delay));
@@ -888,6 +892,124 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
   }
 }
 
+function updateDots() {
+  const userDots = document.getElementById('userDots');
+  if (!userDots) return;
+  userDots.innerHTML = '';
+  const greenCount = totalClients;
+  const redCount = maxClients - greenCount;
+  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId);
+  const selfDot = document.createElement('div');
+  selfDot.className = 'user-dot online';
+  userDots.appendChild(selfDot);
+  otherClientIds.forEach((targetId, index) => {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot online';
+    dot.dataset.targetId = targetId;
+    if (isInitiator) {
+      const menu = document.createElement('div');
+      menu.className = 'user-menu';
+      const kickButton = document.createElement('button');
+      kickButton.textContent = 'Kick';
+      kickButton.onclick = () => kickUser(targetId);
+      const banButton = document.createElement('button');
+      banButton.textContent = 'Ban';
+      banButton.onclick = () => banUser(targetId);
+      menu.appendChild(kickButton);
+      menu.appendChild(banButton);
+      dot.appendChild(menu);
+    }
+    userDots.appendChild(dot);
+  });
+  for (let i = 0; i < redCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot offline';
+    userDots.appendChild(dot);
+  }
+}
+
+async function kickUser(targetId) {
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for kick:', targetId);
+    showStatusMessage('Invalid target user for kick.');
+    return;
+  }
+  console.log('Kicking user', targetId);
+  const toSign = targetId + 'kick' + code;
+  const signature = await signMessage(signingKey, toSign);
+  const message = { type: 'kick', targetId, code, clientId, token, signature };
+  console.log('Sending kick message:', message);
+  socket.send(JSON.stringify(message));
+  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
+}
+
+async function banUser(targetId) {
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for ban:', targetId);
+    showStatusMessage('Invalid target user for ban.');
+    return;
+  }
+  console.log('Banning user', targetId);
+  const toSign = targetId + 'ban' + code;
+  const signature = await signMessage(signingKey, toSign);
+  const message = { type: 'ban', targetId, code, clientId, token, signature };
+  console.log('Sending ban message:', message);
+  socket.send(JSON.stringify(message));
+  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
+}
+
+function setupLazyObserver() {
+  lazyObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const elem = entry.target;
+        if (elem.dataset.src) {
+          elem.src = elem.dataset.src;
+          delete elem.dataset.src;
+          lazyObserver.unobserve(elem);
+        }
+        if (elem.dataset.fullSrc) {
+          elem.src = elem.dataset.fullSrc;
+          delete elem.dataset.fullSrc;
+          lazyObserver.unobserve(elem);
+        }
+      }
+    });
+  }, { rootMargin: '100px' });
+}
+
+function loadRecentCodes() {
+  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  const recentCodesList = document.getElementById('recentCodesList');
+  recentCodesList.innerHTML = '';
+  if (recentCodes.length > 0) {
+    document.getElementById('recentChats').classList.remove('hidden');
+    recentCodes.forEach(recentCode => {
+      const button = document.createElement('button');
+      button.textContent = recentCode;
+      button.onclick = () => autoConnect(recentCode);
+      recentCodesList.appendChild(button);
+    });
+  } else {
+    document.getElementById('recentChats').classList.add('hidden');
+  }
+}
+
+function updateRecentCodes(code) {
+  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  if (recentCodes.includes(code)) {
+    recentCodes = recentCodes.filter(c => c !== code);
+  }
+  recentCodes.unshift(code);
+  if (recentCodes.length > 5) {
+    recentCodes = recentCodes.slice(0, 5);
+  }
+  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
+  loadRecentCodes();
+}
+
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');
@@ -900,6 +1022,7 @@ document.getElementById('startChatToggleButton').onclick = () => {
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
 };
+
 document.getElementById('connectToggleButton').onclick = () => {
   console.log('Connect toggle clicked');
   initialContainer.classList.add('hidden');
@@ -912,6 +1035,7 @@ document.getElementById('connectToggleButton').onclick = () => {
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
 };
+
 document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.add('active');
   document.getElementById('totpUsernameInput').value = username || '';
@@ -919,6 +1043,7 @@ document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('customTotpSecretContainer').classList.add('hidden');
   document.querySelector('input[name="totpType"][value="server"]').checked = true;
 };
+
 document.getElementById('connect2FAChatButton').onclick = () => {
   initialContainer.classList.add('hidden');
   usernameContainer.classList.add('hidden');
@@ -949,22 +1074,27 @@ document.getElementById('connect2FAChatButton').onclick = () => {
     showTotpInputModal(code);
   };
 };
+
 document.querySelectorAll('input[name="totpType"]').forEach(radio => {
   radio.addEventListener('change', () => {
     document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');
   });
 });
+
 document.getElementById('createTotpRoomButton').onclick = () => {
   const serverGenerated = document.querySelector('input[name="totpType"]:checked').value === 'server';
   startTotpRoom(serverGenerated);
 };
+
 document.getElementById('cancelTotpButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
+
 document.getElementById('closeTotpSecretButton').onclick = () => {
   document.getElementById('totpSecretModal').classList.remove('active');
 };
+
 document.getElementById('submitTotpCodeButton').onclick = () => {
   const totpCode = document.getElementById('totpCodeInput').value.trim();
   const codeParam = document.getElementById('totpInputModal').dataset.code;
@@ -975,10 +1105,12 @@ document.getElementById('submitTotpCodeButton').onclick = () => {
   joinWithTotp(codeParam, totpCode);
   document.getElementById('totpInputModal').classList.remove('active');
 };
+
 document.getElementById('cancelTotpInputButton').onclick = () => {
   document.getElementById('totpInputModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
+
 document.getElementById('joinWithUsernameButton').onclick = () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -1016,6 +1148,7 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   }
   document.getElementById('messageInput')?.focus();
 };
+
 document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
   const inputCode = document.getElementById('codeInput').value.trim();
@@ -1207,105 +1340,16 @@ cornerLogo.addEventListener('click', () => {
   showStatusMessage('Chat history cleared locally.');
 });
 
-function updateDots() {
-  const userDots = document.getElementById('userDots');
-  if (!userDots) return;
-  userDots.innerHTML = '';
-  const greenCount = totalClients;
-  const redCount = maxClients - greenCount;
-  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId);
-  // Add self dot (no menu)
-  const selfDot = document.createElement('div');
-  selfDot.className = 'user-dot online';
-  userDots.appendChild(selfDot);
-  // Add other users' dots with menu if initiator
-  otherClientIds.forEach((targetId, index) => {
-    const dot = document.createElement('div');
-    dot.className = 'user-dot online';
-    dot.dataset.targetId = targetId;
-    if (isInitiator) {
-      const menu = document.createElement('div');
-      menu.className = 'user-menu';
-      const kickButton = document.createElement('button');
-      kickButton.textContent = 'Kick';
-      kickButton.onclick = () => kickUser(targetId);
-      const banButton = document.createElement('button');
-      banButton.textContent = 'Ban';
-      banButton.onclick = () => banUser(targetId);
-      menu.appendChild(kickButton);
-      menu.appendChild(banButton);
-      dot.appendChild(menu);
-    }
-    userDots.appendChild(dot);
-  });
-  // Add offline (red) dots
-  for (let i = 0; i < redCount; i++) {
-    const dot = document.createElement('div');
-    dot.className = 'user-dot offline';
-    userDots.appendChild(dot);
-  }
-}
-
-async function kickUser(targetId) {
-  if (!isInitiator) return;
-  if (!targetId || typeof targetId !== 'string') {
-    console.error('Invalid targetId for kick:', targetId);
-    showStatusMessage('Invalid target user for kick.');
-    return;
-  }
-  console.log('Kicking user', targetId);
-  const toSign = targetId + 'kick' + code;
-  const signature = await signMessage(signingKey, toSign);
-  const message = { type: 'kick', targetId, code, clientId, token, signature };
-  console.log('Sending kick message:', message);
-  socket.send(JSON.stringify(message));
-  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
-}
-
-async function banUser(targetId) {
-  if (!isInitiator) return;
-  if (!targetId || typeof targetId !== 'string') {
-    console.error('Invalid targetId for ban:', targetId);
-    showStatusMessage('Invalid target user for ban.');
-    return;
-  }
-  console.log('Banning user', targetId);
-  const toSign = targetId + 'ban' + code;
-  const signature = await signMessage(signingKey, toSign);
-  const message = { type: 'ban', targetId, code, clientId, token, signature };
-  console.log('Sending ban message:', message);
-  socket.send(JSON.stringify(message));
-  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
-}
-
-function getCookie(name) {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop().split(';').shift();
-  return null;
-}
-
-function setCookie(name, value, days) {
-  let expires = '';
-  if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = '; expires=' + date.toUTCString();
-  }
-  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
     setupWaitingForJoin(codeParam);
   }
-  // New: Auto-format code input
   const codeInput = document.getElementById('codeInput');
   if (codeInput) {
     codeInput.addEventListener('input', (e) => {
-      let val = e.target.value.replace(/[^a-zA-Z0-9]/gi, ''); // Remove non-alphanum, case insensitive
+      let val = e.target.value.replace(/[^a-zA-Z0-9]/gi, '');
       val = val.substring(0, 16);
       let formatted = '';
       for (let i = 0; i < val.length; i++) {
@@ -1315,25 +1359,19 @@ document.addEventListener('DOMContentLoaded', () => {
       e.target.value = formatted;
     });
   }
-  // Setup lazy observer
   setupLazyObserver();
-  // Load recent codes
   loadRecentCodes();
-  // Setup user dots click for menu
   document.getElementById('userDots').addEventListener('click', (e) => {
     if (e.target.classList.contains('user-dot')) {
-      // Toggle menu if needed; already in CSS hover, but for touch/mobile, add click toggle
-      e.target.classList.toggle('active'); // Add .active to show menu on click
+      e.target.classList.toggle('active');
     }
   });
-  // Toggle recent chats
   const toggleRecent = document.getElementById('toggleRecent');
   const recentCodesList = document.getElementById('recentCodesList');
   toggleRecent.addEventListener('click', () => {
     const isHidden = recentCodesList.classList.toggle('hidden');
     toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
-  // Login modal setup
   document.getElementById('loginButton').addEventListener('click', () => {
     document.getElementById('loginModal').classList.add('active');
   });
@@ -1347,7 +1385,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('loginCancelButton').onclick = () => {
     document.getElementById('loginModal').classList.remove('active');
   };
-  // Search modal setup
   document.getElementById('searchUserButton').addEventListener('click', () => {
     document.getElementById('searchUserModal').classList.add('active');
   });
@@ -1360,14 +1397,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('searchCancelButton').onclick = () => {
     document.getElementById('searchUserModal').classList.remove('active');
   };
-  // Claim username modal setup
   document.getElementById('claimUsernameButton').addEventListener('click', () => {
     document.getElementById('claimUsernameModal').classList.add('active');
   });
   document.getElementById('claimCancelButton').onclick = () => {
     document.getElementById('claimUsernameModal').classList.remove('active');
   };
-  // Override claim/login to generate keys
   document.getElementById('claimSubmitButton').onclick = () => {
     const name = document.getElementById('claimUsernameInput').value.trim();
     const pass = document.getElementById('claimPasswordInput').value;
@@ -1382,7 +1417,6 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatusMessage('Invalid username or password (min 8 chars).');
     }
   };
-
   document.getElementById('loginSubmitButton').onclick = () => {
     const name = document.getElementById('loginUsernameInput').value.trim();
     const pass = document.getElementById('loginPasswordInput').value;

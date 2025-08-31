@@ -13,17 +13,16 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
-const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
-const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
-const negotiationQueues = new Map(); // Queue pending negotiations per peer
-let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
-const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
-const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
-let keyVersion = 0; // New: Global key version counter for ratcheting
-let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
-let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
-let userPrivateKey = localStorage.getItem('userPrivateKey'); // New: Persistent private key
-let userPublicKey; // Generated on claim/login
+const CHUNK_SIZE = 8192;
+const chunkBuffers = new Map();
+const negotiationQueues = new Map();
+let globalSendRate = { count: 0, startTime: performance.now() };
+const renegotiationCounts = new Map();
+const maxRenegotiations = 5;
+let globalSizeRate = { totalSize: 0, startTime: performance.now() };
+let processedNonces = new Map();
+let userPrivateKey = localStorage.getItem('userPrivateKey');
+let userPublicKey;
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -31,7 +30,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     return;
   }
 
-  // Global send rate limit check (aggregate all types)
   const now = performance.now();
   if (now - globalSendRate.startTime >= 60000) {
     globalSendRate.count = 0;
@@ -42,13 +40,12 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     return;
   }
 
-  // New: Client-side size limit check (mirror server 1MB/min)
   if (now - globalSizeRate.startTime >= 60000) {
     globalSizeRate.totalSize = 0;
     globalSizeRate.startTime = now;
   }
-  const payloadSize = (content || base64 || '').length * 3 / 4; // Approximate byte size (base64 or text)
-  if (globalSizeRate.totalSize + payloadSize > 1048576) { // 1MB
+  const payloadSize = (content || base64 || '').length * 3 / 4;
+  if (globalSizeRate.totalSize + payloadSize > 1048576) {
     showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
     return;
   }
@@ -125,20 +122,19 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
 
   const messageId = generateMessageId();
   const timestamp = Date.now();
-  const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
+  const jitter = Math.floor(Math.random() * 61) - 30;
   const jitteredTimestamp = timestamp + jitter * 1000;
-  const nonce = crypto.randomUUID(); // New: Generate nonce
+  const nonce = crypto.randomUUID();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
-  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type }); // New: Metadata JSON
-  let rawData = metadata + (dataToSend || sanitizedContent); // New: Prepend metadata
-  // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type });
+  let rawData = metadata + (dataToSend || sanitizedContent);
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
-  rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
+  rawData = rawData.padEnd(paddedLength, ' ');
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
+  const toSign = rawData + nonce;
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
+  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };
 
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
@@ -159,7 +155,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
           for (let index = 0; index < chunks.length; index++) {
             const chunk = chunks[index];
             dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
-            await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
+            await new Promise(resolve => setTimeout(resolve, 1));
           }
         }
       }
@@ -175,7 +171,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     return;
   }
 
-  // Increment global count and size after successful send
   globalSendRate.count += 1;
   globalSizeRate.totalSize += payloadSize;
 
@@ -221,7 +216,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
-  processedNonces.set(nonce, Date.now()); // Changed to Map: nonce -> timestamp
+  processedNonces.set(nonce, Date.now());
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
     await triggerRatchet();
@@ -258,7 +253,6 @@ async function sendMedia(file, type) {
   document.getElementById(`${type}Button`)?.focus();
 }
 
-// Rest of the code remains the same...
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
   if (!features.enableP2P) {
@@ -340,7 +334,6 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Connection state for ${targetId}: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
       console.log(`Connection failed with ${targetId}`);
-      // Removed showStatusMessage to suppress transient error
       cleanupPeerConnection(targetId);
       const retryCount = retryCounts.get(targetId) || 0;
       if (retryCount < maxRetries) {
@@ -397,7 +390,6 @@ async function startPeerConnection(targetId, isOfferer) {
       sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
     }).catch(error => {
       console.error(`Error creating offer for ${targetId}:`, error);
-      // Removed showStatusMessage to suppress transient error
     });
   }
   const timeout = setTimeout(() => {
@@ -405,7 +397,6 @@ async function startPeerConnection(targetId, isOfferer) {
       console.log(`P2P failed with ${targetId}, checking relay availability`);
       if (features.enableRelay) {
         useRelay = true;
-        // Removed showStatusMessage to suppress transient error; user sees final connection status
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
           privacyStatus.textContent = 'Relay Mode (E2EE)';
@@ -461,7 +452,6 @@ function setupDataChannel(dataChannel, targetId) {
       return;
     }
     if (data.chunk) {
-      // Don't count chunks toward rate limit
       const { chunkId, index, total, data: chunkData } = data;
       if (!chunkBuffers.has(chunkId)) {
         chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
@@ -472,7 +462,6 @@ function setupDataChannel(dataChannel, targetId) {
       if (buffer.received === total) {
         const fullMessage = buffer.chunks.join('');
         chunkBuffers.delete(chunkId);
-        // Process the reassembled message
         try {
           data = JSON.parse(fullMessage);
         } catch (e) {
@@ -483,7 +472,6 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
-    // Count non-chunk messages
     rateLimit.count += 1;
     messageRateLimits.set(targetId, rateLimit);
     if (rateLimit.count > 10) {
@@ -495,11 +483,9 @@ function setupDataChannel(dataChannel, targetId) {
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
   };
   dataChannel.onclose = () => {
     console.log(`Data channel closed with ${targetId}`);
-    // Removed showStatusMessage to suppress transient error
     cleanupPeerConnection(targetId);
     messageRateLimits.delete(targetId);
     imageRateLimits.delete(targetId);
@@ -541,7 +527,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedBlob)) { // New: Check for encryptedBlob
+  if (!data.messageId || !data.encryptedBlob) {
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -549,29 +535,28 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate message ${data.messageId} from ${targetId}`);
     return;
   }
-  if (processedNonces.has(data.nonce)) { // New: Check nonce
+  if (processedNonces.has(data.nonce)) {
     console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
     return;
   }
   const now = Date.now();
-  if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
+  if (Math.abs(now - data.timestamp) > 300000) {
     console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
     return;
   }
   processedMessageIds.add(data.messageId);
-  processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
+  processedNonces.set(data.nonce, Date.now());
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     const messageKey = await deriveMessageKey();
     const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
-    const toVerify = rawData + data.nonce; // New: Verify on rawData + nonce
+    const toVerify = rawData + data.nonce;
     const valid = await verifyMessage(signingKey, data.signature, toVerify);
     if (!valid) {
       console.warn(`Invalid signature for message from ${targetId}`);
       showStatusMessage('Invalid message signature detected.');
       return;
     }
-    // New: Parse metadata from rawData
     let metadataStr = '';
     let braceCount = 0;
     for (let i = 0; i < rawData.length; i++) {
@@ -584,7 +569,7 @@ async function processReceivedMessage(data, targetId) {
     senderUsername = metadata.username;
     timestamp = metadata.timestamp;
     contentType = metadata.type;
-    contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
+    contentOrData = rawData.substring(metadataStr.length).trimEnd();
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
@@ -601,7 +586,7 @@ async function processReceivedMessage(data, targetId) {
   messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
   if (contentType === 'image') {
     const img = document.createElement('img');
-    img.dataset.src = contentOrData; // Lazy load
+    img.dataset.src = contentOrData;
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
@@ -611,7 +596,7 @@ async function processReceivedMessage(data, targetId) {
     messageDiv.appendChild(img);
   } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
-    audio.dataset.src = contentOrData; // Lazy load
+    audio.dataset.src = contentOrData;
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
@@ -658,13 +643,11 @@ async function handleOffer(offer, targetId) {
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
-    // Process queued candidates asynchronously
     const queue = candidatesQueues.get(targetId) || [];
     await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling offer from ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
   }
 }
 
@@ -688,13 +671,11 @@ async function handleAnswer(answer, targetId) {
   }
   try {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    // Process queued items asynchronously
     const queue = candidatesQueues.get(targetId) || [];
     await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling answer from ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
   }
 }
 
@@ -710,7 +691,6 @@ async function handleCandidate(candidate, targetId) {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (error) {
       console.error(`Error adding ICE candidate from ${targetId}:`, error);
-      // Removed showStatusMessage to suppress transient error
     }
   } else {
     const queue = candidatesQueues.get(targetId) || [];
@@ -719,7 +699,6 @@ async function handleCandidate(candidate, targetId) {
   }
 }
 
-// New helper to process queue with Promises for efficiency
 async function processCandidateQueue(peerConnection, queue) {
   for (const item of queue) {
     if (item.type === 'answer') {
@@ -727,14 +706,12 @@ async function processCandidateQueue(peerConnection, queue) {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer));
       } catch (error) {
         console.error(`Error applying queued answer:`, error);
-        // Removed showStatusMessage to suppress transient error
       }
     } else if (item.type === 'candidate') {
       try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(item.candidate));
       } catch (error) {
         console.error(`Error adding queued ICE candidate:`, error);
-        // Removed showStatusMessage to suppress transient error
       }
     }
   }
@@ -801,7 +778,6 @@ function stopVoiceCall() {
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection) {
-    // Check renegotiation limit
     const count = renegotiationCounts.get(targetId) || 0;
     if (count >= maxRenegotiations) {
       console.warn(`Max renegotiations reached for ${targetId} (${maxRenegotiations}), aborting.`);
@@ -820,7 +796,7 @@ async function renegotiate(targetId) {
       }
       if (peerConnection.signalingState !== 'stable') {
         console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}. Queuing.`);
-        return renegotiate(targetId); // Recurse to queue again
+        return renegotiate(targetId);
       }
       renegotiating.set(targetId, true);
       try {
@@ -829,7 +805,6 @@ async function renegotiate(targetId) {
         sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
       } catch (error) {
         console.error(`Error renegotiating with ${targetId}:`, error);
-        // Removed showStatusMessage to suppress transient error
       } finally {
         renegotiating.set(targetId, false);
       }
@@ -850,13 +825,7 @@ function sendSignalingMessage(type, additionalData) {
     return;
   }
   const message = { type, ...additionalData, code, clientId, token };
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(message));
-  } else {
-    console.log('Socket not open, queuing signaling message');
-    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
-    signalingQueue.get('global').push({ type, additionalData });
-  }
+  wsManager.send(JSON.stringify(message));
 }
 
 function broadcastVoiceCallEvent(eventType) {
@@ -876,13 +845,7 @@ function sendRelayMessage(type, additionalData) {
     return;
   }
   const message = { type, ...additionalData, code, clientId, token };
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(message));
-  } else {
-    console.log('Socket not open, queuing relay message');
-    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
-    signalingQueue.get('global').push({ type, additionalData });
-  }
+  wsManager.send(JSON.stringify(message));
 }
 
 function processSignalingQueue() {
@@ -916,15 +879,15 @@ function autoConnect(codeParam) {
       copyCodeButton.classList.remove('hidden');
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
-      if (socket.readyState === WebSocket.OPEN) {
+      if (wsManager.readyState === WebSocket.OPEN) {
         console.log('Sending check-totp');
-        socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
+        wsManager.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
       } else {
         console.log('WebSocket not open, waiting for open event to send check-totp');
-        socket.addEventListener('open', () => {
+        wsManager.onOpen = () => {
           console.log('WebSocket opened, sent check-totp');
-          socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
-        }, { once: true });
+          wsManager.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
+        };
       }
       document.getElementById('messageInput')?.focus();
       updateFeaturesUI();
@@ -951,7 +914,7 @@ function autoConnect(codeParam) {
         copyCodeButton.classList.remove('hidden');
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
-        socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
+        wsManager.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
         document.getElementById('messageInput')?.focus();
       };
     }
@@ -1150,7 +1113,7 @@ async function startTotpRoom(serverGenerated) {
   totpEnabled = true;
   code = generateCode();
   pendingTotpSecret = { display: totpSecret, send: secretToSend };
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+  wsManager.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
   document.getElementById('totpOptionsModal').classList.remove('active');
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -1174,7 +1137,7 @@ function showTotpSecretModal(secret) {
 }
 
 async function joinWithTotp(code, totpCode) {
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
+  wsManager.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }
 
 function startVoiceRecording() {
@@ -1270,70 +1233,26 @@ async function generateThumbnail(dataURL, width = 100, height = 100) {
       ctx.drawImage(img, 0, 0, width, height);
       resolve(canvas.toDataURL('image/jpeg', 0.5));
     };
-    img.onerror = () => resolve(dataURL); // Fallback to full if error
+    img.onerror = () => resolve(dataURL);
   });
 }
 
-// New: Cleanup old nonces every 5min
 setInterval(() => {
   const now = Date.now();
   for (const [nonce, ts] of processedNonces) {
-    if (now - ts > 3600000) { // 1hr = 3600000ms
+    if (now - ts > 3600000) {
       processedNonces.delete(nonce);
     }
   }
   console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
-}, 300000); // 5min
+}, 300000);
 
-// New: Generate user keypair on claim/login if none
-async function generateUserKeypair() {
-  const keypair = await window.crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-384' },
-    true, // Extractable for storage
-    ['deriveKey', 'deriveBits']
-  );
-  const privateJwk = await window.crypto.subtle.exportKey('jwk', keypair.privateKey);
-  const publicBase64 = await exportPublicKey(keypair.publicKey);
-  localStorage.setItem('userPrivateKey', JSON.stringify(privateJwk));
-  userPrivateKey = privateJwk;
-  userPublicKey = publicBase64;
-  return publicBase64;
-}
-
-// New: Send offline message
-async function sendOfflineMessage(toUsername, messageText) {
-  if (!userPrivateKey) {
-    showStatusMessage('No private key. Please re-claim username on this device.');
-    return;
-  }
-  const ephemeralKeypair = await window.crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-384' },
-    false,
-    ['deriveKey', 'deriveBits']
-  );
-  const recipientPublic = await importPublicKey(userPublicKey); // From search response
-  const shared = await deriveSharedKey(ephemeralKeypair.privateKey, recipientPublic);
-  const { encrypted, iv } = await encryptRaw(shared, messageText);
-  const ephemeralPublic = await exportPublicKey(ephemeralKeypair.publicKey);
-  socket.send(JSON.stringify({
-    type: 'send-offline-message',
-    to_username,
-    encrypted,
-    iv,
-    ephemeral_public: ephemeralPublic,
-    clientId,
-    token
-  }));
-  showStatusMessage('Offline message sent.');
-}
-
-// Override claim/login to generate keys
 document.getElementById('claimSubmitButton').onclick = () => {
   const name = document.getElementById('claimUsernameInput').value.trim();
   const pass = document.getElementById('claimPasswordInput').value;
   if (validateUsername(name) && pass.length >= 8) {
     generateUserKeypair().then(publicKey => {
-      socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+      wsManager.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
     }).catch(error => {
       console.error('Key generation error:', error);
       showStatusMessage('Failed to generate keys for claim.');
@@ -1350,15 +1269,24 @@ document.getElementById('loginSubmitButton').onclick = () => {
     if (!userPrivateKey) {
       generateUserKeypair().then(() => {
         showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
-        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+        wsManager.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
       }).catch(error => {
         console.error('Key generation error:', error);
         showStatusMessage('Failed to generate keys for login.');
       });
     } else {
-      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+      wsManager.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
     }
   } else {
     showStatusMessage('Invalid username or password (min 8 chars).');
   }
 };
+
+let wsManager = new WebSocketManager(
+  'wss://signaling-server-zc6m.onrender.com',
+  clientId,
+  socket.onmessage,
+  socket.onopen,
+  socket.onerror,
+  socket.onclose
+);

@@ -1,4 +1,3 @@
-
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -1318,7 +1317,7 @@ async function sendOfflineMessage(toUsername, messageText) {
   const ephemeralPublic = await exportPublicKey(ephemeralKeypair.publicKey);
   socket.send(JSON.stringify({
     type: 'send-offline-message',
-    to_username,
+    toUsername,  // Fixed: Changed to_username to toUsername to match parameter
     encrypted,
     iv,
     ephemeral_public: ephemeralPublic,

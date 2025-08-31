@@ -13,11 +13,13 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
+  // Decode HTML entities (e.g., &#x2F; to /)
+  const decodedBase64 = base64.replace(/&#x2F;/g, '/');
   // Strict validation: Check if input is valid base64
-  if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
+  if (!/^[A-Za-z0-9+/=]+$/.test(decodedBase64)) {
     throw new Error('Invalid base64 input');
   }
-  const binary = window.atob(base64);
+  const binary = window.atob(decodedBase64);
   const len = binary.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {

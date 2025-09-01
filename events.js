@@ -144,10 +144,11 @@ let pendingJoin = null;
 const maxReconnectAttempts = 5;
 let refreshFailures = 0;
 let refreshBackoff = 1000;
+let isLoggedIn = false; // New: Track login state
 function updateLogoutButtonVisibility() {
   const logoutButton = document.getElementById('logoutButton');
   if (logoutButton) {
-    logoutButton.classList.toggle('hidden', !(username && token));
+    logoutButton.classList.toggle('hidden', !isLoggedIn);
   }
 }
 function logout() {
@@ -157,6 +158,7 @@ function logout() {
   username = '';
   token = '';
   refreshToken = '';
+  isLoggedIn = false; // Reset login state
   clientId = Math.random().toString(36).substr(2, 9);
   setCookie('clientId', clientId, 365);
   localStorage.removeItem('username');
@@ -203,6 +205,14 @@ socket.onopen = () => {
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
     copyCodeButton.classList.add('hidden');
+  }
+  // New: Attempt to log in if username exists in localStorage
+  if (username && !isLoggedIn) {
+    const password = localStorage.getItem('password'); // Assuming password is stored securely (for demo; ideally use a session-based approach)
+    if (password) {
+      console.log('Attempting auto-login with stored username:', username);
+      socket.send(JSON.stringify({ type: 'login-username', username, password, clientId }));
+    }
   }
   updateLogoutButtonVisibility();
 };
@@ -295,16 +305,14 @@ socket.onmessage = async (event) => {
         document.getElementById('loginUsernameInput').value = '';
         document.getElementById('loginPasswordInput').value = '';
         document.getElementById('loginUsernameInput')?.focus();
+        isLoggedIn = false;
+        updateLogoutButtonVisibility();
         return;
       }
-      if (message.message.includes('User already logged in')) {
-        const loginError = document.getElementById('loginError');
-        loginError.textContent = 'User is already logged in. Please log out from other sessions first.';
-        setTimeout(() => {
-          loginError.textContent = '';
-        }, 5000);
-        document.getElementById('loginUsernameInput').value = '';
-        document.getElementById('loginPasswordInput').value = '';
+      if (message.message.includes('Must be logged in to search users.')) {
+        showStatusMessage('Please log in to search for users.');
+        document.getElementById('searchUserModal').classList.remove('active');
+        document.getElementById('loginModal').classList.add('active');
         document.getElementById('loginUsernameInput')?.focus();
         return;
       }
@@ -703,6 +711,8 @@ socket.onmessage = async (event) => {
     if (message.type === 'username-registered') {
       const claimSuccess = document.getElementById('claimSuccess');
       claimSuccess.textContent = `Username claimed successfully: ${message.username}`;
+      isLoggedIn = true; // Set login state
+      localStorage.setItem('username', message.username);
       setTimeout(() => {
         claimSuccess.textContent = '';
         document.getElementById('claimUsernameModal').classList.remove('active');
@@ -720,6 +730,7 @@ socket.onmessage = async (event) => {
     if (message.type === 'login-success') {
       username = message.username;
       localStorage.setItem('username', username);
+      isLoggedIn = true; // Set login state
       const loginSuccess = document.getElementById('loginSuccess');
       loginSuccess.textContent = `Logged in as ${username}`;
       if (message.offlineMessages && message.offlineMessages.length > 0) {
@@ -1142,68 +1153,16 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
   document.getElementById('loginButton').addEventListener('click', () => {
-    if (username && token) {
+    if (isLoggedIn) {
       showStatusMessage('You are already logged in. Log out first to switch accounts.');
       return;
     }
     document.getElementById('loginModal').classList.add('active');
+    document.getElementById('loginUsernameInput').value = username || '';
+    document.getElementById('loginUsernameInput')?.focus();
   });
   document.getElementById('loginSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    const name = document.getElementById('loginUsernameInput').value.trim();
-    const pass = document.getElementById('loginPasswordInput').value;
-    if (name && pass) {
-      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-    }
-  };
-  document.getElementById('loginCancelButton').onclick = () => {
-    document.getElementById('loginModal').classList.remove('active');
-  };
-  document.getElementById('searchUserButton').addEventListener('click', () => {
-    document.getElementById('searchUserModal').classList.add('active');
-  });
-  document.getElementById('searchSubmitButton').onclick = () => {
-    const name = document.getElementById('searchUsernameInput').value.trim();
-    if (name) {
-      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
-    }
-  };
-  document.getElementById('searchCancelButton').onclick = () => {
-    document.getElementById('searchUserModal').classList.remove('active');
-  };
-  document.getElementById('claimUsernameButton').addEventListener('click', () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to claim a new username.');
-      return;
-    }
-    document.getElementById('claimUsernameModal').classList.add('active');
-  });
-  document.getElementById('claimCancelButton').onclick = () => {
-    document.getElementById('claimUsernameModal').classList.remove('active');
-  };
-  document.getElementById('claimSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to claim a new username.');
-      return;
-    }
-    const name = document.getElementById('claimUsernameInput').value.trim();
-    const pass = document.getElementById('claimPasswordInput').value;
-    if (validateUsername(name) && pass.length >= 8) {
-      generateUserKeypair().then(publicKey => {
-        socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
-      }).catch(error => {
-        console.error('Key generation error:', error);
-        showStatusMessage('Failed to generate keys for claim.');
-      });
-    } else {
-      showStatusMessage('Invalid username or password (min 8 chars).');
-    }
-  };
-  document.getElementById('loginSubmitButton').onclick = () => {
-    if (username && token) {
+    if (isLoggedIn) {
       showStatusMessage('You are already logged in. Log out first to switch accounts.');
       return;
     }
@@ -1214,13 +1173,72 @@ document.addEventListener('DOMContentLoaded', () => {
         generateUserKeypair().then(() => {
           showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
           socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+          localStorage.setItem('password', pass); // Store password securely (for demo; ideally use a more secure method)
         }).catch(error => {
           console.error('Key generation error:', error);
           showStatusMessage('Failed to generate keys for login.');
         });
       } else {
         socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+        localStorage.setItem('password', pass); // Store password securely (for demo)
       }
+    } else {
+      showStatusMessage('Invalid username or password (min 8 chars).');
+    }
+  };
+  document.getElementById('loginCancelButton').onclick = () => {
+    document.getElementById('loginModal').classList.remove('active');
+  };
+  document.getElementById('searchUserButton').addEventListener('click', () => {
+    if (!isLoggedIn) {
+      showStatusMessage('Please log in to search for users.');
+      document.getElementById('loginModal').classList.add('active');
+      document.getElementById('loginUsernameInput')?.focus();
+      return;
+    }
+    document.getElementById('searchUserModal').classList.add('active');
+  });
+  document.getElementById('searchSubmitButton').onclick = () => {
+    if (!isLoggedIn) {
+      showStatusMessage('Please log in to search for users.');
+      document.getElementById('searchUserModal').classList.remove('active');
+      document.getElementById('loginModal').classList.add('active');
+      document.getElementById('loginUsernameInput')?.focus();
+      return;
+    }
+    const name = document.getElementById('searchUsernameInput').value.trim();
+    if (name) {
+      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
+    }
+  };
+  document.getElementById('searchCancelButton').onclick = () => {
+    document.getElementById('searchUserModal').classList.remove('active');
+  };
+  document.getElementById('claimUsernameButton').addEventListener('click', () => {
+    if (isLoggedIn) {
+      showStatusMessage('You are already logged in. Log out first to claim a new username.');
+      return;
+    }
+    document.getElementById('claimUsernameModal').classList.add('active');
+  });
+  document.getElementById('claimCancelButton').onclick = () => {
+    document.getElementById('claimUsernameModal').classList.remove('active');
+  };
+  document.getElementById('claimSubmitButton').onclick = () => {
+    if (isLoggedIn) {
+      showStatusMessage('You are already logged in. Log out first to claim a new username.');
+      return;
+    }
+    const name = document.getElementById('claimUsernameInput').value.trim();
+    const pass = document.getElementById('claimPasswordInput').value;
+    if (validateUsername(name) && pass.length >= 8) {
+      generateUserKeypair().then(publicKey => {
+        socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+        localStorage.setItem('password', pass); // Store password securely (for demo)
+      }).catch(error => {
+        console.error('Key generation error:', error);
+        showStatusMessage('Failed to generate keys for claim.');
+      });
     } else {
       showStatusMessage('Invalid username or password (min 8 chars).');
     }

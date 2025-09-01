@@ -1,219 +1,71 @@
-function showStatusMessage(message, duration = 3000) {
-  if (typeof statusElement !== 'undefined' && statusElement) {
-    statusElement.textContent = message;
-    statusElement.setAttribute('aria-live', 'assertive');
-    setTimeout(() => {
-      statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
-      statusElement.setAttribute('aria-live', 'polite');
-    }, duration);
-  }
-}
 
-function sanitizeMessage(content) {
-  // Switch to DOMPurify for better sanitization
-  return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); // Plain text only, no HTML
-}
-
-function generateMessageId() {
-  return Math.random().toString(36).substr(2, 9);
-}
-
-function validateUsername(username) {
-  const regex = /^[a-zA-Z0-9]{1,16}$/;
-  return username && regex.test(username);
-}
-
-function validateCode(code) {
-  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
-  return code && regex.test(code);
-}
-
-function cleanupPeerConnection(targetId) {
-  const peerConnection = peerConnections.get(targetId);
-  const dataChannel = dataChannels.get(targetId);
-  if (dataChannel && dataChannel.readyState === 'open') {
-    log('info', `Skipping cleanup for ${targetId}: data channel is open`);
-    return;
-  }
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnections.delete(targetId);
-  }
-  if (dataChannel) {
-    dataChannel.close();
-    dataChannels.delete(targetId);
-  }
-  candidatesQueues.delete(targetId);
-  clearTimeout(connectionTimeouts.get(targetId));
-  connectionTimeouts.delete(targetId);
-  retryCounts.delete(targetId);
-  messageRateLimits.delete(targetId);
-  if (remoteAudios.has(targetId)) {
-    const audio = remoteAudios.get(targetId);
-    audio.remove();
-    remoteAudios.delete(targetId);
-    if (remoteAudios.size === 0) {
-      document.getElementById('remoteAudioContainer').classList.add('hidden');
-    }
-  }
-  isConnected = dataChannels.size > 0;
-  updateMaxClientsUI();
-  if (!isConnected) {
-    if (inputContainer) inputContainer.classList.add('hidden');
-    if (messages) messages.classList.add('waiting');
-  }
-}
-
-function initializeMaxClientsUI() {
-  log('info', `initializeMaxClientsUI called, isInitiator: ${isInitiator}`);
-  const addUserText = document.getElementById('addUserText');
-  const addUserModal = document.getElementById('addUserModal');
-  const addUserRadios = document.getElementById('addUserRadios');
-  if (addUserText && addUserModal && addUserRadios) {
-    addUserText.classList.toggle('hidden', !isInitiator);
-    if (isInitiator) {
-      log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
-      addUserRadios.innerHTML = '';
-      for (let n = 2; n <= 10; n++) {
-        const button = document.createElement('button');
-        button.textContent = n;
-        button.setAttribute('aria-label', `Set maximum users to ${n}`);
-        button.className = n === maxClients ? 'active' : '';
-        button.disabled = !isInitiator;
-        button.addEventListener('click', () => {
-          if (isInitiator) {
-            log('info', `Button clicked for maxClients: ${n}`);
-            setMaxClients(n);
-            document.querySelectorAll('#addUserRadios button').forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            addUserModal.classList.remove('active');
-          }
-        });
-        addUserRadios.appendChild(button);
-      }
-      log('info', 'Buttons appended to addUserRadios');
-    } else {
-      log('info', 'Hiding addUserText for non-initiator');
-    }
-  } else {
-    log('error', 'Add user modal elements not found');
-    showStatusMessage('Error: UI initialization failed. Please refresh.');
-  }
-}
-
-function updateMaxClientsUI() {
-  log('info', `updateMaxClientsUI called, maxClients: ${maxClients}, isInitiator: ${isInitiator}`);
+// Initialize UI components on DOM load
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, initializing maxClients UI');
+  initializeMaxClientsUI();
+  // UI element references
+  const statusElement = document.getElementById('status');
+  const codeDisplayElement = document.getElementById('codeDisplay');
+  const copyCodeButton = document.getElementById('copyCodeButton');
+  const initialContainer = document.getElementById('initialContainer');
+  const usernameContainer = document.getElementById('usernameContainer');
+  const connectContainer = document.getElementById('connectContainer');
+  const chatContainer = document.getElementById('chatContainer');
+  const newSessionButton = document.getElementById('newSessionButton');
+  const maxClientsContainer = document.getElementById('maxClientsContainer');
+  const inputContainer = document.querySelector('.input-container');
+  const messages = document.getElementById('messages');
+  const cornerLogo = document.getElementById('cornerLogo');
+  const button2 = document.getElementById('button2');
+  const helpText = document.getElementById('helpText');
+  const helpModal = document.getElementById('helpModal');
+  // Set initial UI state
   if (statusElement) {
-    statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
+    statusElement.textContent = 'Start a new chat or connect to an existing one';
   }
-  const addUserText = document.getElementById('addUserText');
-  if (addUserText) {
-    addUserText.classList.toggle('hidden', !isInitiator);
+  if (codeDisplayElement) {
+    codeDisplayElement.classList.add('hidden');
   }
-  const buttons = document.querySelectorAll('#addUserRadios button');
-  log('info', `Found buttons in modal: ${buttons.length}`);
-  buttons.forEach(button => {
-    const value = parseInt(button.textContent);
-    button.classList.toggle('active', value === maxClients);
-    button.disabled = !isInitiator;
-  });
+  if (copyCodeButton) {
+    copyCodeButton.classList.add('hidden');
+  }
+  if (initialContainer) {
+    initialContainer.classList.remove('hidden');
+  }
+  if (usernameContainer) {
+    usernameContainer.classList.add('hidden');
+  }
+  if (connectContainer) {
+    connectContainer.classList.add('hidden');
+  }
+  if (chatContainer) {
+    chatContainer.classList.add('hidden');
+  }
+  if (newSessionButton) {
+    newSessionButton.classList.add('hidden');
+  }
+  if (maxClientsContainer) {
+    maxClientsContainer.classList.add('hidden');
+  }
+  if (inputContainer) {
+    inputContainer.classList.add('hidden');
+  }
   if (messages) {
-    if (!isConnected) {
-      messages.classList.add('waiting');
-    } else {
-      messages.classList.remove('waiting');
+    messages.classList.remove('waiting');
+  }
+  // Corner logo animation
+  let cycleTimeout;
+  function triggerCycle() {
+    if (cycleTimeout) clearTimeout(cycleTimeout);
+    if (cornerLogo) {
+      cornerLogo.classList.add('wink');
+      cycleTimeout = setTimeout(() => {
+        cornerLogo.classList.remove('wink');
+      }, 500);
+      setTimeout(triggerCycle, 60000);
     }
   }
-}
-
-function setMaxClients(n) {
-  if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
-    maxClients = Math.min(n, 10);
-    log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);
-    socket.send(JSON.stringify({ type: 'set-max-clients', maxClients: maxClients, code, clientId, token }));
-    updateMaxClientsUI();
-  } else {
-    log('warn', 'setMaxClients failed: not initiator, no token, or socket not open');
-  }
-}
-
-function log(level, ...msg) {
-  const timestamp = new Date().toISOString();
-  const fullMsg = `[${timestamp}] ${msg.join(' ')}`;
-  if (level === 'error') {
-    console.error(fullMsg);
-  } else if (level === 'warn') {
-    console.warn(fullMsg);
-  } else {
-    console.log(fullMsg);
-  }
-}
-
-function createImageModal(base64, focusId) {
-  let modal = document.getElementById('imageModal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'imageModal';
-    modal.className = 'modal';
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', 'Image viewer');
-    modal.setAttribute('tabindex', '-1');
-    document.body.appendChild(modal);
-  }
-  modal.innerHTML = '';
-  const modalImg = document.createElement('img');
-  modalImg.src = base64;
-  modalImg.setAttribute('alt', 'Enlarged image');
-  modal.appendChild(modalImg);
-  modal.classList.add('active');
-  modal.focus();
-  modal.addEventListener('click', () => {
-    modal.classList.remove('active');
-    document.getElementById(focusId)?.focus();
-  });
-  modal.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      modal.classList.remove('active');
-      document.getElementById(focusId)?.focus();
-    }
-  });
-}
-
-function createAudioModal(base64, focusId) {
-  let modal = document.getElementById('audioModal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'audioModal';
-    modal.className = 'modal';
-    modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', 'Audio player');
-    modal.setAttribute('tabindex', '-1');
-    document.body.appendChild(modal);
-  }
-  modal.innerHTML = '';
-  const audio = document.createElement('audio');
-  audio.src = base64;
-  audio.controls = true;
-  audio.setAttribute('alt', 'Voice message');
-  modal.appendChild(audio);
-  modal.classList.add('active');
-  modal.focus();
-  modal.addEventListener('click', () => {
-    modal.classList.remove('active');
-    document.getElementById(focusId)?.focus();
-  });
-  modal.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      modal.classList.remove('active');
-      document.getElementById(focusId)?.focus();
-    }
-  });
-}
-
-function generateTotpSecret() {
-  return otplib.authenticator.generateSecret(32);
-}
-
-function generateTotpUri(roomCode, secret) {
-  return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
-}
+  setTimeout(triggerCycle, 60000);
+  // Focus on initial button
+  document.getElementById('startChatToggleButton')?.focus();
+});

@@ -267,6 +267,17 @@ socket.onmessage = async (event) => {
         document.getElementById('loginUsernameInput')?.focus();
         return;
       }
+      if (message.message.includes('User already logged in')) {
+        const loginError = document.getElementById('loginError');
+        loginError.textContent = 'User is already logged in. Please log out from other sessions first.';
+        setTimeout(() => {
+          loginError.textContent = '';
+        }, 5000);
+        document.getElementById('loginUsernameInput').value = '';
+        document.getElementById('loginPasswordInput').value = '';
+        document.getElementById('loginUsernameInput')?.focus();
+        return;
+      }
       if (message.message.includes('Invalid or expired token') || message.message.includes('Missing authentication token')) {
         if (refreshToken && !refreshingToken) {
           refreshingToken = true;
@@ -739,7 +750,7 @@ socket.onmessage = async (event) => {
         sendBtn.onclick = () => {
           const msgText = textarea.value.trim();
           if (msgText) {
-            sendOfflineMessage(message.username, msgText).then(() => {
+            sendOfflineMessage(searchedUsername, msgText).then(() => {
               textarea.value = '';
             }).catch(error => {
               console.error('Offline send error:', error);
@@ -754,7 +765,9 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'incoming-connection') {
-      document.getElementById('incomingMessage').textContent = `${message.from} wants to connect. Accept?`;
+      // Workaround: If 'from' matches current username, use a generic message
+      const fromUser = message.from === username ? 'Someone' : message.from;
+      document.getElementById('incomingMessage').textContent = `${fromUser} wants to connect. Accept?`;
       document.getElementById('acceptButton').onclick = () => {
         socket.send(JSON.stringify({ type: 'connection-accepted', code: message.code, clientId, token }));
         autoConnect(message.code);
@@ -1340,6 +1353,56 @@ cornerLogo.addEventListener('click', () => {
   showStatusMessage('Chat history cleared locally.');
 });
 
+function setupLazyObserver() {
+  lazyObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const elem = entry.target;
+        if (elem.dataset.src) {
+          elem.src = elem.dataset.src;
+          delete elem.dataset.src;
+          lazyObserver.unobserve(elem);
+        }
+        if (elem.dataset.fullSrc) {
+          elem.src = elem.dataset.fullSrc;
+          delete elem.dataset.fullSrc;
+          lazyObserver.unobserve(elem);
+        }
+      }
+    });
+  }, { rootMargin: '100px' });
+}
+
+function loadRecentCodes() {
+  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  const recentCodesList = document.getElementById('recentCodesList');
+  recentCodesList.innerHTML = '';
+  if (recentCodes.length > 0) {
+    document.getElementById('recentChats').classList.remove('hidden');
+    recentCodes.forEach(recentCode => {
+      const button = document.createElement('button');
+      button.textContent = recentCode;
+      button.onclick = () => autoConnect(recentCode);
+      recentCodesList.appendChild(button);
+    });
+  } else {
+    document.getElementById('recentChats').classList.add('hidden');
+  }
+}
+
+function updateRecentCodes(code) {
+  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  if (recentCodes.includes(code)) {
+    recentCodes = recentCodes.filter(c => c !== code);
+  }
+  recentCodes.unshift(code);
+  if (recentCodes.length > 5) {
+    recentCodes = recentCodes.slice(0, 5);
+  }
+  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
+  loadRecentCodes();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -1373,9 +1436,19 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
   document.getElementById('loginButton').addEventListener('click', () => {
+    // Prevent opening login modal if already logged in
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to switch accounts.');
+      return;
+    }
     document.getElementById('loginModal').classList.add('active');
   });
   document.getElementById('loginSubmitButton').onclick = () => {
+    // Prevent login if already logged in
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to switch accounts.');
+      return;
+    }
     const name = document.getElementById('loginUsernameInput').value.trim();
     const pass = document.getElementById('loginPasswordInput').value;
     if (name && pass) {
@@ -1398,12 +1471,22 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('searchUserModal').classList.remove('active');
   };
   document.getElementById('claimUsernameButton').addEventListener('click', () => {
+    // Prevent opening claim modal if already logged in
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to claim a new username.');
+      return;
+    }
     document.getElementById('claimUsernameModal').classList.add('active');
   });
   document.getElementById('claimCancelButton').onclick = () => {
     document.getElementById('claimUsernameModal').classList.remove('active');
   };
   document.getElementById('claimSubmitButton').onclick = () => {
+    // Prevent claim if already logged in
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to claim a new username.');
+      return;
+    }
     const name = document.getElementById('claimUsernameInput').value.trim();
     const pass = document.getElementById('claimPasswordInput').value;
     if (validateUsername(name) && pass.length >= 8) {
@@ -1418,6 +1501,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   document.getElementById('loginSubmitButton').onclick = () => {
+    // Prevent login if already logged in
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to switch accounts.');
+      return;
+    }
     const name = document.getElementById('loginUsernameInput').value.trim();
     const pass = document.getElementById('loginPasswordInput').value;
     if (validateUsername(name) && pass.length >= 8) {

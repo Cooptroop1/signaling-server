@@ -609,7 +609,7 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
+    if ((message.type === 'message' || message.type === 'image' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
       console.log('Received relay message:', message);
@@ -724,7 +724,7 @@ socket.onmessage = async (event) => {
       loginSuccess.textContent = `Logged in as ${username}`;
       if (message.offlineMessages && message.offlineMessages.length > 0) {
         for (const msg of message.offlineMessages) {
-          console.log('Processing offline msg:', msg);  // Added log
+          console.log('Processing offline msg:', msg);
           if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
             (async () => {
               try {
@@ -784,20 +784,20 @@ socket.onmessage = async (event) => {
         textarea.placeholder = 'Send offline message...';
         const sendBtn = document.createElement('button');
         sendBtn.textContent = 'Send';
-        console.log('Setting up offline send button for', searchedUsername);  // Added log
+        console.log('Setting up offline send button for', searchedUsername);
         sendBtn.onclick = () => {
           const msgText = textarea.value.trim();
-          console.log('Offline send button clicked, text:', msgText, 'to:', searchedUsername);  // Added log
+          console.log('Offline send button clicked, text:', msgText, 'to:', searchedUsername);
           if (msgText) {
             sendOfflineMessage(searchedUsername, msgText).then(() => {
-              console.log('Offline message sent successfully');  // Added log
+              console.log('Offline message sent successfully');
               textarea.value = '';
             }).catch(error => {
               console.error('Offline send error:', error);
               showStatusMessage('Failed to send offline message.');
             });
           } else {
-            console.log('No message text, not sending');  // Added log
+            console.log('No message text, not sending');
           }
         };
         offlineMsgContainer.appendChild(textarea);
@@ -1053,7 +1053,63 @@ function updateRecentCodes(code) {
   localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
   loadRecentCodes();
 }
+function setupWaitingForJoin(codeParam) {
+  code = codeParam;
+  initialContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  if (validateCode(codeParam)) {
+    if (validateUsername(username)) {
+      console.log('Valid username and code, waiting for join approval');
+      codeDisplayElement.textContent = `Waiting for approval: ${code}`;
+      codeDisplayElement.classList.remove('hidden');
+      copyCodeButton.classList.remove('hidden');
+      messages.classList.add('waiting');
+      statusElement.textContent = 'Waiting for connection approval...';
+      socket.send(JSON.stringify({ type: 'request-join', code: codeParam, clientId, username, token }));
+      document.getElementById('messageInput')?.focus();
+    } else {
+      console.log('No valid username, prompting for username');
+      usernameContainer.classList.remove('hidden');
+      chatContainer.classList.add('hidden');
+      statusElement.textContent = 'Please enter a username to request to join';
+      document.getElementById('usernameInput').value = username || '';
+      document.getElementById('usernameInput')?.focus();
+      document.getElementById('joinWithUsernameButton').onclick = () => {
+        const usernameInput = document.getElementById('usernameInput').value.trim();
+        if (!validateUsername(usernameInput)) {
+          showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+          document.getElementById('usernameInput')?.focus();
+          return;
+        }
+        username = usernameInput;
+        localStorage.setItem('username', username);
+        usernameContainer.classList.add('hidden');
+        chatContainer.classList.remove('hidden');
+        codeDisplayElement.textContent = `Waiting for approval: ${code}`;
+        codeDisplayElement.classList.remove('hidden');
+        copyCodeButton.classList.remove('hidden');
+        messages.classList.add('waiting');
+        statusElement.textContent = 'Waiting for connection approval...';
+        socket.send(JSON.stringify({ type: 'request-join', code, clientId, username, token }));
+        document.getElementById('messageInput')?.focus();
+      };
+    }
+  } else {
+    console.log('Invalid code, showing initial container');
+    initialContainer.classList.remove('hidden');
+    usernameContainer.classList.add('hidden');
+    chatContainer.classList.add('hidden');
+    showStatusMessage('Invalid code format. Please enter a valid code.');
+    document.getElementById('connectToggleButton')?.focus();
+  }
+}
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, initializing maxClients UI');
+  initializeMaxClientsUI();
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
@@ -1436,4 +1492,43 @@ document.getElementById('usernameConnectInput').addEventListener('keydown', (eve
   }
 });
 document.getElementById('codeInput').addEventListener('keydown', (event) => {
-  if (
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    document.getElementById('connectButton')?.click();
+  }
+});
+document.getElementById('copyCodeButton').onclick = () => {
+  const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '').replace('Waiting for approval: ', '');
+  navigator.clipboard.writeText(codeText).then(() => {
+    copyCodeButton.textContent = 'Copied!';
+    setTimeout(() => {
+      copyCodeButton.textContent = 'Copy Code';
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy text: ', err);
+    showStatusMessage('Failed to copy code.');
+  });
+  copyCodeButton?.focus();
+};
+document.getElementById('button1').onclick = () => {
+  if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
+    socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
+    showStatusMessage(`Sent code ${code} to random board.`);
+    codeSentToRandom = true;
+    button2.disabled = true;
+  } else {
+    showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
+  }
+  document.getElementById('button1')?.focus();
+};
+document.getElementById('button2').onclick = () => {
+  if (!button2.disabled) {
+    window.location.href = 'https://anonomoose.com/random.html';
+  }
+  document.getElementById('button2')?.focus();
+};
+cornerLogo.addEventListener('click', () => {
+  document.getElementById('messages').innerHTML = '';
+  processedMessageIds.clear();
+  showStatusMessage('Chat history cleared locally.');
+});

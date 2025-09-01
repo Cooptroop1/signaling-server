@@ -32,6 +32,29 @@ dbPool.connect((err) => {
     console.log('Connected to DB successfully');
   }
 });
+// Create encrypted_keys table on startup
+dbPool.query(`
+  CREATE TABLE IF NOT EXISTS encrypted_keys (
+    client_id TEXT PRIMARY KEY,
+    encrypted_key TEXT NOT NULL,
+    iv TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch((err) => console.error("Error creating encrypted_keys table:", err));
+// Create pending_ratchets table on startup
+dbPool.query(`
+  CREATE TABLE IF NOT EXISTS pending_ratchets (
+    id SERIAL PRIMARY KEY,
+    code TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    room_master TEXT NOT NULL,
+    signing_salt TEXT NOT NULL,
+    message_salt TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`).catch((err) => console.error("Error creating pending_ratchets table:", err));
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
@@ -287,6 +310,11 @@ function validateMessage(data) {
         return { valid: false, error: 'set-max-clients: code required' };
       }
       break;
+    case 'check-totp':
+      if (!data.code) {
+        return { valid: false, error: 'check-totp: code required' };
+      }
+      break;
     case 'offer':
     case 'answer':
       if (!data.offer && !data.answer) {
@@ -427,8 +455,6 @@ function validateMessage(data) {
         return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
       }
       break;
-    case 'logout':
-      break;
     case 'find-user':
       if (!data.username) {
         return { valid: false, error: 'find-user: username required' };
@@ -447,6 +473,39 @@ function validateMessage(data) {
       }
       if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
         return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
+      }
+      break;
+    case 'store-encrypted-key':
+      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
+        return { valid: false, error: "store-encrypted-key: invalid encryptedKey (base64)" };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: "store-encrypted-key: invalid iv (base64)" };
+      }
+      if (!data.salt || !isValidBase64(data.salt)) {
+        return { valid: false, error: "store-encrypted-key: invalid salt (base64)" };
+      }
+      break;
+    case 'retrieve-encrypted-key':
+      break;
+    case 'store-pending-ratchet':
+      if (!data.code) {
+        return { valid: false, error: 'store-pending-ratchet: code required' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'store-pending-ratchet: targetId required as string' };
+      }
+      if (!data.roomMaster || !isValidBase64(data.roomMaster)) {
+        return { valid: false, error: 'store-pending-ratchet: invalid roomMaster (base64)' };
+      }
+      if (!data.signingSalt || !isValidBase64(data.signingSalt)) {
+        return { valid: false, error: 'store-pending-ratchet: invalid signingSalt (base64)' };
+      }
+      if (!data.messageSalt || !isValidBase64(data.messageSalt)) {
+        return { valid: false, error: 'store-pending-ratchet: invalid messageSalt (base64)' };
+      }
+      if (!data.version || typeof data.version !== 'number') {
+        return { valid: false, error: 'store-pending-ratchet: version required as number' };
       }
       break;
     default:
@@ -499,6 +558,15 @@ setInterval(() => {
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 600000); // Changed to every 10 minutes (600000 ms)
+// New: Daily cleanup for pending_ratchets older than 7 days
+setInterval(async () => {
+  try {
+    await dbPool.query("DELETE FROM pending_ratchets WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '7 days'");
+    console.log("Cleaned up old pending ratchets");
+  } catch (err) {
+    console.error("Error cleaning up pending ratchets:", err);
+  }
+}, 24 * 60 * 60 * 1000); // Daily cleanup
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -648,12 +716,6 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
             return;
           }
-          const oldRefreshExpiry = decoded.exp * 1000;
-          revokedTokens.set(data.refreshToken, oldRefreshExpiry);
-          const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
-          const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
-          clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
-          ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
         } catch (err) {
           if (fs.existsSync(previousSecretFile)) {
             const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
@@ -667,12 +729,6 @@ wss.on('connection', (ws, req) => {
                 ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
                 return;
               }
-              const oldRefreshExpiry = decoded.exp * 1000;
-              revokedTokens.set(data.refreshToken, oldRefreshExpiry);
-              const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
-              const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
-              clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
-              ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
             } catch (previousErr) {
               ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
               return;
@@ -682,6 +738,12 @@ wss.on('connection', (ws, req) => {
             return;
           }
         }
+        const oldRefreshExpiry = decoded.exp * 1000;
+        revokedTokens.set(data.refreshToken, oldRefreshExpiry);
+        const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
+        const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
+        clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
+        ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
         return;
       }
       if (data.type === 'public-key') {
@@ -824,6 +886,30 @@ wss.on('connection', (ws, req) => {
         ws.code = code;
         ws.username = username;
         broadcast(code, { type: 'join-notify', clientId, username, code, totalClients: room.clients.size });
+        // Check for pending ratchets
+        const res = await dbPool.query(
+          "SELECT * FROM pending_ratchets WHERE code = $1 AND target_id = $2",
+          [data.code, clientId]
+        );
+        if (res.rows.length > 0) {
+          const { room_master, signing_salt, message_salt, version } = res.rows[0];
+          const ownerWs = room.clients.get(room.initiator)?.ws;
+          if (ownerWs && ownerWs.readyState === WebSocket.OPEN) {
+            ownerWs.send(
+              JSON.stringify({
+                type: "retry-ratchet",
+                targetId: clientId,
+                roomMaster: room_master,
+                signingSalt: signing_salt,
+                messageSalt: message_salt,
+                version,
+                code: data.code,
+              })
+            );
+          }
+          // Delete the pending ratchet
+          await dbPool.query("DELETE FROM pending_ratchets WHERE code = $1 AND target_id = $2", [data.code, clientId]);
+        }
         return;
       }
       if (data.type === 'check-totp') {
@@ -1162,35 +1248,6 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      if (data.type === 'logout') {
-        try {
-          const decoded = jwt.verify(data.token, JWT_SECRET);
-          if (decoded.clientId !== data.clientId) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid token' }));
-            return;
-          }
-        } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-          return;
-        }
-
-        // Update the user's client_id and last_active to NULL
-        await dbPool.query('UPDATE users SET client_id = NULL, last_active = NULL WHERE client_id = $1', [data.clientId]);
-
-        // Revoke tokens
-        revokedTokens.set(data.token, Date.now() + 1000);
-        if (clientTokens.has(data.clientId)) {
-          const tokens = clientTokens.get(data.clientId);
-          revokedTokens.set(tokens.accessToken, Date.now() + 1000);
-          if (tokens.refreshToken) {
-            revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
-          }
-          clientTokens.delete(data.clientId);
-        }
-
-        ws.close();
-        return;
-      }
       if (data.type === 'find-user') {
         const { username } = data;
         try {
@@ -1203,9 +1260,9 @@ wss.on('connection', (ws, req) => {
           // Create dynamic room
           const dynamicCode = uuidv4().replace(/-/g, '').substring(0,16).match(/.{1,4}/g).join('-');
           // Notify online user if connected (via ws)
-          const owner = [...wss.clients].find(client => client.clientId === user.client_id);
-          if (owner) {
-            owner.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
+          const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
+          if (ownerWs) {
+            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
           } else {
             // Queue notification
             await dbPool.query(
@@ -1215,7 +1272,7 @@ wss.on('connection', (ws, req) => {
           }
           // Use last_active for status
           const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
-          const isOnline = owner || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
+          const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
           ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
         } catch (err) {
           console.error('DB error finding user:', err.message, err.stack);
@@ -1223,7 +1280,7 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      // New: Send offline message
+      // New for offline message
       if (data.type === 'send-offline-message') {
         const { to_username, encrypted, iv, ephemeral_public } = data;
         try {
@@ -1247,6 +1304,61 @@ wss.on('connection', (ws, req) => {
         } catch (err) {
           console.error('DB error sending offline message:', err.message, err.stack);
           ws.send(JSON.stringify({ type: 'error', message: 'Failed to send offline message.' }));
+        }
+        return;
+      }
+      if (data.type === 'store-encrypted-key') {
+        try {
+          await dbPool.query(
+            "INSERT INTO encrypted_keys (client_id, encrypted_key, iv, salt) VALUES ($1, $2, $3, $4) ON CONFLICT (client_id) DO UPDATE SET encrypted_key = $2, iv = $3, salt = $4",
+            [data.clientId, data.encryptedKey, data.iv, data.salt]
+          );
+          ws.send(JSON.stringify({ type: "encrypted-key-stored" }));
+        } catch (err) {
+          console.error("DB error storing encrypted key:", err.message, err.stack);
+          ws.send(JSON.stringify({ type: "error", message: "Failed to store encrypted key." }));
+        }
+        return;
+      }
+      if (data.type === 'retrieve-encrypted-key') {
+        try {
+          const res = await dbPool.query(
+            "SELECT encrypted_key, iv, salt FROM encrypted_keys WHERE client_id = $1",
+            [data.clientId]
+          );
+          if (res.rows.length === 0) {
+            ws.send(JSON.stringify({ type: "error", message: "No encrypted key found for client." }));
+            return;
+          }
+          const { encrypted_key, iv, salt } = res.rows[0];
+          ws.send(
+            JSON.stringify({
+              type: "encrypted-key-retrieved",
+              encryptedKey: encrypted_key,
+              iv,
+              salt,
+            })
+          );
+        } catch (err) {
+          console.error("DB error retrieving encrypted key:", err.message, err.stack);
+          ws.send(JSON.stringify({ type: "error", message: "Failed to retrieve encrypted key." }));
+        }
+        return;
+      }
+      if (data.type === 'store-pending-ratchet') {
+        if (!rooms.has(data.code) || data.clientId !== rooms.get(data.code).initiator) {
+          ws.send(JSON.stringify({ type: "error", message: "Only initiator can store pending ratchets.", code: data.code }));
+          return;
+        }
+        try {
+          await dbPool.query(
+            "INSERT INTO pending_ratchets (code, target_id, room_master, signing_salt, message_salt, version) VALUES ($1, $2, $3, $4, $5, $6)",
+            [data.code, data.targetId, data.roomMaster, data.signingSalt, data.messageSalt, data.version]
+          );
+          ws.send(JSON.stringify({ type: "pending-ratchet-stored" }));
+        } catch (err) {
+          console.error("DB error storing pending ratchet:", err.message, err.stack);
+          ws.send(JSON.stringify({ type: "error", message: "Failed to store pending ratchet." }));
         }
         return;
       }

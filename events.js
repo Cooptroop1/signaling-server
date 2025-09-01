@@ -1,13 +1,9 @@
-
-
-
 function getCookie(name) {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) return parts.pop().split(';').shift();
   return null;
 }
-
 function setCookie(name, value, days) {
   let expires = '';
   if (days) {
@@ -17,7 +13,6 @@ function setCookie(name, value, days) {
   }
   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
 }
-
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -31,7 +26,6 @@ function processSignalingQueue() {
   });
   signalingQueue.clear();
 }
-
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -80,7 +74,6 @@ let clientPublicKeys = new Map();
 let initiatorPublic;
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
-
 if (typeof window !== 'undefined') {
   socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
   console.log('WebSocket created');
@@ -114,24 +107,20 @@ if (typeof window !== 'undefined') {
     );
   })();
 }
-
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
   helpModal.focus();
 });
-
 helpModal.addEventListener('click', () => {
   helpModal.classList.remove('active');
   helpText.focus();
 });
-
 helpModal.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     helpModal.classList.remove('active');
     helpText.focus();
   }
 });
-
 const addUserText = document.getElementById('addUserText');
 const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', () => {
@@ -140,32 +129,27 @@ addUserText.addEventListener('click', () => {
     addUserModal.focus();
   }
 });
-
 addUserModal.addEventListener('click', () => {
   addUserModal.classList.remove('active');
   addUserText.focus();
 });
-
 addUserModal.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     addUserModal.classList.remove('active');
     addUserText.focus();
   }
 });
-
 let pendingCode = null;
 let pendingJoin = null;
 const maxReconnectAttempts = 5;
 let refreshFailures = 0;
 let refreshBackoff = 1000;
-
 function updateLogoutButtonVisibility() {
   const logoutButton = document.getElementById('logoutButton');
   if (logoutButton) {
     logoutButton.classList.toggle('hidden', !(username && token));
   }
 }
-
 function logout() {
   if (socket.readyState === WebSocket.OPEN && token) {
     socket.send(JSON.stringify({ type: 'logout', clientId, token }));
@@ -202,7 +186,6 @@ function logout() {
   showStatusMessage('Logged out successfully.');
   document.getElementById('startChatToggleButton')?.focus();
 }
-
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -223,13 +206,11 @@ socket.onopen = () => {
   }
   updateLogoutButtonVisibility();
 };
-
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
 };
-
 socket.onclose = () => {
   console.log('WebSocket closed');
   stopKeepAlive();
@@ -247,7 +228,6 @@ socket.onclose = () => {
     socket.onmessage = socket.onmessage;
   }, delay);
 };
-
 socket.onmessage = async (event) => {
   console.log('Received WebSocket message:', event.data);
   try {
@@ -744,6 +724,7 @@ socket.onmessage = async (event) => {
       loginSuccess.textContent = `Logged in as ${username}`;
       if (message.offlineMessages && message.offlineMessages.length > 0) {
         for (const msg of message.offlineMessages) {
+          console.log('Processing offline msg:', msg);  // Added log
           if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
             (async () => {
               try {
@@ -803,15 +784,20 @@ socket.onmessage = async (event) => {
         textarea.placeholder = 'Send offline message...';
         const sendBtn = document.createElement('button');
         sendBtn.textContent = 'Send';
+        console.log('Setting up offline send button for', searchedUsername);  // Added log
         sendBtn.onclick = () => {
           const msgText = textarea.value.trim();
+          console.log('Offline send button clicked, text:', msgText, 'to:', searchedUsername);  // Added log
           if (msgText) {
             sendOfflineMessage(searchedUsername, msgText).then(() => {
+              console.log('Offline message sent successfully');  // Added log
               textarea.value = '';
             }).catch(error => {
               console.error('Offline send error:', error);
               showStatusMessage('Failed to send offline message.');
             });
+          } else {
+            console.log('No message text, not sending');  // Added log
           }
         };
         offlineMsgContainer.appendChild(textarea);
@@ -854,7 +840,6 @@ socket.onmessage = async (event) => {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
 };
-
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
@@ -864,7 +849,6 @@ function refreshAccessToken() {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
   }
 }
-
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
   keyVersion++;
@@ -913,7 +897,6 @@ async function triggerRatchet() {
     keyVersion--;
   }
 }
-
 async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
@@ -923,7 +906,6 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
   const delay = backoffTimes[retryCount - 1];
   console.log(`Scheduling retry ${retryCount} in ${delay / 1000}s for version ${version}`);
   await new Promise(resolve => setTimeout(resolve, delay));
-
   let retrySuccess = 0;
   let newFailures = [];
   for (const cId of failures) {
@@ -959,7 +941,6 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
     console.log(`All partial ratchet retries complete for version ${version}.`);
   }
 }
-
 function updateDots() {
   const userDots = document.getElementById('userDots');
   if (!userDots) return;
@@ -995,7 +976,6 @@ function updateDots() {
     userDots.appendChild(dot);
   }
 }
-
 async function kickUser(targetId) {
   if (!isInitiator) return;
   if (!targetId || typeof targetId !== 'string') {
@@ -1011,7 +991,6 @@ async function kickUser(targetId) {
   socket.send(JSON.stringify(message));
   showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
 }
-
 async function banUser(targetId) {
   if (!isInitiator) return;
   if (!targetId || typeof targetId !== 'string') {
@@ -1027,7 +1006,6 @@ async function banUser(targetId) {
   socket.send(JSON.stringify(message));
   showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
 }
-
 function setupLazyObserver() {
   lazyObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -1047,7 +1025,6 @@ function setupLazyObserver() {
     });
   }, { rootMargin: '100px' });
 }
-
 function loadRecentCodes() {
   const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   const recentCodesList = document.getElementById('recentCodesList');
@@ -1064,7 +1041,6 @@ function loadRecentCodes() {
     document.getElementById('recentChats').classList.add('hidden');
   }
 }
-
 function updateRecentCodes(code) {
   let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   if (recentCodes.includes(code)) {
@@ -1077,389 +1053,6 @@ function updateRecentCodes(code) {
   localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
   loadRecentCodes();
 }
-
-document.getElementById('startChatToggleButton').onclick = () => {
-  console.log('Start chat toggle clicked');
-  initialContainer.classList.add('hidden');
-  usernameContainer.classList.remove('hidden');
-  connectContainer.classList.add('hidden');
-  chatContainer.classList.add('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Enter a username to start a chat';
-  document.getElementById('usernameInput').value = username || '';
-  document.getElementById('usernameInput')?.focus();
-};
-
-document.getElementById('connectToggleButton').onclick = () => {
-  console.log('Connect toggle clicked');
-  initialContainer.classList.add('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.remove('hidden');
-  chatContainer.classList.add('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Enter a username and code to join a chat';
-  document.getElementById('usernameConnectInput').value = username || '';
-  document.getElementById('usernameConnectInput')?.focus();
-};
-
-document.getElementById('start2FAChatButton').onclick = () => {
-  document.getElementById('totpOptionsModal').classList.add('active');
-  document.getElementById('totpUsernameInput').value = username || '';
-  document.getElementById('totpUsernameInput')?.focus();
-  document.getElementById('customTotpSecretContainer').classList.add('hidden');
-  document.querySelector('input[name="totpType"][value="server"]').checked = true;
-};
-
-document.getElementById('connect2FAChatButton').onclick = () => {
-  initialContainer.classList.add('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.remove('hidden');
-  chatContainer.classList.add('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Enter a username and code to join a 2FA chat';
-  document.getElementById('usernameConnectInput').value = username || '';
-  document.getElementById('usernameConnectInput')?.focus();
-  const connectButton = document.getElementById('connectButton');
-  connectButton.onclick = () => {
-    const usernameInput = document.getElementById('usernameConnectInput').value.trim();
-    const inputCode = document.getElementById('codeInput').value.trim();
-    if (!validateUsername(usernameInput)) {
-      showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-      document.getElementById('usernameConnectInput')?.focus();
-      return;
-    }
-    if (!validateCode(inputCode)) {
-      showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx.');
-      document.getElementById('codeInput')?.focus();
-      return;
-    }
-    username = usernameInput;
-    localStorage.setItem('username', username);
-    code = inputCode;
-    showTotpInputModal(code);
-  };
-};
-
-document.querySelectorAll('input[name="totpType"]').forEach(radio => {
-  radio.addEventListener('change', () => {
-    document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');
-  });
-});
-
-document.getElementById('createTotpRoomButton').onclick = () => {
-  const serverGenerated = document.querySelector('input[name="totpType"]:checked').value === 'server';
-  startTotpRoom(serverGenerated);
-};
-
-document.getElementById('cancelTotpButton').onclick = () => {
-  document.getElementById('totpOptionsModal').classList.remove('active');
-  initialContainer.classList.remove('hidden');
-};
-
-document.getElementById('closeTotpSecretButton').onclick = () => {
-  document.getElementById('totpSecretModal').classList.remove('active');
-};
-
-document.getElementById('submitTotpCodeButton').onclick = () => {
-  const totpCode = document.getElementById('totpCodeInput').value.trim();
-  const codeParam = document.getElementById('totpInputModal').dataset.code;
-  if (totpCode.length !== 6 || isNaN(totpCode)) {
-    showStatusMessage('Invalid 2FA code: 6 digits required.');
-    return;
-  }
-  joinWithTotp(codeParam, totpCode);
-  document.getElementById('totpInputModal').classList.remove('active');
-};
-
-document.getElementById('cancelTotpInputButton').onclick = () => {
-  document.getElementById('totpInputModal').classList.remove('active');
-  initialContainer.classList.remove('hidden');
-};
-
-document.getElementById('joinWithUsernameButton').onclick = () => {
-  const usernameInput = document.getElementById('usernameInput').value.trim();
-  if (!validateUsername(usernameInput)) {
-    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-    document.getElementById('usernameInput')?.focus();
-    return;
-  }
-  username = usernameInput;
-  localStorage.setItem('username', username);
-  console.log('Username set in localStorage:', username);
-  code = generateCode();
-  codeDisplayElement.textContent = `Your code: ${code}`;
-  codeDisplayElement.classList.remove('hidden');
-  copyCodeButton.classList.remove('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  initialContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  messages.classList.add('waiting');
-  statusElement.textContent = 'Waiting for connection...';
-  if (socket.readyState === WebSocket.OPEN && token) {
-    console.log('Sending join message for new chat');
-    socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-  } else {
-    pendingJoin = { code, clientId, username };
-    if (socket.readyState !== WebSocket.OPEN) {
-      socket.addEventListener('open', () => {
-        console.log('WebSocket opened, sending join for new chat');
-        if (token) {
-          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-          pendingJoin = null;
-        }
-      }, { once: true });
-    }
-  }
-  document.getElementById('messageInput')?.focus();
-};
-
-document.getElementById('connectButton').onclick = () => {
-  const usernameInput = document.getElementById('usernameConnectInput').value.trim();
-  const inputCode = document.getElementById('codeInput').value.trim();
-  if (!validateUsername(usernameInput)) {
-    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-    document.getElementById('usernameConnectInput')?.focus();
-    return;
-  }
-  if (!validateCode(inputCode)) {
-    showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx.');
-    document.getElementById('codeInput')?.focus();
-    return;
-  }
-  username = usernameInput;
-  localStorage.setItem('username', username);
-  console.log('Username set in localStorage:', username);
-  code = inputCode;
-  codeDisplayElement.textContent = `Using code: ${code}`;
-  codeDisplayElement.classList.remove('hidden');
-  copyCodeButton.classList.remove('hidden');
-  initialContainer.classList.add('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  messages.classList.add('waiting');
-  statusElement.textContent = 'Waiting for connection...';
-  if (socket.readyState === WebSocket.OPEN && token) {
-    console.log('Sending join message for existing chat');
-    socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-  } else {
-    pendingJoin = { code, clientId, username };
-    if (socket.readyState !== WebSocket.OPEN) {
-      socket.addEventListener('open', () => {
-        console.log('WebSocket opened, sending join for existing chat');
-        if (token) {
-          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-          pendingJoin = null;
-        }
-      }, { once: true });
-    }
-  }
-  document.getElementById('messageInput')?.focus();
-};
-
-document.getElementById('backButton').onclick = () => {
-  console.log('Back button clicked from usernameContainer');
-  usernameContainer.classList.add('hidden');
-  initialContainer.classList.remove('hidden');
-  connectContainer.classList.add('hidden');
-  chatContainer.classList.add('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
-  messages.classList.remove('waiting');
-  document.getElementById('startChatToggleButton')?.focus();
-  updateLogoutButtonVisibility();
-};
-
-document.getElementById('backButtonConnect').onclick = () => {
-  console.log('Back button clicked from connectContainer');
-  connectContainer.classList.add('hidden');
-  initialContainer.classList.remove('hidden');
-  usernameContainer.classList.add('hidden');
-  chatContainer.classList.add('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
-  messages.classList.remove('waiting');
-  document.getElementById('connectToggleButton')?.focus();
-  updateLogoutButtonVisibility();
-};
-
-document.getElementById('sendButton').onclick = () => {
-  const messageInput = document.getElementById('messageInput');
-  const message = messageInput.value.trim();
-  if (message) {
-    sendMessage(message);
-  }
-};
-
-document.getElementById('messageInput').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    const messageInput = document.getElementById('messageInput');
-    const message = messageInput.value.trim();
-    if (message) {
-      sendMessage(message);
-    }
-  }
-});
-
-document.getElementById('imageButton').onclick = () => {
-  document.getElementById('imageInput')?.click();
-};
-
-document.getElementById('imageInput').onchange = (event) => {
-  const file = event.target.files[0];
-  if (file) {
-    const type = file.type.startsWith('image/') ? 'image' : 'file';
-    sendMedia(file, type);
-    event.target.value = '';
-  }
-};
-
-document.getElementById('voiceButton').onclick = () => {
-  if (!mediaRecorder || mediaRecorder.state !== 'recording') {
-    startVoiceRecording();
-  } else {
-    stopVoiceRecording();
-  }
-};
-
-document.getElementById('voiceCallButton').onclick = () => {
-  toggleVoiceCall();
-};
-
-document.getElementById('audioOutputButton').onclick = () => {
-  toggleAudioOutput();
-};
-
-document.getElementById('grokButton').onclick = () => {
-  toggleGrokBot();
-};
-
-document.getElementById('saveGrokKey').onclick = () => {
-  saveGrokKey();
-};
-
-document.getElementById('newSessionButton').onclick = () => {
-  console.log('New session button clicked');
-  window.location.href = 'https://anonomoose.com';
-};
-
-document.getElementById('usernameInput').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    document.getElementById('joinWithUsernameButton')?.click();
-  }
-});
-
-document.getElementById('usernameConnectInput').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    document.getElementById('codeInput')?.focus();
-  }
-});
-
-document.getElementById('codeInput').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    document.getElementById('connectButton')?.click();
-  }
-});
-
-document.getElementById('copyCodeButton').onclick = () => {
-  const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
-  navigator.clipboard.writeText(codeText).then(() => {
-    copyCodeButton.textContent = 'Copied!';
-    setTimeout(() => {
-      copyCodeButton.textContent = 'Copy Code';
-    }, 2000);
-  }).catch(err => {
-    console.error('Failed to copy text: ', err);
-    showStatusMessage('Failed to copy code.');
-  });
-  copyCodeButton?.focus();
-};
-
-document.getElementById('button1').onclick = () => {
-  if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
-    socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
-    showStatusMessage(`Sent code ${code} to random board.`);
-    codeSentToRandom = true;
-    button2.disabled = true;
-  } else {
-    showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
-  }
-  document.getElementById('button1')?.focus();
-};
-
-document.getElementById('button2').onclick = () => {
-  if (!button2.disabled) {
-    window.location.href = 'https://anonomoose.com/random.html';
-  }
-  document.getElementById('button2')?.focus();
-};
-
-cornerLogo.addEventListener('click', () => {
-  document.getElementById('messages').innerHTML = '';
-  processedMessageIds.clear();
-  showStatusMessage('Chat history cleared locally.');
-});
-
-function setupLazyObserver() {
-  lazyObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        const elem = entry.target;
-        if (elem.dataset.src) {
-          elem.src = elem.dataset.src;
-          delete elem.dataset.src;
-          lazyObserver.unobserve(elem);
-        }
-        if (elem.dataset.fullSrc) {
-          elem.src = elem.dataset.fullSrc;
-          delete elem.dataset.fullSrc;
-          lazyObserver.unobserve(elem);
-        }
-      }
-    });
-  }, { rootMargin: '100px' });
-}
-
-function loadRecentCodes() {
-  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
-  const recentCodesList = document.getElementById('recentCodesList');
-  recentCodesList.innerHTML = '';
-  if (recentCodes.length > 0) {
-    document.getElementById('recentChats').classList.remove('hidden');
-    recentCodes.forEach(recentCode => {
-      const button = document.createElement('button');
-      button.textContent = recentCode;
-      button.onclick = () => autoConnect(recentCode);
-      recentCodesList.appendChild(button);
-    });
-  } else {
-    document.getElementById('recentChats').classList.add('hidden');
-  }
-}
-
-function updateRecentCodes(code) {
-  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
-  if (recentCodes.includes(code)) {
-    recentCodes = recentCodes.filter(c => c !== code);
-  }
-  recentCodes.unshift(code);
-  if (recentCodes.length > 5) {
-    recentCodes = recentCodes.slice(0, 5);
-  }
-  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
-  loadRecentCodes();
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -1519,7 +1112,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('searchSubmitButton').onclick = () => {
     const name = document.getElementById('searchUsernameInput').value.trim();
     if (name) {
-      socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
+      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
     }
   };
   document.getElementById('searchCancelButton').onclick = () => {
@@ -1582,3 +1175,265 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   updateLogoutButtonVisibility();
 });
+document.getElementById('startChatToggleButton').onclick = () => {
+  console.log('Start chat toggle clicked');
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.remove('hidden');
+  connectContainer.classList.add('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  statusElement.textContent = 'Enter a username to start a chat';
+  document.getElementById('usernameInput').value = username || '';
+  document.getElementById('usernameInput')?.focus();
+};
+document.getElementById('connectToggleButton').onclick = () => {
+  console.log('Connect toggle clicked');
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.remove('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  statusElement.textContent = 'Enter a username and code to join a chat';
+  document.getElementById('usernameConnectInput').value = username || '';
+  document.getElementById('usernameConnectInput')?.focus();
+};
+document.getElementById('start2FAChatButton').onclick = () => {
+  document.getElementById('totpOptionsModal').classList.add('active');
+  document.getElementById('totpUsernameInput').value = username || '';
+  document.getElementById('totpUsernameInput')?.focus();
+  document.getElementById('customTotpSecretContainer').classList.add('hidden');
+  document.querySelector('input[name="totpType"][value="server"]').checked = true;
+};
+document.getElementById('connect2FAChatButton').onclick = () => {
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.remove('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  statusElement.textContent = 'Enter a username and code to join a 2FA chat';
+  document.getElementById('usernameConnectInput').value = username || '';
+  document.getElementById('usernameConnectInput')?.focus();
+  const connectButton = document.getElementById('connectButton');
+  connectButton.onclick = () => {
+    const usernameInput = document.getElementById('usernameConnectInput').value.trim();
+    const inputCode = document.getElementById('codeInput').value.trim();
+    if (!validateUsername(usernameInput)) {
+      showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+      document.getElementById('usernameConnectInput')?.focus();
+      return;
+    }
+    if (!validateCode(inputCode)) {
+      showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx.');
+      document.getElementById('codeInput')?.focus();
+      return;
+    }
+    username = usernameInput;
+    localStorage.setItem('username', username);
+    code = inputCode;
+    showTotpInputModal(code);
+  };
+};
+document.querySelectorAll('input[name="totpType"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');
+  });
+});
+document.getElementById('createTotpRoomButton').onclick = () => {
+  const serverGenerated = document.querySelector('input[name="totpType"]:checked').value === 'server';
+  startTotpRoom(serverGenerated);
+};
+document.getElementById('cancelTotpButton').onclick = () => {
+  document.getElementById('totpOptionsModal').classList.remove('active');
+  initialContainer.classList.remove('hidden');
+};
+document.getElementById('closeTotpSecretButton').onclick = () => {
+  document.getElementById('totpSecretModal').classList.remove('active');
+};
+document.getElementById('submitTotpCodeButton').onclick = () => {
+  const totpCode = document.getElementById('totpCodeInput').value.trim();
+  const codeParam = document.getElementById('totpInputModal').dataset.code;
+  if (totpCode.length !== 6 || isNaN(totpCode)) {
+    showStatusMessage('Invalid 2FA code: 6 digits required.');
+    return;
+  }
+  joinWithTotp(codeParam, totpCode);
+  document.getElementById('totpInputModal').classList.remove('active');
+};
+document.getElementById('cancelTotpInputButton').onclick = () => {
+  document.getElementById('totpInputModal').classList.remove('active');
+  initialContainer.classList.remove('hidden');
+};
+document.getElementById('joinWithUsernameButton').onclick = () => {
+  const usernameInput = document.getElementById('usernameInput').value.trim();
+  if (!validateUsername(usernameInput)) {
+    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+    document.getElementById('usernameInput')?.focus();
+    return;
+  }
+  username = usernameInput;
+  localStorage.setItem('username', username);
+  console.log('Username set in localStorage:', username);
+  code = generateCode();
+  codeDisplayElement.textContent = `Your code: ${code}`;
+  codeDisplayElement.classList.remove('hidden');
+  copyCodeButton.classList.remove('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  initialContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for connection...';
+  if (socket.readyState === WebSocket.OPEN && token) {
+    console.log('Sending join message for new chat');
+    socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+  } else {
+    pendingJoin = { code, clientId, username };
+    if (socket.readyState !== WebSocket.OPEN) {
+      socket.addEventListener('open', () => {
+        console.log('WebSocket opened, sending join for new chat');
+        if (token) {
+          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+          pendingJoin = null;
+        }
+      }, { once: true });
+    }
+  }
+  document.getElementById('messageInput')?.focus();
+};
+document.getElementById('connectButton').onclick = () => {
+  const usernameInput = document.getElementById('usernameConnectInput').value.trim();
+  const inputCode = document.getElementById('codeInput').value.trim();
+  if (!validateUsername(usernameInput)) {
+    showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+    document.getElementById('usernameConnectInput')?.focus();
+    return;
+  }
+  if (!validateCode(inputCode)) {
+    showStatusMessage('Invalid code format: xxxx-xxxx-xxxx-xxxx.');
+    document.getElementById('codeInput')?.focus();
+    return;
+  }
+  username = usernameInput;
+  localStorage.setItem('username', username);
+  console.log('Username set in localStorage:', username);
+  code = inputCode;
+  codeDisplayElement.textContent = `Using code: ${code}`;
+  codeDisplayElement.classList.remove('hidden');
+  copyCodeButton.classList.remove('hidden');
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for connection...';
+  if (socket.readyState === WebSocket.OPEN && token) {
+    console.log('Sending join message for existing chat');
+    socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+  } else {
+    pendingJoin = { code, clientId, username };
+    if (socket.readyState !== WebSocket.OPEN) {
+      socket.addEventListener('open', () => {
+        console.log('WebSocket opened, sending join for existing chat');
+        if (token) {
+          socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+          pendingJoin = null;
+        }
+      }, { once: true });
+    }
+  }
+  document.getElementById('messageInput')?.focus();
+};
+document.getElementById('backButton').onclick = () => {
+  console.log('Back button clicked from usernameContainer');
+  usernameContainer.classList.add('hidden');
+  initialContainer.classList.remove('hidden');
+  connectContainer.classList.add('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  statusElement.textContent = 'Start a new chat or connect to an existing one';
+  messages.classList.remove('waiting');
+  document.getElementById('startChatToggleButton')?.focus();
+  updateLogoutButtonVisibility();
+};
+document.getElementById('backButtonConnect').onclick = () => {
+  console.log('Back button clicked from connectContainer');
+  connectContainer.classList.add('hidden');
+  initialContainer.classList.remove('hidden');
+  usernameContainer.classList.add('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  statusElement.textContent = 'Start a new chat or connect to an existing one';
+  messages.classList.remove('waiting');
+  document.getElementById('connectToggleButton')?.focus();
+  updateLogoutButtonVisibility();
+};
+document.getElementById('sendButton').onclick = () => {
+  const messageInput = document.getElementById('messageInput');
+  const message = messageInput.value.trim();
+  if (message) {
+    sendMessage(message);
+  }
+};
+document.getElementById('messageInput').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    const messageInput = document.getElementById('messageInput');
+    const message = messageInput.value.trim();
+    if (message) {
+      sendMessage(message);
+    }
+  }
+});
+document.getElementById('imageButton').onclick = () => {
+  document.getElementById('imageInput')?.click();
+};
+document.getElementById('imageInput').onchange = (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    const type = file.type.startsWith('image/') ? 'image' : 'file';
+    sendMedia(file, type);
+    event.target.value = '';
+  }
+};
+document.getElementById('voiceButton').onclick = () => {
+  if (!mediaRecorder || mediaRecorder.state !== 'recording') {
+    startVoiceRecording();
+  } else {
+    stopVoiceRecording();
+  }
+};
+document.getElementById('voiceCallButton').onclick = () => {
+  toggleVoiceCall();
+};
+document.getElementById('audioOutputButton').onclick = () => {
+  toggleAudioOutput();
+};
+document.getElementById('grokButton').onclick = () => {
+  toggleGrokBot();
+};
+document.getElementById('saveGrokKey').onclick = () => {
+  saveGrokKey();
+};
+document.getElementById('newSessionButton').onclick = () => {
+  console.log('New session button clicked');
+  window.location.href = 'https://anonomoose.com';
+};
+document.getElementById('usernameInput').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    document.getElementById('joinWithUsernameButton')?.click();
+  }
+});
+document.getElementById('usernameConnectInput').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    document.getElementById('codeInput')?.focus();
+  }
+});
+document.getElementById('codeInput').addEventListener('keydown', (event) => {
+  if (

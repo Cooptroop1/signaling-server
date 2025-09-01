@@ -1,4 +1,5 @@
-// main.js
+
+
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -18,47 +19,20 @@ const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
 let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
-const renegotiationCounts = new Map(); // Per-peer renegotiation attempt counter
-const maxRenegotiations = 5; // Max renegotiation attempts per peer
-let keyVersion = 0; // Global key version counter for ratcheting
-let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // Client-side size tracking (mirror server 1MB/min)
+const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
+const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
+let keyVersion = 0; // New: Global key version counter for ratcheting
+let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
-let userPrivateKey; // Will be loaded from IndexedDB or server
+let userPrivateKey = localStorage.getItem('userPrivateKey'); // New: Persistent private key
 let userPublicKey; // Generated on claim/login
-
-// IndexedDB setup
-const dbName = "AnonomooseKeys";
-const storeName = "privateKeys";
-let db;
-
-async function initIndexedDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, 1);
-    request.onupgradeneeded = (event) => {
-      db = event.target.result;
-      db.createObjectStore(storeName, { keyPath: "clientId" });
-    };
-    request.onsuccess = (event) => {
-      db = event.target.result;
-      resolve(db);
-    };
-    request.onerror = (event) => {
-      console.error("IndexedDB error:", event.target.error);
-      reject(event.target.error);
-    };
-  });
-}
-
-// Initialize IndexedDB on load
-document.addEventListener("DOMContentLoaded", async () => {
-  await initIndexedDB();
-});
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');
     return;
   }
+
   // Global send rate limit check (aggregate all types)
   const now = performance.now();
   if (now - globalSendRate.startTime >= 60000) {
@@ -69,7 +43,8 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Global message rate limit exceeded (50/min). Please wait.');
     return;
   }
-  // Client-side size limit check (mirror server 1MB/min)
+
+  // New: Client-side size limit check (mirror server 1MB/min)
   if (now - globalSizeRate.startTime >= 60000) {
     globalSizeRate.totalSize = 0;
     globalSizeRate.startTime = now;
@@ -79,6 +54,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
     return;
   }
+
   let dataToSend = content || base64;
   if (type === 'image' || type === 'file') {
     if (!features.enableImages) {
@@ -91,10 +67,12 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       return;
     }
   }
+
   if (file && file.size > 5 * 1024 * 1024) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
     return;
   }
+
   const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
   const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
@@ -107,12 +85,14 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} rate limit reached (5/min). Please wait.`);
     return;
   }
+
   if (file && type === 'image') {
     const maxWidth = 640;
     const maxHeight = 360;
     let quality = 0.4;
     if (file.size > 3 * 1024 * 1024) quality = 0.3;
     else if (file.size > 1 * 1024 * 1024) quality = 0.35;
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
@@ -144,25 +124,28 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       reader.readAsDataURL(file);
     });
   }
+
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
   const jitteredTimestamp = timestamp + jitter * 1000;
-  const nonce = crypto.randomUUID(); // Generate nonce
+  const nonce = crypto.randomUUID(); // New: Generate nonce
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
-  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type }); // Metadata JSON
-  let rawData = metadata + (dataToSend || sanitizedContent); // Prepend metadata
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type }); // New: Metadata JSON
+  let rawData = metadata + (dataToSend || sanitizedContent); // New: Prepend metadata
   // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + nonce; // Sign rawData + nonce (timestamp is inside rawData)
+  const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // Use encryptedBlob
+  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
+
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
   }
+
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
     sendRelayMessage(`relay-${type}`, payload);
@@ -193,9 +176,11 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Error: No connections.');
     return;
   }
+
   // Increment global count and size after successful send
   globalSendRate.count += 1;
   globalSizeRate.totalSize += payloadSize;
+
   const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-bubble self';
@@ -204,6 +189,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   messageDiv.appendChild(document.createTextNode(`${username}: `));
+
   if (type === 'image' || type === 'voice' || type === 'file') {
     let element;
     if (type === 'image') {
@@ -233,6 +219,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   } else {
     messageDiv.appendChild(document.createTextNode(sanitizedContent));
   }
+
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
@@ -273,6 +260,7 @@ async function sendMedia(file, type) {
   document.getElementById(`${type}Button`)?.focus();
 }
 
+// Rest of the code remains the same...
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
   if (!features.enableP2P) {
@@ -354,6 +342,7 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Connection state for ${targetId}: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
       console.log(`Connection failed with ${targetId}`);
+      // Removed showStatusMessage to suppress transient error
       cleanupPeerConnection(targetId);
       const retryCount = retryCounts.get(targetId) || 0;
       if (retryCount < maxRetries) {
@@ -410,6 +399,7 @@ async function startPeerConnection(targetId, isOfferer) {
       sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
     }).catch(error => {
       console.error(`Error creating offer for ${targetId}:`, error);
+      // Removed showStatusMessage to suppress transient error
     });
   }
   const timeout = setTimeout(() => {
@@ -417,6 +407,7 @@ async function startPeerConnection(targetId, isOfferer) {
       console.log(`P2P failed with ${targetId}, checking relay availability`);
       if (features.enableRelay) {
         useRelay = true;
+        // Removed showStatusMessage to suppress transient error; user sees final connection status
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
           privacyStatus.textContent = 'Relay Mode (E2EE)';
@@ -472,6 +463,7 @@ function setupDataChannel(dataChannel, targetId) {
       return;
     }
     if (data.chunk) {
+      // Don't count chunks toward rate limit
       const { chunkId, index, total, data: chunkData } = data;
       if (!chunkBuffers.has(chunkId)) {
         chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
@@ -482,6 +474,7 @@ function setupDataChannel(dataChannel, targetId) {
       if (buffer.received === total) {
         const fullMessage = buffer.chunks.join('');
         chunkBuffers.delete(chunkId);
+        // Process the reassembled message
         try {
           data = JSON.parse(fullMessage);
         } catch (e) {
@@ -492,6 +485,7 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
+    // Count non-chunk messages
     rateLimit.count += 1;
     messageRateLimits.set(targetId, rateLimit);
     if (rateLimit.count > 10) {
@@ -503,9 +497,11 @@ function setupDataChannel(dataChannel, targetId) {
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
+    // Removed showStatusMessage to suppress transient error
   };
   dataChannel.onclose = () => {
     console.log(`Data channel closed with ${targetId}`);
+    // Removed showStatusMessage to suppress transient error
     cleanupPeerConnection(targetId);
     messageRateLimits.delete(targetId);
     imageRateLimits.delete(targetId);
@@ -547,7 +543,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || !data.encryptedBlob) {
+  if (!data.messageId || (!data.encryptedBlob)) { // New: Check for encryptedBlob
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -555,28 +551,29 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate message ${data.messageId} from ${targetId}`);
     return;
   }
-  if (processedNonces.has(data.nonce)) {
+  if (processedNonces.has(data.nonce)) { // New: Check nonce
     console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
     return;
   }
   const now = Date.now();
-  if (Math.abs(now - data.timestamp) > 300000) {
+  if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
     console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
     return;
   }
   processedMessageIds.add(data.messageId);
-  processedNonces.set(data.nonce, Date.now());
+  processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     const messageKey = await deriveMessageKey();
     const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
-    const toVerify = rawData + data.nonce;
+    const toVerify = rawData + data.nonce; // New: Verify on rawData + nonce
     const valid = await verifyMessage(signingKey, data.signature, toVerify);
     if (!valid) {
       console.warn(`Invalid signature for message from ${targetId}`);
       showStatusMessage('Invalid message signature detected.');
       return;
     }
+    // New: Parse metadata from rawData
     let metadataStr = '';
     let braceCount = 0;
     for (let i = 0; i < rawData.length; i++) {
@@ -589,7 +586,7 @@ async function processReceivedMessage(data, targetId) {
     senderUsername = metadata.username;
     timestamp = metadata.timestamp;
     contentType = metadata.type;
-    contentOrData = rawData.substring(metadataStr.length).trimEnd();
+    contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
@@ -606,7 +603,7 @@ async function processReceivedMessage(data, targetId) {
   messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
   if (contentType === 'image') {
     const img = document.createElement('img');
-    img.dataset.src = contentOrData;
+    img.dataset.src = contentOrData; // Lazy load
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
@@ -616,7 +613,7 @@ async function processReceivedMessage(data, targetId) {
     messageDiv.appendChild(img);
   } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
-    audio.dataset.src = contentOrData;
+    audio.dataset.src = contentOrData; // Lazy load
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
@@ -637,7 +634,7 @@ async function processReceivedMessage(data, targetId) {
   if (isInitiator) {
     dataChannels.forEach((dc, id) => {
       if (id !== targetId && dc.readyState === 'open') {
-        dc.send(JSON.stringify(data));
+        dc.send(event.data);
       }
     });
   }
@@ -663,11 +660,13 @@ async function handleOffer(offer, targetId) {
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
+    // Process queued candidates asynchronously
     const queue = candidatesQueues.get(targetId) || [];
     await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling offer from ${targetId}:`, error);
+    // Removed showStatusMessage to suppress transient error
   }
 }
 
@@ -691,11 +690,13 @@ async function handleAnswer(answer, targetId) {
   }
   try {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    // Process queued items asynchronously
     const queue = candidatesQueues.get(targetId) || [];
     await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling answer from ${targetId}:`, error);
+    // Removed showStatusMessage to suppress transient error
   }
 }
 
@@ -711,6 +712,7 @@ async function handleCandidate(candidate, targetId) {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (error) {
       console.error(`Error adding ICE candidate from ${targetId}:`, error);
+      // Removed showStatusMessage to suppress transient error
     }
   } else {
     const queue = candidatesQueues.get(targetId) || [];
@@ -719,6 +721,7 @@ async function handleCandidate(candidate, targetId) {
   }
 }
 
+// New helper to process queue with Promises for efficiency
 async function processCandidateQueue(peerConnection, queue) {
   for (const item of queue) {
     if (item.type === 'answer') {
@@ -726,12 +729,14 @@ async function processCandidateQueue(peerConnection, queue) {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer));
       } catch (error) {
         console.error(`Error applying queued answer:`, error);
+        // Removed showStatusMessage to suppress transient error
       }
     } else if (item.type === 'candidate') {
       try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(item.candidate));
       } catch (error) {
         console.error(`Error adding queued ICE candidate:`, error);
+        // Removed showStatusMessage to suppress transient error
       }
     }
   }
@@ -798,6 +803,7 @@ function stopVoiceCall() {
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection) {
+    // Check renegotiation limit
     const count = renegotiationCounts.get(targetId) || 0;
     if (count >= maxRenegotiations) {
       console.warn(`Max renegotiations reached for ${targetId} (${maxRenegotiations}), aborting.`);
@@ -805,6 +811,7 @@ async function renegotiate(targetId) {
       return;
     }
     renegotiationCounts.set(targetId, count + 1);
+
     if (!negotiationQueues.has(targetId)) {
       negotiationQueues.set(targetId, Promise.resolve());
     }
@@ -815,7 +822,7 @@ async function renegotiate(targetId) {
       }
       if (peerConnection.signalingState !== 'stable') {
         console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}. Queuing.`);
-        return renegotiate(targetId);
+        return renegotiate(targetId); // Recurse to queue again
       }
       renegotiating.set(targetId, true);
       try {
@@ -824,6 +831,7 @@ async function renegotiate(targetId) {
         sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
       } catch (error) {
         console.error(`Error renegotiating with ${targetId}:`, error);
+        // Removed showStatusMessage to suppress transient error
       } finally {
         renegotiating.set(targetId, false);
       }
@@ -876,6 +884,134 @@ function sendRelayMessage(type, additionalData) {
     console.log('Socket not open, queuing relay message');
     if (!signalingQueue.has('global')) signalingQueue.set('global', []);
     signalingQueue.get('global').push({ type, additionalData });
+  }
+}
+
+function processSignalingQueue() {
+  signalingQueue.forEach((queue, key) => {
+    while (queue.length > 0) {
+      const { type, additionalData } = queue.shift();
+      if (type.startsWith('relay-')) {
+        sendRelayMessage(type, additionalData);
+      } else {
+        sendSignalingMessage(type, additionalData);
+      }
+    }
+  });
+  signalingQueue.clear();
+}
+
+function autoConnect(codeParam) {
+  console.log('autoConnect running with code:', codeParam);
+  code = codeParam;
+  initialContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  if (validateCode(codeParam)) {
+    if (validateUsername(username)) {
+      console.log('Valid username and code, joining chat');
+      codeDisplayElement.textContent = `Using code: ${code}`;
+      codeDisplayElement.classList.remove('hidden');
+      copyCodeButton.classList.remove('hidden');
+      messages.classList.add('waiting');
+      statusElement.textContent = 'Waiting for connection...';
+      if (socket.readyState === WebSocket.OPEN) {
+        console.log('Sending check-totp');
+        socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
+      } else {
+        console.log('WebSocket not open, waiting for open event to send check-totp');
+        socket.addEventListener('open', () => {
+          console.log('WebSocket opened, sent check-totp');
+          socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
+        }, { once: true });
+      }
+      document.getElementById('messageInput')?.focus();
+      updateFeaturesUI();
+    } else {
+      console.log('No valid username, prompting for username');
+      usernameContainer.classList.remove('hidden');
+      chatContainer.classList.add('hidden');
+      statusElement.textContent = 'Please enter a username to join the chat';
+      document.getElementById('usernameInput').value = username || '';
+      document.getElementById('usernameInput')?.focus();
+      document.getElementById('joinWithUsernameButton').onclick = () => {
+        const usernameInput = document.getElementById('usernameInput').value.trim();
+        if (!validateUsername(usernameInput)) {
+          showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+          document.getElementById('usernameInput')?.focus();
+          return;
+        }
+        username = usernameInput;
+        localStorage.setItem('username', username);
+        usernameContainer.classList.add('hidden');
+        chatContainer.classList.remove('hidden');
+        codeDisplayElement.textContent = `Using code: ${code}`;
+        codeDisplayElement.classList.remove('hidden');
+        copyCodeButton.classList.remove('hidden');
+        messages.classList.add('waiting');
+        statusElement.textContent = 'Waiting for connection...';
+        socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
+        document.getElementById('messageInput')?.focus();
+      };
+    }
+  } else {
+    console.log('Invalid code, showing initial container');
+    initialContainer.classList.remove('hidden');
+    usernameContainer.classList.add('hidden');
+    chatContainer.classList.add('hidden');
+    showStatusMessage('Invalid code format. Please enter a valid code.');
+    document.getElementById('connectToggleButton')?.focus();
+  }
+}
+
+function updateFeaturesUI() {
+  const imageButton = document.getElementById('imageButton');
+  const voiceButton = document.getElementById('voiceButton');
+  const voiceCallButton = document.getElementById('voiceCallButton');
+  const audioOutputButton = document.getElementById('audioOutputButton');
+  const grokButton = document.getElementById('grokButton');
+  if (imageButton) {
+    imageButton.classList.toggle('hidden', !features.enableImages);
+    imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
+  }
+  if (voiceButton) {
+    voiceButton.classList.toggle('hidden', !features.enableVoice);
+    voiceButton.title = features.enableVoice ? 'Record Voice' : 'Voice disabled by admin';
+  }
+  if (voiceCallButton) {
+    voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
+    voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
+    if (!features.enableVoiceCalls && voiceCallActive) {
+      stopVoiceCall();
+    }
+  }
+  if (audioOutputButton) {
+    const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
+    audioOutputButton.classList.toggle('hidden', shouldHide);
+    if (shouldHide && voiceCallActive) {
+      stopVoiceCall();
+    }
+    audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
+    audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
+    audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
+  }
+  if (grokButton) {
+    grokButton.classList.toggle('hidden', !features.enableGrokBot);
+    grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
+  }
+  if (!features.enableService) {
+    showStatusMessage('Service disabled by admin. Disconnecting...');
+    socket.close();
+  }
+  if (!features.enableP2P && !features.enableRelay) {
+    showStatusMessage('Both P2P and relay disabled. Messaging unavailable.');
+    inputContainer.classList.add('hidden');
+  } else if (!features.enableP2P && features.enableRelay && isConnected) {
+    inputContainer.classList.remove('hidden');
+    messages.classList.remove('waiting');
   }
 }
 
@@ -953,8 +1089,8 @@ async function setAudioOutput(audioElement, targetId) {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
       if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker'
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default')
+        const targetDevice = audioOutputMode === 'speaker' 
+          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
           : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
         if (targetDevice) {
           await audioElement.setSinkId(targetDevice.deviceId);
@@ -1136,11 +1272,23 @@ async function generateThumbnail(dataURL, width = 100, height = 100) {
       ctx.drawImage(img, 0, 0, width, height);
       resolve(canvas.toDataURL('image/jpeg', 0.5));
     };
-    img.onerror = () => resolve(dataURL);
+    img.onerror = () => resolve(dataURL); // Fallback to full if error
   });
 }
 
-async function generateUserKeypair(password) {
+// New: Cleanup old nonces every 5min
+setInterval(() => {
+  const now = Date.now();
+  for (const [nonce, ts] of processedNonces) {
+    if (now - ts > 3600000) { // 1hr = 3600000ms
+      processedNonces.delete(nonce);
+    }
+  }
+  console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
+}, 300000); // 5min
+
+// New: Generate user keypair on claim/login if none
+async function generateUserKeypair() {
   const keypair = await window.crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-384' },
     true, // Extractable for storage
@@ -1148,53 +1296,13 @@ async function generateUserKeypair(password) {
   );
   const privateJwk = await window.crypto.subtle.exportKey('jwk', keypair.privateKey);
   const publicBase64 = await exportPublicKey(keypair.publicKey);
-
-  // Derive wrapping key from password
-  const salt = window.crypto.getRandomValues(new Uint8Array(16));
-  const wrappingKey = await window.crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: 100000,
-      hash: "SHA-256",
-    },
-    await window.crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(password),
-      { name: "PBKDF2" },
-      false,
-      ["deriveKey"]
-    ),
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-
-  // Encrypt private key
-  const { encrypted, iv } = await encryptRaw(wrappingKey, JSON.stringify(privateJwk));
-
-  // Store in IndexedDB
-  const transaction = db.transaction([storeName], "readwrite");
-  const store = transaction.objectStore(storeName);
-  store.put({ clientId, encryptedKey: encrypted, iv, salt });
-
-  // Store encrypted key in anonomoose.db for backup
-  socket.send(
-    JSON.stringify({
-      type: "store-encrypted-key",
-      clientId,
-      token,
-      encryptedKey: encrypted,
-      iv,
-      salt,
-    })
-  );
-
+  localStorage.setItem('userPrivateKey', JSON.stringify(privateJwk));
   userPrivateKey = privateJwk;
   userPublicKey = publicBase64;
   return publicBase64;
 }
 
+// New: Send offline message
 async function sendOfflineMessage(toUsername, messageText) {
   if (!userPrivateKey) {
     showStatusMessage('No private key. Please re-claim username on this device.');
@@ -1205,13 +1313,13 @@ async function sendOfflineMessage(toUsername, messageText) {
     false,
     ['deriveKey', 'deriveBits']
   );
-  const recipientPublic = await importPublicKey(userPublicKey);
+  const recipientPublic = await importPublicKey(userPublicKey); // From search response
   const shared = await deriveSharedKey(ephemeralKeypair.privateKey, recipientPublic);
   const { encrypted, iv } = await encryptRaw(shared, messageText);
   const ephemeralPublic = await exportPublicKey(ephemeralKeypair.publicKey);
   socket.send(JSON.stringify({
     type: 'send-offline-message',
-    to_username: toUsername,
+    toUsername,  // Fixed: Changed to_username to toUsername to match parameter
     encrypted,
     iv,
     ephemeral_public: ephemeralPublic,
@@ -1221,13 +1329,38 @@ async function sendOfflineMessage(toUsername, messageText) {
   showStatusMessage('Offline message sent.');
 }
 
-// Cleanup old nonces every 5min
-setInterval(() => {
-  const now = Date.now();
-  for (const [nonce, ts] of processedNonces) {
-    if (now - ts > 3600000) { // 1hr = 3600000ms
-      processedNonces.delete(nonce);
-    }
+// Override claim/login to generate keys
+document.getElementById('claimSubmitButton').onclick = () => {
+  const name = document.getElementById('claimUsernameInput').value.trim();
+  const pass = document.getElementById('claimPasswordInput').value;
+  if (validateUsername(name) && pass.length >= 8) {
+    generateUserKeypair().then(publicKey => {
+      socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+    }).catch(error => {
+      console.error('Key generation error:', error);
+      showStatusMessage('Failed to generate keys for claim.');
+    });
+  } else {
+    showStatusMessage('Invalid username or password (min 8 chars).');
   }
-  console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
-}, 300000);
+};
+
+document.getElementById('loginSubmitButton').onclick = () => {
+  const name = document.getElementById('loginUsernameInput').value.trim();
+  const pass = document.getElementById('loginPasswordInput').value;
+  if (validateUsername(name) && pass.length >= 8) {
+    if (!userPrivateKey) {
+      generateUserKeypair().then(() => {
+        showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+      }).catch(error => {
+        console.error('Key generation error:', error);
+        showStatusMessage('Failed to generate keys for login.');
+      });
+    } else {
+      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+    }
+  } else {
+    showStatusMessage('Invalid username or password (min 8 chars).');
+  }
+};

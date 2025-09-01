@@ -156,6 +156,50 @@ const maxReconnectAttempts = 5;
 let refreshFailures = 0;
 let refreshBackoff = 1000;
 
+function updateLogoutButtonVisibility() {
+  const logoutButton = document.getElementById('logoutButton');
+  if (logoutButton) {
+    logoutButton.classList.toggle('hidden', !(username && token));
+  }
+}
+
+function logout() {
+  if (socket.readyState === WebSocket.OPEN && token) {
+    socket.send(JSON.stringify({ type: 'logout', clientId, token }));
+  }
+  username = '';
+  token = '';
+  refreshToken = '';
+  clientId = Math.random().toString(36).substr(2, 9);
+  setCookie('clientId', clientId, 365);
+  localStorage.removeItem('username');
+  localStorage.removeItem('userPrivateKey');
+  userPrivateKey = null;
+  userPublicKey = null;
+  processedMessageIds.clear();
+  connectedClients.clear();
+  peerConnections.forEach((pc) => pc.close());
+  peerConnections.clear();
+  dataChannels.forEach((dc) => dc.close());
+  dataChannels.clear();
+  socket.close();
+  initialContainer.classList.remove('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  newSessionButton.classList.add('hidden');
+  maxClientsContainer.classList.add('hidden');
+  inputContainer.classList.add('hidden');
+  messages.classList.remove('waiting');
+  messages.innerHTML = '';
+  statusElement.textContent = 'Start a new chat or connect to an existing one';
+  updateLogoutButtonVisibility();
+  showStatusMessage('Logged out successfully.');
+  document.getElementById('startChatToggleButton')?.focus();
+}
+
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -174,6 +218,7 @@ socket.onopen = () => {
     codeDisplayElement.classList.add('hidden');
     copyCodeButton.classList.add('hidden');
   }
+  updateLogoutButtonVisibility();
 };
 
 socket.onerror = (error) => {
@@ -226,6 +271,7 @@ socket.onmessage = async (event) => {
         pendingCode = null;
       }
       processSignalingQueue();
+      updateLogoutButtonVisibility();
       return;
     }
     if (message.type === 'token-refreshed') {
@@ -241,6 +287,7 @@ socket.onmessage = async (event) => {
       }
       processSignalingQueue();
       refreshingToken = false;
+      updateLogoutButtonVisibility();
       return;
     }
     if (message.type === 'error') {
@@ -338,6 +385,8 @@ socket.onmessage = async (event) => {
         button2.disabled = false;
         token = '';
         refreshToken = '';
+        updateLogoutButtonVisibility();
+        return;
       } else if (message.message.includes('Service has been disabled by admin.')) {
         showStatusMessage(message.message);
         initialContainer.classList.remove('hidden');
@@ -351,6 +400,8 @@ socket.onmessage = async (event) => {
         inputContainer.classList.add('hidden');
         messages.classList.remove('waiting');
         socket.close();
+        updateLogoutButtonVisibility();
+        return;
       } else {
         showStatusMessage(message.message);
       }
@@ -679,6 +730,7 @@ socket.onmessage = async (event) => {
         codeDisplayElement.classList.add('hidden');
         copyCodeButton.classList.add('hidden');
         statusElement.textContent = 'Start a new chat or connect to an existing one';
+        updateLogoutButtonVisibility();
       }, 5000);
       return;
     }
@@ -724,6 +776,7 @@ socket.onmessage = async (event) => {
         codeDisplayElement.classList.add('hidden');
         copyCodeButton.classList.add('hidden');
         statusElement.textContent = 'Start a new chat or connect to an existing one';
+        updateLogoutButtonVisibility();
       }, 5000);
       return;
     }
@@ -765,7 +818,6 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'incoming-connection') {
-      // Workaround: If 'from' matches current username, use a generic message
       const fromUser = message.from === username ? 'Someone' : message.from;
       document.getElementById('incomingMessage').textContent = `${fromUser} wants to connect. Accept?`;
       document.getElementById('acceptButton').onclick = () => {
@@ -1217,6 +1269,7 @@ document.getElementById('backButton').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
+  updateLogoutButtonVisibility();
 };
 
 document.getElementById('backButtonConnect').onclick = () => {
@@ -1230,6 +1283,7 @@ document.getElementById('backButtonConnect').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
+  updateLogoutButtonVisibility();
 };
 
 document.getElementById('sendButton').onclick = () => {
@@ -1436,7 +1490,6 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
   document.getElementById('loginButton').addEventListener('click', () => {
-    // Prevent opening login modal if already logged in
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to switch accounts.');
       return;
@@ -1444,7 +1497,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('loginModal').classList.add('active');
   });
   document.getElementById('loginSubmitButton').onclick = () => {
-    // Prevent login if already logged in
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to switch accounts.');
       return;
@@ -1471,7 +1523,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('searchUserModal').classList.remove('active');
   };
   document.getElementById('claimUsernameButton').addEventListener('click', () => {
-    // Prevent opening claim modal if already logged in
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to claim a new username.');
       return;
@@ -1482,7 +1533,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('claimUsernameModal').classList.remove('active');
   };
   document.getElementById('claimSubmitButton').onclick = () => {
-    // Prevent claim if already logged in
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to claim a new username.');
       return;
@@ -1501,7 +1551,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   document.getElementById('loginSubmitButton').onclick = () => {
-    // Prevent login if already logged in
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to switch accounts.');
       return;
@@ -1524,4 +1573,9 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatusMessage('Invalid username or password (min 8 chars).');
     }
   };
+  document.getElementById('logoutButton').onclick = () => {
+    console.log('Logout button clicked');
+    logout();
+  };
+  updateLogoutButtonVisibility();
 });

@@ -12,22 +12,18 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-
 // New: Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
-
 // New: Validate password
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
-
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false } // For Render Postgres
 });
-
 // Test DB connection on startup
 dbPool.connect((err) => {
   if (err) {
@@ -36,7 +32,6 @@ dbPool.connect((err) => {
     console.log('Connected to DB successfully');
   }
 });
-
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
@@ -50,7 +45,6 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   });
   console.log('Using HTTPS server for local development');
 }
-
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
   if (proto && proto !== 'https') {
@@ -102,7 +96,6 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
-
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
@@ -172,7 +165,6 @@ let features = {
   enableP2P: true,
   enableRelay: true
 };
-
 if (fs.existsSync(FEATURES_FILE)) {
   try {
     features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
@@ -183,23 +175,18 @@ if (fs.existsSync(FEATURES_FILE)) {
 } else {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
-
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
-
 function saveFeatures() {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
   console.log('Saved features:', features);
 }
-
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
 }
-
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
-
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -210,7 +197,6 @@ function isValidBase64(str) {
   if (!isValid) console.warn('Invalid base64 detected:', str);
   return isValid;
 }
-
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -441,6 +427,8 @@ function validateMessage(data) {
         return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
       }
       break;
+    case 'logout':
+      break;
     case 'find-user':
       if (!data.username) {
         return { valid: false, error: 'find-user: username required' };
@@ -466,7 +454,6 @@ function validateMessage(data) {
   }
   return { valid: true };
 }
-
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -476,7 +463,6 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
-
 setInterval(() => {
   randomCodes.forEach(code => {
     if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
@@ -486,7 +472,6 @@ setInterval(() => {
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
-
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
@@ -494,7 +479,6 @@ const pingInterval = setInterval(() => {
     ws.ping();
   });
 }, 50000);
-
 setInterval(() => {
   const now = Date.now();
   revokedTokens.forEach((expiry, token) => {
@@ -515,7 +499,6 @@ setInterval(() => {
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 600000); // Changed to every 10 minutes (600000 ms)
-
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -958,7 +941,7 @@ wss.on('connection', (ws, req) => {
         }
         const messageSet = processedMessageIds.get(data.code);
         if (messageSet.has(data.nonce)) { // Changed to check nonce instead of messageId
-          console.warn(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
+          console.log(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
           return;
         }
         const now = Date.now();
@@ -1179,6 +1162,35 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
+      if (data.type === 'logout') {
+        try {
+          const decoded = jwt.verify(data.token, JWT_SECRET);
+          if (decoded.clientId !== data.clientId) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid token' }));
+            return;
+          }
+        } catch (err) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+          return;
+        }
+
+        // Update the user's client_id and last_active to NULL
+        await dbPool.query('UPDATE users SET client_id = NULL, last_active = NULL WHERE client_id = $1', [data.clientId]);
+
+        // Revoke tokens
+        revokedTokens.set(data.token, Date.now() + 1000);
+        if (clientTokens.has(data.clientId)) {
+          const tokens = clientTokens.get(data.clientId);
+          revokedTokens.set(tokens.accessToken, Date.now() + 1000);
+          if (tokens.refreshToken) {
+            revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
+          }
+          clientTokens.delete(data.clientId);
+        }
+
+        ws.close();
+        return;
+      }
       if (data.type === 'find-user') {
         const { username } = data;
         try {
@@ -1191,9 +1203,9 @@ wss.on('connection', (ws, req) => {
           // Create dynamic room
           const dynamicCode = uuidv4().replace(/-/g, '').substring(0,16).match(/.{1,4}/g).join('-');
           // Notify online user if connected (via ws)
-          const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
-          if (ownerWs) {
-            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
+          const owner = [...wss.clients].find(client => client.clientId === user.client_id);
+          if (owner) {
+            owner.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
           } else {
             // Queue notification
             await dbPool.query(
@@ -1203,7 +1215,7 @@ wss.on('connection', (ws, req) => {
           }
           // Use last_active for status
           const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
-          const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
+          const isOnline = owner || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
           ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
         } catch (err) {
           console.error('DB error finding user:', err.message, err.stack);
@@ -1303,7 +1315,6 @@ wss.on('connection', (ws, req) => {
     await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]);
   });
 });
-
 function restrictRate(ws) {
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
@@ -1320,7 +1331,6 @@ function restrictRate(ws) {
   }
   return true;
 }
-
 // New: Per-client size cap (1MB/min total)
 function restrictClientSize(clientId, size) {
   const now = Date.now();
@@ -1338,7 +1348,6 @@ function restrictClientSize(clientId, size) {
   }
   return true;
 }
-
 function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const now = Date.now();
@@ -1357,7 +1366,6 @@ function restrictIpRate(ip, action) {
   }
   return true;
 }
-
 function restrictIpDaily(ip, action) {
   const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
@@ -1372,7 +1380,6 @@ function restrictIpDaily(ip, action) {
   }
   return true;
 }
-
 function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
   const hashedUa = hashUa(ua);
@@ -1402,17 +1409,14 @@ function incrementFailure(ip, ua) {
     ipFailureCounts.delete(key);
   }
 }
-
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
-
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
-
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
@@ -1450,19 +1454,16 @@ function logStats(data) {
     }
   });
 }
-
 // New: Audit log rotation function
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const currentFile = `${AUDIT_FILE_BASE}.log`;
   const rotatedFile = `${AUDIT_FILE_BASE}-${today}.log`;
-
   if (fs.existsSync(currentFile)) {
     fs.renameSync(currentFile, rotatedFile);
     console.log(`Rotated audit log to ${rotatedFile}`);
   }
-
   // Delete files older than 7 days
   const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
   files.forEach(file => {
@@ -1473,15 +1474,12 @@ function rotateAuditLog() {
       console.log(`Deleted old audit log: ${file}`);
     }
   });
-
   // Create new current file
   fs.writeFileSync(currentFile, '');
 }
-
 // Call rotation on startup and every 24 hours
 rotateAuditLog();
 setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
-
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -1500,7 +1498,6 @@ function updateLogFile() {
   aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
   saveAggregatedStats();
 }
-
 fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
@@ -1508,7 +1505,6 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
-
 function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;
@@ -1523,7 +1519,6 @@ function computeAggregate(days) {
   }
   return { users, connections };
 }
-
 // New: Generate CSV for stats
 function generateStatsCSV() {
   let csv = 'Period,Users,Connections\n';
@@ -1539,7 +1534,6 @@ function generateStatsCSV() {
   csv += `All-Time,${allTimeUsers.size},N/A\n`;
   return csv;
 }
-
 // New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
 function generateLogsCSV() {
   let csv = 'Timestamp,Event\n';
@@ -1553,7 +1547,6 @@ function generateLogsCSV() {
   });
   return csv;
 }
-
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -1567,7 +1560,6 @@ function broadcast(code, message) {
     console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
-
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -1576,11 +1568,9 @@ function broadcastRandomCodes() {
   });
   console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
 }
-
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
-
 function hashUa(ua) {
   if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
   const parser = new UAParser(ua);
@@ -1588,7 +1578,6 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
-
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });

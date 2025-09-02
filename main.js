@@ -1,3 +1,4 @@
+// main.js
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -24,12 +25,12 @@ let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Cli
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
 let userPrivateKey = localStorage.getItem('userPrivateKey'); // New: Persistent private key
 let userPublicKey; // Generated on claim/login
+
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');
     return;
   }
-  // Global send rate limit check (aggregate all types)
   const now = performance.now();
   if (now - globalSendRate.startTime >= 60000) {
     globalSendRate.count = 0;
@@ -39,13 +40,12 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Global message rate limit exceeded (50/min). Please wait.');
     return;
   }
-  // New: Client-side size limit check (mirror server 1MB/min)
   if (now - globalSizeRate.startTime >= 60000) {
     globalSizeRate.totalSize = 0;
     globalSizeRate.startTime = now;
   }
-  const payloadSize = (content || base64 || '').length * 3 / 4; // Approximate byte size (base64 or text)
-  if (globalSizeRate.totalSize + payloadSize > 1048576) { // 1MB
+  const payloadSize = (content || base64 || '').length * 3 / 4;
+  if (globalSizeRate.totalSize + payloadSize > 1048576) {
     showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
     return;
   }
@@ -118,18 +118,17 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
   const jitteredTimestamp = timestamp + jitter * 1000;
-  const nonce = crypto.randomUUID(); // New: Generate nonce
+  const nonce = crypto.randomUUID();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
-  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type }); // New: Metadata JSON
-  let rawData = metadata + (dataToSend || sanitizedContent); // New: Prepend metadata
-  // Pad to mask size (next multiple of 512 bytes, up to 5MB max)
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type });
+  let rawData = metadata + (dataToSend || sanitizedContent);
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
-  rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
+  rawData = rawData.padEnd(paddedLength, ' ');
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-  const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
+  const toSign = rawData + nonce;
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
+  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
   }
@@ -148,7 +147,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
           for (let index = 0; index < chunks.length; index++) {
             const chunk = chunks[index];
             dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
-            await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
+            await new Promise(resolve => setTimeout(resolve, 1));
           }
         }
       }
@@ -163,7 +162,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Error: No connections.');
     return;
   }
-  // Increment global count and size after successful send
   globalSendRate.count += 1;
   globalSizeRate.totalSize += payloadSize;
   const messagesElement = document.getElementById('messages');
@@ -206,12 +204,13 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
-  processedNonces.set(nonce, Date.now()); // Changed to Map: nonce -> timestamp
+  processedNonces.set(nonce, Date.now());
   messageCount++;
   if (isInitiator && messageCount % 100 === 0) {
     await triggerRatchet();
   }
 }
+
 async function sendMessage(content) {
   if (!content) return;
   if (grokBotActive && content.startsWith('/grok ')) {
@@ -228,6 +227,7 @@ async function sendMessage(content) {
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
 }
+
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
@@ -240,7 +240,7 @@ async function sendMedia(file, type) {
   await prepareAndSendMessage({ type, file });
   document.getElementById(`${type}Button`)?.focus();
 }
-// Rest of the code remains the same...
+
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
   if (!features.enableP2P) {
@@ -322,7 +322,6 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Connection state for ${targetId}: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
       console.log(`Connection failed with ${targetId}`);
-      // Removed showStatusMessage to suppress transient error
       cleanupPeerConnection(targetId);
       const retryCount = retryCounts.get(targetId) || 0;
       if (retryCount < maxRetries) {
@@ -352,8 +351,8 @@ async function startPeerConnection(targetId, isOfferer) {
       audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
       audio.play().catch(error => console.error('Error playing remote audio:', error));
       remoteAudios.set(targetId, audio);
-      document.getElementById('remoteAudioContainer').appendChild(audio);
-      document.getElementById('remoteAudioContainer').classList.remove('hidden');
+      document.getElementById('remoteAudioContainer')?.appendChild(audio);
+      document.getElementById('remoteAudioContainer')?.classList.remove('hidden');
       setAudioOutput(audio, targetId);
     }
   };
@@ -379,7 +378,6 @@ async function startPeerConnection(targetId, isOfferer) {
       sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
     }).catch(error => {
       console.error(`Error creating offer for ${targetId}:`, error);
-      // Removed showStatusMessage to suppress transient error
     });
   }
   const timeout = setTimeout(() => {
@@ -387,7 +385,6 @@ async function startPeerConnection(targetId, isOfferer) {
       console.log(`P2P failed with ${targetId}, checking relay availability`);
       if (features.enableRelay) {
         useRelay = true;
-        // Removed showStatusMessage to suppress transient error; user sees final connection status
         const privacyStatus = document.getElementById('privacyStatus');
         if (privacyStatus) {
           privacyStatus.textContent = 'Relay Mode (E2EE)';
@@ -404,6 +401,7 @@ async function startPeerConnection(targetId, isOfferer) {
   }, 10000);
   connectionTimeouts.set(targetId, timeout);
 }
+
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
@@ -421,9 +419,9 @@ function setupDataChannel(dataChannel, targetId) {
     updateMaxClientsUI();
     document.getElementById('messageInput')?.focus();
     if (features.enableVoiceCalls && features.enableAudioToggle) {
-      document.getElementById('audioOutputButton').classList.remove('hidden');
+      document.getElementById('audioOutputButton')?.classList.remove('hidden');
     } else {
-      document.getElementById('audioOutputButton').classList.add('hidden');
+      document.getElementById('audioOutputButton')?.classList.add('hidden');
     }
   };
   dataChannel.onmessage = async (event) => {
@@ -442,7 +440,6 @@ function setupDataChannel(dataChannel, targetId) {
       return;
     }
     if (data.chunk) {
-      // Don't count chunks toward rate limit
       const { chunkId, index, total, data: chunkData } = data;
       if (!chunkBuffers.has(chunkId)) {
         chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
@@ -453,7 +450,6 @@ function setupDataChannel(dataChannel, targetId) {
       if (buffer.received === total) {
         const fullMessage = buffer.chunks.join('');
         chunkBuffers.delete(chunkId);
-        // Process the reassembled message
         try {
           data = JSON.parse(fullMessage);
         } catch (e) {
@@ -464,7 +460,6 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
-    // Count non-chunk messages
     rateLimit.count += 1;
     messageRateLimits.set(targetId, rateLimit);
     if (rateLimit.count > 10) {
@@ -476,11 +471,9 @@ function setupDataChannel(dataChannel, targetId) {
   };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
   };
   dataChannel.onclose = () => {
     console.log(`Data channel closed with ${targetId}`);
-    // Removed showStatusMessage to suppress transient error
     cleanupPeerConnection(targetId);
     messageRateLimits.delete(targetId);
     imageRateLimits.delete(targetId);
@@ -490,16 +483,17 @@ function setupDataChannel(dataChannel, targetId) {
       audio.remove();
       remoteAudios.delete(targetId);
       if (remoteAudios.size === 0) {
-        document.getElementById('remoteAudioContainer').classList.add('hidden');
+        document.getElementById('remoteAudioContainer')?.classList.add('hidden');
       }
     }
     if (dataChannels.size === 0) {
       inputContainer.classList.add('hidden');
       messages.classList.add('waiting');
-      document.getElementById('audioOutputButton').classList.add('hidden');
+      document.getElementById('audioOutputButton')?.classList.add('hidden');
     }
   };
 }
+
 async function processReceivedMessage(data, targetId) {
   if (data.type === 'voice-call-start') {
     if (!voiceCallActive) {
@@ -521,7 +515,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedBlob)) { // New: Check for encryptedBlob
+  if (!data.messageId || (!data.encryptedBlob)) {
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -529,29 +523,28 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate message ${data.messageId} from ${targetId}`);
     return;
   }
-  if (processedNonces.has(data.nonce)) { // New: Check nonce
+  if (processedNonces.has(data.nonce)) {
     console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
     return;
   }
   const now = Date.now();
-  if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
+  if (Math.abs(now - data.timestamp) > 300000) {
     console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
     return;
   }
   processedMessageIds.add(data.messageId);
-  processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
+  processedNonces.set(data.nonce, Date.now());
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     const messageKey = await deriveMessageKey();
     const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
-    const toVerify = rawData + data.nonce; // New: Verify on rawData + nonce
+    const toVerify = rawData + data.nonce;
     const valid = await verifyMessage(signingKey, data.signature, toVerify);
     if (!valid) {
       console.warn(`Invalid signature for message from ${targetId}`);
       showStatusMessage('Invalid message signature detected.');
       return;
     }
-    // New: Parse metadata from rawData
     let metadataStr = '';
     let braceCount = 0;
     for (let i = 0; i < rawData.length; i++) {
@@ -564,7 +557,7 @@ async function processReceivedMessage(data, targetId) {
     senderUsername = metadata.username;
     timestamp = metadata.timestamp;
     contentType = metadata.type;
-    contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
+    contentOrData = rawData.substring(metadataStr.length).trimEnd();
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
@@ -581,7 +574,7 @@ async function processReceivedMessage(data, targetId) {
   messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
   if (contentType === 'image') {
     const img = document.createElement('img');
-    img.dataset.src = contentOrData; // Lazy load
+    img.dataset.src = contentOrData;
     img.style.maxWidth = '100%';
     img.style.borderRadius = '0.5rem';
     img.style.cursor = 'pointer';
@@ -591,7 +584,7 @@ async function processReceivedMessage(data, targetId) {
     messageDiv.appendChild(img);
   } else if (contentType === 'voice') {
     const audio = document.createElement('audio');
-    audio.dataset.src = contentOrData; // Lazy load
+    audio.dataset.src = contentOrData;
     audio.controls = true;
     audio.setAttribute('alt', 'Received voice message');
     audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
@@ -617,6 +610,7 @@ async function processReceivedMessage(data, targetId) {
     });
   }
 }
+
 async function handleOffer(offer, targetId) {
   console.log(`Handling offer from ${targetId} for code: ${code}`);
   if (offer.type !== 'offer') {
@@ -637,15 +631,14 @@ async function handleOffer(offer, targetId) {
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
-    // Process queued candidates asynchronously
     const queue = candidatesQueues.get(targetId) || [];
     await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling offer from ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
   }
 }
+
 async function handleAnswer(answer, targetId) {
   console.log(`Handling answer from ${targetId} for code: ${code}`);
   if (!peerConnections.has(targetId)) {
@@ -666,15 +659,14 @@ async function handleAnswer(answer, targetId) {
   }
   try {
     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    // Process queued items asynchronously
     const queue = candidatesQueues.get(targetId) || [];
     await processCandidateQueue(peerConnection, queue);
     candidatesQueues.set(targetId, []);
   } catch (error) {
     console.error(`Error handling answer from ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
   }
 }
+
 async function handleCandidate(candidate, targetId) {
   console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
   if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
@@ -687,7 +679,6 @@ async function handleCandidate(candidate, targetId) {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (error) {
       console.error(`Error adding ICE candidate from ${targetId}:`, error);
-      // Removed showStatusMessage to suppress transient error
     }
   } else {
     const queue = candidatesQueues.get(targetId) || [];
@@ -695,7 +686,7 @@ async function handleCandidate(candidate, targetId) {
     candidatesQueues.set(targetId, queue);
   }
 }
-// New helper to process queue with Promises for efficiency
+
 async function processCandidateQueue(peerConnection, queue) {
   for (const item of queue) {
     if (item.type === 'answer') {
@@ -703,18 +694,17 @@ async function processCandidateQueue(peerConnection, queue) {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(item.answer));
       } catch (error) {
         console.error(`Error applying queued answer:`, error);
-        // Removed showStatusMessage to suppress transient error
       }
     } else if (item.type === 'candidate') {
       try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(item.candidate));
       } catch (error) {
         console.error(`Error adding queued ICE candidate:`, error);
-        // Removed showStatusMessage to suppress transient error
       }
     }
   }
 }
+
 async function toggleVoiceCall() {
   if (!features.enableVoiceCalls) {
     showStatusMessage('Voice calls are disabled by admin.');
@@ -728,6 +718,7 @@ async function toggleVoiceCall() {
     broadcastVoiceCallEvent('voice-call-start');
   }
 }
+
 async function startVoiceCall() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showStatusMessage('Microphone not supported.');
@@ -742,15 +733,16 @@ async function startVoiceCall() {
       renegotiate(targetId);
     });
     voiceCallActive = true;
-    document.getElementById('voiceCallButton').classList.add('active');
-    document.getElementById('voiceCallButton').title = 'End Voice Call';
-    document.getElementById('audioOutputButton').classList.remove('hidden');
+    document.getElementById('voiceCallButton')?.classList.add('active');
+    document.getElementById('voiceCallButton')?.title = 'End Voice Call';
+    document.getElementById('audioOutputButton')?.classList.remove('hidden');
     showStatusMessage('Voice call started.');
   } catch (error) {
     console.error('Error starting voice call:', error);
     showStatusMessage('Failed to access microphone for voice call.');
   }
 }
+
 function stopVoiceCall() {
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
@@ -765,15 +757,15 @@ function stopVoiceCall() {
     renegotiate(targetId);
   });
   voiceCallActive = false;
-  document.getElementById('voiceCallButton').classList.remove('active');
-  document.getElementById('voiceCallButton').title = 'Start Voice Call';
-  document.getElementById('audioOutputButton').classList.add('hidden');
+  document.getElementById('voiceCallButton')?.classList.remove('active');
+  document.getElementById('voiceCallButton')?.title = 'Start Voice Call';
+  document.getElementById('audioOutputButton')?.classList.add('hidden');
   showStatusMessage('Voice call ended.');
 }
+
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection) {
-    // Check renegotiation limit
     const count = renegotiationCounts.get(targetId) || 0;
     if (count >= maxRenegotiations) {
       console.warn(`Max renegotiations reached for ${targetId} (${maxRenegotiations}), aborting.`);
@@ -791,7 +783,7 @@ async function renegotiate(targetId) {
       }
       if (peerConnection.signalingState !== 'stable') {
         console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}. Queuing.`);
-        return renegotiate(targetId); // Recurse to queue
+        return renegotiate(targetId);
       }
       renegotiating.set(targetId, true);
       try {
@@ -800,7 +792,6 @@ async function renegotiate(targetId) {
         sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
       } catch (error) {
         console.error(`Error renegotiating with ${targetId}:`, error);
-        // Removed showStatusMessage to suppress transient error
       } finally {
         renegotiating.set(targetId, false);
       }
@@ -811,6 +802,7 @@ async function renegotiate(targetId) {
     console.log(`No peer connection for ${targetId}, cannot renegotiate.`);
   }
 }
+
 function sendSignalingMessage(type, additionalData) {
   if (!token || refreshingToken) {
     console.log('Token missing or refresh in progress, queuing signaling message');
@@ -828,6 +820,7 @@ function sendSignalingMessage(type, additionalData) {
     signalingQueue.get('global').push({ type, additionalData });
   }
 }
+
 function broadcastVoiceCallEvent(eventType) {
   dataChannels.forEach((dataChannel) => {
     if (dataChannel.readyState === 'open') {
@@ -835,6 +828,7 @@ function broadcastVoiceCallEvent(eventType) {
     }
   });
 }
+
 function sendRelayMessage(type, additionalData) {
   if (!token || refreshingToken) {
     console.log('Token missing or refresh in progress, queuing relay message');
@@ -852,6 +846,7 @@ function sendRelayMessage(type, additionalData) {
     signalingQueue.get('global').push({ type, additionalData });
   }
 }
+
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -865,6 +860,7 @@ function processSignalingQueue() {
   });
   signalingQueue.clear();
 }
+
 async function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
   code = codeParam;
@@ -930,6 +926,7 @@ async function autoConnect(codeParam) {
     document.getElementById('connectToggleButton')?.focus();
   }
 }
+
 function updateFeaturesUI() {
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
@@ -977,6 +974,7 @@ function updateFeaturesUI() {
     messages.classList.remove('waiting');
   }
 }
+
 async function sendToGrok(query) {
   if (!grokApiKey) {
     showStatusMessage('Error: xAI API key not set. Enter it in the Grok bot settings.');
@@ -1014,6 +1012,7 @@ async function sendToGrok(query) {
     showStatusMessage('Error querying Grok: ' + error.message + '. Check your API key or visit https://x.ai/api for details.');
   }
 }
+
 function toggleGrokBot() {
   grokBotActive = !grokBotActive;
   const grokButton = document.getElementById('grokButton');
@@ -1030,18 +1029,20 @@ function toggleGrokBot() {
     showStatusMessage('Grok bot disabled.');
   }
 }
+
 function saveGrokKey() {
   const keyInput = document.getElementById('grokApiKey');
   grokApiKey = keyInput.value.trim();
   if (grokApiKey) {
     localStorage.setItem('grokApiKey', grokApiKey);
-    document.getElementById('grokKeyContainer').classList.remove('active');
+    document.getElementById('grokKeyContainer')?.classList.remove('active');
     showStatusMessage('API key saved. Use /grok <query> to ask Grok.');
     keyInput.value = '';
   } else {
     showStatusMessage('Error: Enter a valid API key.');
   }
 }
+
 async function setAudioOutput(audioElement, targetId) {
   try {
     if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
@@ -1071,6 +1072,7 @@ async function setAudioOutput(audioElement, targetId) {
     audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
   }
 }
+
 function toggleAudioOutput() {
   audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
   console.log(`Toggling audio output to ${audioOutputMode}`);
@@ -1083,8 +1085,9 @@ function toggleAudioOutput() {
   audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
   showStatusMessage(`Audio output set to ${audioOutputMode}`);
 }
+
 async function startTotpRoom(serverGenerated) {
-  const usernameInput = document.getElementById('totpUsernameInput').value.trim();
+  const usernameInput = document.getElementById('totpUsernameInput')?.value.trim();
   if (!validateUsername(usernameInput)) {
     showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
     return;
@@ -1095,7 +1098,7 @@ async function startTotpRoom(serverGenerated) {
   if (serverGenerated) {
     totpSecret = generateTotpSecret();
   } else {
-    totpSecret = document.getElementById('customTotpSecret').value.trim();
+    totpSecret = document.getElementById('customTotpSecret')?.value.trim();
     const base32Regex = /^[A-Z2-7]+=*$/i;
     if (!base32Regex.test(totpSecret) || totpSecret.length < 16) {
       showStatusMessage('Invalid custom TOTP secret format (base32, min 16 chars).');
@@ -1110,7 +1113,7 @@ async function startTotpRoom(serverGenerated) {
   code = generateCode();
   pendingTotpSecret = { display: totpSecret, send: secretToSend };
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-  document.getElementById('totpOptionsModal').classList.remove('active');
+  document.getElementById('totpOptionsModal')?.classList.remove('active');
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
   copyCodeButton.classList.remove('hidden');
@@ -1122,17 +1125,20 @@ async function startTotpRoom(serverGenerated) {
   statusElement.textContent = 'Waiting for connection...';
   document.getElementById('messageInput')?.focus();
 }
+
 function showTotpSecretModal(secret) {
   console.log('Showing TOTP modal with secret:', secret);
   document.getElementById('totpSecretDisplay').textContent = secret;
   const qrCanvas = document.getElementById('qrCodeCanvas');
   qrCanvas.innerHTML = '';
   new QRCode(qrCanvas, generateTotpUri(code, secret));
-  document.getElementById('totpSecretModal').classList.add('active');
+  document.getElementById('totpSecretModal')?.classList.add('active');
 }
+
 async function joinWithTotp(code, totpCode) {
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }
+
 function startVoiceRecording() {
   if (!features.enableVoice) {
     showStatusMessage('Voice messages are disabled by admin.');
@@ -1178,18 +1184,18 @@ function startVoiceRecording() {
       stream.getTracks().forEach(track => track.stop());
       mediaRecorder = null;
       voiceChunks = [];
-      document.getElementById('voiceButton').classList.remove('recording');
-      document.getElementById('voiceTimer').style.display = 'none';
-      document.getElementById('voiceTimer').textContent = '';
+      document.getElementById('voiceButton')?.classList.remove('recording');
+      document.getElementById('voiceTimer')?.style.display = 'none';
+      document.getElementById('voiceTimer')?.textContent = '';
       clearInterval(voiceTimerInterval);
     });
     mediaRecorder.start(1000);
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceTimer').style.display = 'flex';
+    document.getElementById('voiceButton')?.classList.add('recording');
+    document.getElementById('voiceTimer')?.style.display = 'flex';
     let time = 0;
     voiceTimerInterval = setInterval(() => {
       time++;
-      document.getElementById('voiceTimer').textContent = `00:${time < 10 ? '0' + time : time}`;
+      document.getElementById('voiceTimer')?.textContent = `00:${time < 10 ? '0' + time : time}`;
       if (time >= 30) {
         stopVoiceRecording();
       }
@@ -1199,11 +1205,13 @@ function startVoiceRecording() {
     showStatusMessage('Failed to access microphone for voice message.');
   });
 }
+
 function stopVoiceRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
 }
+
 async function isWebPSupported() {
   const elem = document.createElement('canvas');
   if (!!(elem.getContext && elem.getContext('2d'))) {
@@ -1211,6 +1219,7 @@ async function isWebPSupported() {
   }
   return false;
 }
+
 async function generateThumbnail(dataURL, width = 100, height = 100) {
   return new Promise((resolve) => {
     const canvas = document.createElement('canvas');
@@ -1226,17 +1235,7 @@ async function generateThumbnail(dataURL, width = 100, height = 100) {
     img.onerror = () => resolve(dataURL); // Fallback to full if error
   });
 }
-// New: Cleanup old nonces every 5min
-setInterval(() => {
-  const now = Date.now();
-  for (const [nonce, ts] of processedNonces) {
-    if (now - ts > 3600000) { // 1hr = 3600000ms
-      processedNonces.delete(nonce);
-    }
-  }
-  console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
-}, 300000); // 5min
-// New: Generate user keypair on claim/login if none
+
 async function generateUserKeypair() {
   const keypair = await window.crypto.subtle.generateKey(
     { name: 'ECDH', namedCurve: 'P-384' },
@@ -1250,7 +1249,7 @@ async function generateUserKeypair() {
   userPublicKey = publicBase64;
   return publicBase64;
 }
-// New: Send offline message
+
 async function sendOfflineMessage(messageId, to_username, messageText) {
   if (!userPrivateKey) {
     showStatusMessage('No private key. Please re-claim username on this device.');
@@ -1261,7 +1260,7 @@ async function sendOfflineMessage(messageId, to_username, messageText) {
     false,
     ['deriveKey', 'deriveBits']
   );
-  const recipientPublic = await importPublicKey(userPublicKey); // From search response
+  const recipientPublic = await importPublicKey(userPublicKey);
   const shared = await deriveSharedKey(ephemeralKeypair.privateKey, recipientPublic);
   const { encrypted, iv } = await encryptRaw(shared, messageText);
   const ephemeralPublic = await exportPublicKey(ephemeralKeypair.publicKey);

@@ -1661,3 +1661,23 @@ server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
 
+// server.js
+module.exports = {
+  validateMessage,
+  validateUsername,
+  validateCode,
+  isValidBase32,
+  isValidBase64,
+  hashPassword,
+  validatePassword,
+  logStats,
+  restrictRate,
+  restrictClientSize,
+  restrictIpRate,
+  restrictIpDaily,
+  incrementFailure,
+  broadcast,
+  broadcastRandomCodes,
+  hashIp,
+  hashUa,
+};

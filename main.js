@@ -130,7 +130,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const signature = await signMessage(signingKey, toSign);
   let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };
   if (dataToSend && type === 'file') {
-    payload.filename = file?.name;
+    payload.filename = file.name;
   }
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
@@ -914,27 +914,30 @@ async function autoConnect(codeParam) {
       const usernameInput = document.getElementById('usernameInput');
       usernameInput.value = username || '';
       if (usernameInput) usernameInput.focus();
-      document.getElementById('joinWithUsernameButton').onclick = () => {
-        const usernameInput = document.getElementById('usernameInput').value.trim();
-        if (!validateUsername(usernameInput)) {
-          showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+      const joinButton = document.getElementById('joinWithUsernameButton');
+      if (joinButton) {
+        joinButton.onclick = () => {
           const usernameInput = document.getElementById('usernameInput');
-          if (usernameInput) usernameInput.focus();
-          return;
-        }
-        username = usernameInput;
-        localStorage.setItem('username', username);
-        usernameContainer.classList.add('hidden');
-        chatContainer.classList.remove('hidden');
-        codeDisplayElement.textContent = `Using code: ${code}`;
-        codeDisplayElement.classList.remove('hidden');
-        copyCodeButton.classList.remove('hidden');
-        messages.classList.add('waiting');
-        statusElement.textContent = 'Waiting for connection...';
-        socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
-        const messageInput = document.getElementById('messageInput');
-        if (messageInput) messageInput.focus();
-      };
+          const usernameValue = usernameInput ? usernameInput.value.trim() : '';
+          if (!validateUsername(usernameValue)) {
+            showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+            if (usernameInput) usernameInput.focus();
+            return;
+          }
+          username = usernameValue;
+          localStorage.setItem('username', username);
+          usernameContainer.classList.add('hidden');
+          chatContainer.classList.remove('hidden');
+          codeDisplayElement.textContent = `Using code: ${code}`;
+          codeDisplayElement.classList.remove('hidden');
+          copyCodeButton.classList.remove('hidden');
+          messages.classList.add('waiting');
+          statusElement.textContent = 'Waiting for connection...';
+          socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
+          const messageInput = document.getElementById('messageInput');
+          if (messageInput) messageInput.focus();
+        };
+      }
     }
   } else {
     console.log('Invalid code, showing initial container');
@@ -1149,16 +1152,19 @@ async function startTotpRoom(serverGenerated) {
   chatContainer.classList.remove('hidden');
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
-  document.getElementById('messageInput')?.focus();
+  const messageInput = document.getElementById('messageInput');
+  if (messageInput) messageInput.focus();
 }
 
 function showTotpSecretModal(secret) {
   console.log('Showing TOTP modal with secret:', secret);
-  document.getElementById('totpSecretDisplay').textContent = secret;
+  const totpSecretDisplay = document.getElementById('totpSecretDisplay');
+  if (totpSecretDisplay) totpSecretDisplay.textContent = secret;
   const qrCanvas = document.getElementById('qrCodeCanvas');
-  qrCanvas.innerHTML = '';
+  if (qrCanvas) qrCanvas.innerHTML = '';
   new QRCode(qrCanvas, generateTotpUri(code, secret));
-  document.getElementById('totpSecretModal')?.classList.add('active');
+  const totpSecretModal = document.getElementById('totpSecretModal');
+  if (totpSecretModal) totpSecretModal.classList.add('active');
 }
 
 async function joinWithTotp(code, totpCode) {

@@ -1251,7 +1251,7 @@ async function generateUserKeypair() {
   return publicBase64;
 }
 // New: Send offline message
-async function sendOfflineMessage(to_username, messageText) {
+async function sendOfflineMessage(messageId, to_username, messageText) {
   if (!userPrivateKey) {
     showStatusMessage('No private key. Please re-claim username on this device.');
     return;

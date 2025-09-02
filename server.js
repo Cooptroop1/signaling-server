@@ -11,7 +11,7 @@ const crypto = require('crypto');
 const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 // Hash password
 async function hashPassword(password) {
@@ -1681,3 +1681,4 @@ module.exports = {
   hashIp,
   hashUa,
 };
+

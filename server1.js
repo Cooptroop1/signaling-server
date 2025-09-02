@@ -12,18 +12,22 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
+
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
+
 // Validate password
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
+
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false } // For Render Postgres
 });
+
 // Test DB connection on startup
 dbPool.connect((err) => {
   if (err) {
@@ -32,6 +36,7 @@ dbPool.connect((err) => {
     console.log('Connected to DB successfully');
   }
 });
+
 // Clean up old offline messages (TTL: 24 hours)
 setInterval(async () => {
   try {
@@ -41,8 +46,10 @@ setInterval(async () => {
     console.error('Error cleaning up offline messages:', err.message, err.stack);
   }
 }, 24 * 60 * 60 * 1000); // Run daily
+
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
+
 let server;
 if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
   server = http.createServer();
@@ -54,6 +61,7 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   });
   console.log('Using HTTPS server for local development');
 }
+
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
   if (proto && proto !== 'https') {
@@ -105,6 +113,7 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
+
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
@@ -185,6 +194,277 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+function saveFeatures() {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+  console.log('Saved features:', features);
+}
+function saveAggregatedStats() {
+  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
+  console.log('Saved aggregated stats to disk');
+}
+function isValidBase32(str) {
+  return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
+}
+function isValidBase64(str) {
+  if (typeof str !== 'string') return false;
+  let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
+  const padding = (4 - sanitized.length % 4) % 4;
+  sanitized += '='.repeat(padding);
+  const base64Regex = /^[A-Za-z0-9+/=]+$/;
+  const isValid = base64Regex.test(sanitized);
+  if (!isValid) console.warn('Invalid base64 detected:', str);
+  return isValid;
+}
+function validateMessage(data) {
+  // ... (full validateMessage function here, as in original)
+}
+function hashIp(ip) {
+  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+}
+function hashUa(ua) {
+  if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
+  const parser = new UAParser(ua);
+  const result = parser.getResult();
+  const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
+  return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
+}
+function broadcast(code, message) {
+  const room = rooms.get(code);
+  if (room) {
+    room.clients.forEach(client => {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify(message));
+      }
+    });
+    console.log(`Broadcasted ${message.type} to ${room.clients.size} clients in code ${code}`);
+  } else {
+    console.warn(`Cannot broadcast: Room ${code} not found`);
+  }
+}
+function broadcastRandomCodes() {
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+    }
+  });
+  console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
+}
+function generateStatsCSV() {
+  let csv = 'Period,Users,Connections\n';
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  csv += `Daily,${dailyUsers.get(day)?.size || 0},${dailyConnections.get(day)?.size || 0}\n`;
+  const weekly = computeAggregate(7);
+  csv += `Weekly,${weekly.users},${weekly.connections}\n`;
+  const monthly = computeAggregate(30);
+  csv += `Monthly,${monthly.users},${monthly.connections}\n`;
+  const yearly = computeAggregate(365);
+  csv += `Yearly,${yearly.users},${yearly.connections}\n`;
+  csv += `All-Time,${allTimeUsers.size},N/A\n`;
+  return csv;
+}
+function generateLogsCSV() {
+  let csv = 'Timestamp,Event\n';
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
+  logContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  const auditContent = fs.readFileSync(`${AUDIT_FILE_BASE}.log`, 'utf8');
+  auditContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  return csv;
+}
+function computeAggregate(days) {
+  const now = new Date();
+  let users = 0, connections = 0;
+  for (let i = 0; i < days; i++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    if (aggregatedStats.daily[key]) {
+      users += aggregatedStats.daily[key].users;
+      connections += aggregatedStats.daily[key].connections;
+    }
+  }
+  return { users, connections };
+}
+function updateLogFile() {
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  const userCount = dailyUsers.get(day)?.size || 0;
+  const connectionCount = dailyConnections.get(day)?.size || 0;
+  const allTimeUserCount = allTimeUsers.size;
+  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}\n`;
+  fs.appendFileSync(LOG_FILE, logEntry, (err) => {
+    if (err) {
+      console.error('Error writing to log file:', err);
+    } else {
+      console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
+    }
+  });
+  if (!aggregatedStats.daily) aggregatedStats.daily = {};
+  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
+  saveAggregatedStats();
+}
+function rotateAuditLog() {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const currentFile = `${AUDIT_FILE_BASE}.log`;
+  const rotatedFile = `${AUDIT_FILE_BASE}-${today}.log`;
+  if (fs.existsSync(currentFile)) {
+    fs.renameSync(currentFile, rotatedFile);
+    console.log(`Rotated audit log to ${rotatedFile}`);
+  }
+  const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
+  files.forEach(file => {
+    const fileDate = file.match(/audit-(\d{4}-\d{2}-\d{2})\.log/)[1];
+    const fileTime = new Date(fileDate).getTime();
+    if (now.getTime() - fileTime > 7 * 24 * 60 * 60 * 1000) {
+      fs.unlinkSync(path.join(__dirname, file));
+      console.log(`Deleted old audit log: ${file}`);
+    }
+  });
+  fs.writeFileSync(currentFile, '');
+}
+function logStats(data) {
+  const timestamp = new Date().toISOString();
+  const day = timestamp.slice(0, 10);
+  const stats = {
+    clientId: validator.escape(data.clientId || ''),
+    username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex') : '',
+    targetId: validator.escape(data.targetId || ''),
+    code: validator.escape(data.code || ''),
+    event: validator.escape(data.event || ''),
+    totalClients: data.totalClients || 0,
+    isInitiator: data.isInitiator || false,
+    timestamp,
+    day
+  };
+  if (data.event === 'connect' || data.event === 'join' || data.event === 'webrtc-connection') {
+    if (!dailyUsers.has(day)) {
+      dailyUsers.set(day, new Set());
+    }
+    if (!dailyConnections.has(day)) {
+      dailyConnections.set(day, new Set());
+    }
+    dailyUsers.get(day).add(stats.clientId);
+    allTimeUsers.add(stats.clientId);
+    if (data.event === 'webrtc-connection' && data.targetId) {
+      dailyUsers.get(day).add(stats.targetId);
+      allTimeUsers.add(stats.targetId);
+      const connectionKey = `${stats.clientId}-${stats.targetId}-${stats.code}`;
+      dailyConnections.get(day).add(connectionKey);
+    }
+  }
+  const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}\n`;
+  fs.appendFileSync(LOG_FILE, logEntry, (err) => {
+    if (err) {
+      console.error('Error appending to log file:', err);
+    }
+  });
+}
+function validateCode(code) {
+  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+  return code && regex.test(code);
+}
+function validateUsername(username) {
+  const regex = /^[a-zA-Z0-9]{1,16}$/;
+  return username && regex.test(username);
+}
+function incrementFailure(ip, ua) {
+  const hashedIp = hashIp(ip);
+  const hashedUa = hashUa(ua);
+  const key = hashedIp + ':' + hashedUa;
+  const failure = ipFailureCounts.get(key) || { count: 0, banLevel: 0 };
+  failure.count += 1;
+  ipFailureCounts.set(key, failure);
+  if (failure.count % 5 === 0) {
+    console.warn(`High failure rate for key ${key}: ${failure.count} failures`);
+    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - High failure anomaly for key ${key}: ${failure.count} failures\n`);
+  }
+  if (failure.count >= 10) {
+    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+    failure.banLevel = Math.min(failure.banLevel + 1, 2);
+    const duration = banDurations[failure.banLevel];
+    const expiry = Date.now() + duration;
+    ipBans.set(key, { expiry, banLevel: failure.banLevel });
+    const timestamp = new Date().toISOString();
+    const banLogEntry = `${timestamp} - Key Banned: ${key}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}\n`;
+    fs.appendFileSync(LOG_FILE, banLogEntry, (err) => {
+      if (err) {
+        console.error('Error appending ban log:', err);
+      } else {
+        console.warn(`Key ${key} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+      }
+    });
+    ipFailureCounts.delete(key);
+  }
+}
+function restrictIpDaily(ip, action) {
+  const hashedIp = hashIp(ip);
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${hashedIp}:${action}:${day}`;
+  const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
+  dailyLimit.count += 1;
+  ipDailyLimits.set(key, dailyLimit);
+  if (dailyLimit.count > 100) {
+    console.warn(`Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count} in day ${day}`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count}\n`);
+    return false;
+  }
+  return true;
+}
+function restrictIpRate(ip, action) {
+  const hashedIp = hashIp(ip);
+  const now = Date.now();
+  const key = `${hashedIp}:${action}`;
+  const rateLimit = ipRateLimits.get(key) || { count: 0, startTime: now };
+  if (now - rateLimit.startTime >= 60000) {
+    rateLimit.count = 0;
+    rateLimit.startTime = now;
+  }
+  rateLimit.count += 1;
+  ipRateLimits.set(key, rateLimit);
+  if (rateLimit.count > 5) {
+    console.warn(`IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count} in 60s`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count}\n`);
+    return false;
+  }
+  return true;
+}
+function restrictClientSize(clientId, size) {
+  const now = Date.now();
+  const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
+  if (now - sizeLimit.startTime >= 60000) {
+    sizeLimit.totalSize = 0;
+    sizeLimit.startTime = now;
+  }
+  sizeLimit.totalSize += size;
+  clientSizeLimits.set(clientId, sizeLimit);
+  if (sizeLimit.totalSize > 1048576) {
+    console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
+    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
+    return false;
+  }
+  return true;
+}
+function restrictRate(ws) {
+  const now = Date.now();
+  const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
+  if (now - rateLimit.startTime >= 60000) {
+    rateLimit.count = 0;
+    rateLimit.startTime = now;
+  }
+  rateLimit.count += 1;
+  rateLimits.set(ws.clientId, rateLimit);
+  if (rateLimit.count > 50) {
+    console.warn(`Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages in 60s`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages\n`);
+    return false;
+  }
+  return true;
+}
 const shared = {
   rooms,
   dailyUsers,
@@ -223,8 +503,8 @@ const shared = {
   hashUa,
   broadcast,
   broadcastRandomCodes,
-  generateLogsCSV,
   generateStatsCSV,
+  generateLogsCSV,
   computeAggregate,
   updateLogFile,
   rotateAuditLog,
@@ -241,39 +521,43 @@ const shared = {
 };
 
 module.exports.shared = shared;
-if (fs.existsSync(shared.LOG_FILE)) {
-  const logContent = fs.readFileSync(shared.LOG_FILE, 'utf8');
+
+if (fs.existsSync(LOG_FILE)) {
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
   lines.forEach(line => {
     const match = line.match(/Client: (\w+)/);
-    if (match) shared.allTimeUsers.add(match[1]);
+    if (match) allTimeUsers.add(match[1]);
   });
-  console.log(`Loaded ${shared.allTimeUsers.size} all-time unique users from log.`);
+  console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
+
 setInterval(() => {
-  shared.randomCodes.forEach(code => {
-    if (!shared.rooms.has(code) || shared.rooms.get(code).clients.size === 0) {
-      shared.randomCodes.delete(code);
+  randomCodes.forEach(code => {
+    if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
+      randomCodes.delete(code);
     }
   });
-  shared.broadcastRandomCodes();
+  broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
+
 const pingInterval = setInterval(() => {
-  shared.wss.clients.forEach(ws => {
+  wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
     ws.isAlive = false;
     ws.ping();
   });
 }, 50000);
+
 setInterval(() => {
   const now = Date.now();
-  shared.revokedTokens.forEach((expiry, token) => {
+  revokedTokens.forEach((expiry, token) => {
     if (expiry < now) {
-      shared.revokedTokens.delete(token);
+      revokedTokens.delete(token);
     }
   });
-  shared.processedMessageIds.forEach((messageSet, code) => {
+  processedMessageIds.forEach((messageSet, code) => {
     const now = Date.now();
     messageSet.forEach((timestamp, nonce) => {
       if (now - timestamp > 300000) {
@@ -281,301 +565,26 @@ setInterval(() => {
       }
     });
     if (messageSet.size === 0) {
-      shared.processedMessageIds.delete(code);
+      processedMessageIds.delete(code);
     }
   });
-  console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${shared.revokedTokens.size}, Messages: ${shared.processedMessageIds.size}`);
+  console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 600000);
+
 const { connectionHandler } = require('./server2');
 wss.on('connection', connectionHandler);
+
+fs.writeFileSync(LOG_FILE, '', (err) => {
+  if (err) console.error('Error creating log file:', err);
+  else {
+    updateLogFile();
+    setInterval(updateLogFile, UPDATE_INTERVAL);
+  }
+});
+
+rotateAuditLog();
+setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
+
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-function saveFeatures() {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
-  console.log('Saved features:', features);
-}
-function saveAggregatedStats() {
-  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
-  console.log('Saved aggregated stats to disk');
-}
-function isValidBase32(str) {
-  return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
-}
-function isValidBase64(str) {
-  if (typeof str !== 'string') return false;
-  let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
-  const padding = (4 - sanitized.length % 4) % 4;
-  sanitized += '='.repeat(padding);
-  const base64Regex = /^[A-Za-z0-9+/=]+$/;
-  const isValid = base64Regex.test(sanitized);
-  if (!isValid) console.warn('Invalid base64 detected:', str);
-  return isValid;
-}
-function validateMessage(data) {
-  if (typeof data !== 'object' || data === null || !data.type) {
-    return { valid: false, error: 'Invalid message: must be an object with "type" field' };
-  }
-  if (data.token && typeof data.token !== 'string') {
-    return { valid: false, error: 'Invalid token: must be a string' };
-  }
-  if (data.clientId && typeof data.clientId !== 'string') {
-    return { valid: false, error: 'Invalid clientId: must be a string' };
-  }
-  if (data.code && !validateCode(data.code)) {
-    return { valid: false, error: 'Invalid code format' };
-  }
-  if (data.username && !validateUsername(data.username)) {
-    return { valid: false, error: 'Invalid username: 1-16 alphanumeric characters' };
-  }
-  switch (data.type) {
-    case 'connect':
-      if (!data.clientId || typeof data.clientId !== 'string') {
-        return { valid: false, error: 'connect: clientId required as string' };
-      }
-      break;
-    case 'refresh-token':
-      if (!data.refreshToken || typeof data.refreshToken !== 'string') {
-        return { valid: false, error: 'refresh-token: refreshToken required as string' };
-      }
-      break;
-    case 'public-key':
-      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
-        return { valid: false, error: 'public-key: invalid publicKey format or length' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'public-key: code required' };
-      }
-      break;
-    case 'encrypted-room-key':
-      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
-        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey format' };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'encrypted-room-key: invalid iv' };
-      }
-      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
-        return { valid: false, error: 'encrypted-room-key: invalid publicKey format or length' };
-      }
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: 'encrypted-room-key: targetId required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'encrypted-room-key: code required' };
-      }
-      break;
-    case 'new-room-key':
-      if (!data.encrypted || !isValidBase64(data.encrypted)) {
-        return { valid: false, error: 'new-room-key: invalid encrypted' };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'new-room-key: invalid iv' };
-      }
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: 'new-room-key: targetId required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'new-room-key: code required' };
-      }
-      break;
-    case 'join':
-      if (!data.code) {
-        return { valid: false, error: 'join: code required' };
-      }
-      if (!data.username) {
-        return { valid: false, error: 'join: username required' };
-      }
-      if (data.totpCode && typeof data.totpCode !== 'string') {
-        return { valid: false, error: 'join: totpCode must be a string if provided' };
-      }
-      break;
-    case 'check-totp':
-      if (!data.code) {
-        return { valid: false, error: 'check-totp: code required' };
-      }
-      break;
-    case 'set-max-clients':
-      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
-        return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'set-max-clients: code required' };
-      }
-      break;
-    case 'offer':
-    case 'answer':
-      if (!data.offer && !data.answer) {
-        return { valid: false, error: data.type + ': offer or answer required' };
-      }
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: data.type + ': targetId required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: data.type + ': code required' };
-      }
-      break;
-    case 'candidate':
-      if (!data.candidate) {
-        return { valid: false, error: 'candidate: candidate required' };
-      }
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: 'candidate: targetId required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'candidate: code required' };
-      }
-      break;
-    case 'kick':
-    case 'ban':
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: `${data.type}: targetId required as string` };
-      }
-      if (!data.signature || !isValidBase64(data.signature)) {
-        return { valid: false, error: `${data.type}: valid signature required` };
-      }
-      if (!data.code) {
-        return { valid: false, error: `${data.type}: code required` };
-      }
-      break;
-    case 'submit-random':
-      if (!data.code) {
-        return { valid: false, error: 'submit-random: code required' };
-      }
-      break;
-    case 'get-random-codes':
-      break;
-    case 'relay-message':
-      if ((!data.content && !data.encryptedContent && !data.data && !data.encryptedData) || typeof (data.content || data.encryptedContent || data.data || data.encryptedData) !== 'string') {
-        return { valid: false, error: 'relay-message: content, encryptedContent, data, or encryptedData required as string' };
-      }
-      if ((data.encryptedContent || data.encryptedData) && !data.iv) {
-        return { valid: false, error: 'relay-message: iv required for encryptedContent or encryptedData' };
-      }
-      if ((data.encryptedContent || data.encryptedData) && !data.signature) {
-        return { valid: false, error: 'relay-message: signature required for encryptedContent or encryptedData' };
-      }
-      if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: 'relay-message: messageId required as string' };
-      }
-      if (!data.timestamp || typeof data.timestamp !== 'number') {
-        return { valid: false, error: 'relay-message: timestamp required as number' };
-      }
-      if (!data.nonce || typeof data.nonce !== 'string') {
-        return { valid: false, error: 'relay-message: nonce required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'relay-message: code required' };
-      }
-      break;
-    case 'relay-image':
-    case 'relay-voice':
-    case 'relay-file':
-      if ((!data.data && !data.encryptedData) || !isValidBase64(data.data || data.encryptedData)) {
-        return { valid: false, error: data.type + ': invalid data or encryptedData (base64)' };
-      }
-      if (data.encryptedData && !data.iv) {
-        return { valid: false, error: data.type + ': iv required for encryptedData' };
-      }
-      if (data.encryptedData && !data.signature) {
-        return { valid: false, error: data.type + ': signature required for encryptedData' };
-      }
-      if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: data.type + ': messageId required as string' };
-      }
-      if (!data.timestamp || typeof data.timestamp !== 'number') {
-        return { valid: false, error: data.type + ': timestamp required as number' };
-      }
-      if (!data.nonce || typeof data.nonce !== 'string') {
-        return { valid: false, error: data.type + ': nonce required as string' };
-      }
-      if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string')) {
-        return { valid: false, error: 'relay-file: filename required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: data.type + ': code required' };
-      }
-      break;
-    case 'get-stats':
-    case 'get-features':
-    case 'toggle-feature':
-      if (!data.secret || typeof data.secret !== 'string') {
-        return { valid: false, error: data.type + ': secret required as string' };
-      }
-      if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
-        return { valid: false, error: 'toggle-feature: feature required as string' };
-      }
-      break;
-    case 'export-stats-csv':
-    case 'export-logs-csv':
-      if (!data.secret || typeof data.secret !== 'string') {
-        return { valid: false, error: data.type + ': secret required as string' };
-      }
-      break;
-    case 'ping':
-    case 'pong':
-      break;
-    case 'set-totp':
-      if (!data.code) {
-        return { valid: false, error: 'set-totp: code required' };
-      }
-      if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
-        return { valid: false, error: 'set-totp: valid base32 secret required' };
-      }
-      break;
-    case 'register-username':
-      if (!data.username) {
-        return { valid: false, error: 'register-username: username required' };
-      }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-        return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
-      }
-      if (data.public_key && !isValidBase64(data.public_key)) {
-        return { valid: false, error: 'register-username: invalid public_key (base64)' };
-      }
-      break;
-    case 'login-username':
-      if (!data.username) {
-        return { valid: false, error: 'login-username: username required' };
-      }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-        return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
-      }
-      break;
-    case 'find-user':
-      if (!data.username) {
-        return { valid: false, error: 'find-user: username required' };
-      }
-      break;
-    case 'send-offline-message':
-      if (!data.to_username) {
-        return { valid: false, error: 'send-offline-message: to_username required' };
-      }
-      if (!data.encrypted || !isValidBase64(data.encrypted)) {
-        return { valid: false, error: 'send-offline-message: invalid encrypted (base64)' };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'send-offline-message: invalid iv (base64)' };
-      }
-      if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
-        return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
-      }
-      if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: 'send-offline-message: messageId required as string' };
-      }
-      break;
-    case 'confirm-offline-message':
-      if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: 'confirm-offline-message: messageId required as string' };
-      }
-      break;
-    case 'logout':
-      break;
-    default:
-      return { valid: false, error: 'Unknown message type' };
-  }
-  return { valid: true };
-}
-function generateCode() {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  return Array.from(crypto.randomBytes(16)).map(b => chars[b % chars.length]).join('').match(/.{1,4}/g).join('-');
-}

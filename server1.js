@@ -13,22 +13,19 @@ const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 
-// Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
 
-// Validate password
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
 
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // For Render Postgres
+  ssl: { rejectUnauthorized: false }
 });
 
-// Test DB connection on startup
 dbPool.connect((err) => {
   if (err) {
     console.error('DB connection error:', err.message, err.stack);
@@ -37,7 +34,6 @@ dbPool.connect((err) => {
   }
 });
 
-// Clean up old offline messages (TTL: 24 hours)
 setInterval(async () => {
   try {
     await dbPool.query('DELETE FROM offline_messages WHERE created_at < NOW() - INTERVAL \'24 hours\'');
@@ -45,7 +41,7 @@ setInterval(async () => {
   } catch (err) {
     console.error('Error cleaning up offline messages:', err.message, err.stack);
   }
-}, 24 * 60 * 60 * 1000); // Run daily
+}, 24 * 60 * 60 * 1000);
 
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -137,7 +133,7 @@ const processedMessageIds = new Map();
 const clientSizeLimits = new Map();
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
-  throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
+  throw new Error('ADMIN_SECRET environment variable is not set.');
 }
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
 const secretFile = path.join('/data', 'jwt_secret.txt');
@@ -161,16 +157,16 @@ if (fs.existsSync(secretFile)) {
     JWT_SECRET = crypto.randomBytes(32).toString('hex');
     fs.writeFileSync(secretFile, JWT_SECRET);
     fs.writeFileSync(previousSecretFile, previousSecret);
-    console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
+    console.log('Rotated JWT secret.');
   }
 }
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
-  throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
+  throw new Error('TURN_USERNAME environment variable is not set.');
 }
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
 if (!TURN_CREDENTIAL) {
-  throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
+  throw new Error('TURN_CREDENTIAL environment variable is not set.');
 }
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
@@ -194,17 +190,21 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+
 function saveFeatures() {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
   console.log('Saved features:', features);
 }
+
 function saveAggregatedStats() {
   fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
   console.log('Saved aggregated stats to disk');
 }
+
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
+
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -215,12 +215,11 @@ function isValidBase64(str) {
   if (!isValid) console.warn('Invalid base64 detected:', str);
   return isValid;
 }
-function validateMessage(data) {
-  // ... (full validateMessage function here, as in original)
-}
+
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
+
 function hashUa(ua) {
   if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
   const parser = new UAParser(ua);
@@ -228,6 +227,7 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
+
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -241,6 +241,7 @@ function broadcast(code, message) {
     console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
+
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -249,6 +250,7 @@ function broadcastRandomCodes() {
   });
   console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
 }
+
 function generateStatsCSV() {
   let csv = 'Period,Users,Connections\n';
   const now = new Date();
@@ -263,6 +265,7 @@ function generateStatsCSV() {
   csv += `All-Time,${allTimeUsers.size},N/A\n`;
   return csv;
 }
+
 function generateLogsCSV() {
   let csv = 'Timestamp,Event\n';
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
@@ -275,6 +278,7 @@ function generateLogsCSV() {
   });
   return csv;
 }
+
 function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;
@@ -289,6 +293,7 @@ function computeAggregate(days) {
   }
   return { users, connections };
 }
+
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -307,6 +312,7 @@ function updateLogFile() {
   aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
   saveAggregatedStats();
 }
+
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -327,12 +333,13 @@ function rotateAuditLog() {
   });
   fs.writeFileSync(currentFile, '');
 }
+
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
     clientId: validator.escape(data.clientId || ''),
-    username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex') : '',
+    username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
     targetId: validator.escape(data.targetId || ''),
     code: validator.escape(data.code || ''),
     event: validator.escape(data.event || ''),
@@ -364,14 +371,17 @@ function logStats(data) {
     }
   });
 }
+
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
+
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
+
 function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
   const hashedUa = hashUa(ua);
@@ -401,6 +411,7 @@ function incrementFailure(ip, ua) {
     ipFailureCounts.delete(key);
   }
 }
+
 function restrictIpDaily(ip, action) {
   const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
@@ -415,6 +426,7 @@ function restrictIpDaily(ip, action) {
   }
   return true;
 }
+
 function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const now = Date.now();
@@ -433,6 +445,7 @@ function restrictIpRate(ip, action) {
   }
   return true;
 }
+
 function restrictClientSize(clientId, size) {
   const now = Date.now();
   const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
@@ -449,6 +462,7 @@ function restrictClientSize(clientId, size) {
   }
   return true;
 }
+
 function restrictRate(ws) {
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
@@ -465,6 +479,7 @@ function restrictRate(ws) {
   }
   return true;
 }
+
 const shared = {
   rooms,
   dailyUsers,
@@ -498,7 +513,6 @@ const shared = {
   saveAggregatedStats,
   isValidBase32,
   isValidBase64,
-  validateMessage,
   hashIp,
   hashUa,
   broadcast,

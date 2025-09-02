@@ -1311,3 +1311,36 @@ document.getElementById('loginSubmitButton').onclick = () => {
     showStatusMessage('Invalid username or password (min 8 chars).');
   }
 };
+// main.js
+module.exports = {
+  prepareAndSendMessage,
+  sendMessage,
+  sendMedia,
+  startPeerConnection,
+  setupDataChannel,
+  processReceivedMessage,
+  handleOffer,
+  handleAnswer,
+  handleCandidate,
+  toggleVoiceCall,
+  startVoiceCall,
+  stopVoiceCall,
+  renegotiate,
+  sendSignalingMessage,
+  broadcastVoiceCallEvent,
+  sendRelayMessage,
+  autoConnect,
+  updateFeaturesUI,
+  sendToGrok,
+  toggleGrokBot,
+  saveGrokKey,
+  setAudioOutput,
+  toggleAudioOutput,
+  startTotpRoom,
+  showTotpSecretModal,
+  joinWithTotp,
+  startVoiceRecording,
+  stopVoiceRecording,
+  isWebPSupported,
+  generateThumbnail,
+};

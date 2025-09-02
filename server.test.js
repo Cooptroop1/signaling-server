@@ -1,9 +1,28 @@
 // server.test.js
+const {
+  validateMessage,
+  validateUsername,
+  validateCode,
+  isValidBase32,
+  isValidBase64,
+  hashPassword,
+  validatePassword,
+  logStats,
+  restrictRate,
+  restrictClientSize,
+  restrictIpRate,
+  restrictIpDaily,
+  incrementFailure,
+  broadcast,
+  broadcastRandomCodes,
+  hashIp,
+  hashUa,
+} = require('./server.js');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
-const bcrypt = require('bcryptjs'); // Changed to bcryptjs
+const bcrypt = require('bcryptjs');
 const otplib = require('otplib');
 
 // Mock external dependencies
@@ -11,7 +30,7 @@ jest.mock('ws');
 jest.mock('uuid');
 jest.mock('jsonwebtoken');
 jest.mock('pg');
-jest.mock('bcryptjs'); // Changed to bcryptjs
+jest.mock('bcryptjs');
 jest.mock('otplib');
 jest.mock('fs');
 jest.mock('path');

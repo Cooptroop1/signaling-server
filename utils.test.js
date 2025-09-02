@@ -23,13 +23,21 @@ describe('Utils Functions', () => {
     // Mock DOM elements
     global.document = {
       getElementById: jest.fn(id => {
-        if (id === 'status') return { textContent: '', setAttribute: jest.fn() };
-        if (id === 'messages') return { classList: { add: jest.fn(), remove: jest.fn() } };
-        if (id === 'inputContainer') return { classList: { add: jest.fn(), remove: jest.fn() } };
-        if (id === 'addUserText') return { classList: { toggle: jest.fn() } };
-        if (id === 'addUserModal') return { classList: { toggle: jest.fn() } };
-        if (id === 'addUserRadios') return { innerHTML: '', appendChild: jest.fn() };
-        if (id === 'remoteAudioContainer') return { classList: { add: jest.fn(), remove: jest.fn() } };
+        const mockElement = {
+          classList: { add: jest.fn(), remove: jest.fn(), toggle: jest.fn() },
+          appendChild: jest.fn(),
+          focus: jest.fn(),
+          innerHTML: '',
+          setAttribute: jest.fn(),
+          textContent: '',
+        };
+        if (id === 'status') return { ...mockElement, textContent: '' };
+        if (id === 'messages') return mockElement;
+        if (id === 'inputContainer') return mockElement;
+        if (id === 'addUserText') return mockElement;
+        if (id === 'addUserModal') return mockElement;
+        if (id === 'addUserRadios') return { ...mockElement, innerHTML: '' };
+        if (id === 'remoteAudioContainer') return mockElement;
         return null;
       }),
       createElement: jest.fn(() => ({
@@ -54,6 +62,8 @@ describe('Utils Functions', () => {
     global.maxClients = 2;
     global.totalClients = 1;
     global.isConnected = true;
+    global.inputContainer = { classList: { add: jest.fn(), remove: jest.fn() } };
+    global.messages = { classList: { add: jest.fn(), remove: jest.fn() } };
     global.peerConnections = new Map();
     global.dataChannels = new Map();
     global.candidatesQueues = new Map();
@@ -102,7 +112,7 @@ describe('Utils Functions', () => {
   test('startKeepAlive and stopKeepAlive', () => {
     startKeepAlive();
     expect(setInterval).toHaveBeenCalled();
-    expect(socket.send).toHaveBeenCalledWith(expect.stringContaining('ping'));
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'ping', clientId: 'test-client', token: 'test-token' }));
     stopKeepAlive();
     expect(clearInterval).toHaveBeenCalledWith('mock-interval');
   });
@@ -120,8 +130,8 @@ describe('Utils Functions', () => {
     expect(dataChannels.size).toBe(0);
     expect(clearTimeout).toHaveBeenCalledWith(123);
     expect(document.getElementById('remoteAudioContainer').classList.add).toHaveBeenCalledWith('hidden');
-    expect(document.getElementById('inputContainer').classList.add).toHaveBeenCalledWith('hidden');
-    expect(document.getElementById('messages').classList.add).toHaveBeenCalledWith('waiting');
+    expect(inputContainer.classList.add).toHaveBeenCalledWith('hidden');
+    expect(messages.classList.add).toHaveBeenCalledWith('waiting');
   });
 
   test('initializeMaxClientsUI for initiator', () => {
@@ -132,12 +142,14 @@ describe('Utils Functions', () => {
   test('updateMaxClientsUI', () => {
     updateMaxClientsUI();
     expect(document.getElementById('status').textContent).toBe('Connected (1/2 connections)');
-    expect(document.getElementById('messages').classList.remove).toHaveBeenCalledWith('waiting');
+    expect(messages.classList.remove).toHaveBeenCalledWith('waiting');
   });
 
   test('setMaxClients', () => {
     setMaxClients(5);
-    expect(socket.send).toHaveBeenCalledWith(expect.stringContaining('"set-max-clients"'));
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: 'set-max-clients', maxClients: 5, code: 'test-code', clientId: 'test-client', token: 'test-token' })
+    );
     expect(document.getElementById('status').textContent).toBe('Connected (1/5 connections)');
   });
 
@@ -161,14 +173,14 @@ describe('Utils Functions', () => {
   test('createImageModal', () => {
     const base64 = 'data:image/png;base64,test';
     createImageModal(base64, 'testId');
-    expect(document.createElement).toHaveBeenCalled();
+    expect(document.createElement).toHaveBeenCalledWith('div');
     expect(document.body.appendChild).toHaveBeenCalled();
   });
 
   test('createAudioModal', () => {
     const base64 = 'data:audio/mp3;base64,test';
     createAudioModal(base64, 'testId');
-    expect(document.createElement).toHaveBeenCalled();
+    expect(document.createElement).toHaveBeenCalledWith('div');
     expect(document.body.appendChild).toHaveBeenCalled();
   });
 

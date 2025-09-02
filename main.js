@@ -18,12 +18,12 @@ const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
 let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
-const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
-const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
-let keyVersion = 0; // New: Global key version counter for ratcheting
-let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
-let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
-let userPrivateKey = localStorage.getItem('userPrivateKey'); // New: Persistent private key
+const renegotiationCounts = new Map(); // Per-peer renegotiation attempt counter
+const maxRenegotiations = 5; // Max renegotiation attempts per peer
+let keyVersion = 0; // Global key version counter for ratcheting
+let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // Client-side size tracking (mirror server 1MB/min)
+let processedNonces = new Map(); // Map<nonce, timestamp> for cleanup
+let userPrivateKey = localStorage.getItem('userPrivateKey'); // Persistent private key
 let userPublicKey; // Generated on claim/login
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
@@ -87,7 +87,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     const ctx = canvas.getContext('2d');
     const img = new Image();
     img.src = URL.createObjectURL(file);
-    await new Promise(resolve => img.onload = resolve);
+    await new Promise(resolve => { img.onload = resolve; });
     let width = img.width;
     let height = img.height;
     if (width > height) {
@@ -223,9 +223,11 @@ async function sendMessage(content) {
     await prepareAndSendMessage({ content });
   }
   const messageInput = document.getElementById('messageInput');
-  messageInput.value = '';
-  messageInput.style.height = '2.5rem';
-  if (messageInput) messageInput.focus();
+  if (messageInput) {
+    messageInput.value = '';
+    messageInput.style.height = '2.5rem';
+    messageInput.focus();
+  }
 }
 
 async function sendMedia(file, type) {
@@ -233,7 +235,7 @@ async function sendMedia(file, type) {
     image: ['image/jpeg', 'image/png'],
     voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
   };
-  if (type !== 'file' && !validTypes[type]?.includes(file.type)) {
+  if (type !== 'file' && !validTypes[type].includes(file.type)) {
     showStatusMessage(`Error: Invalid file type for ${type}.`);
     return;
   }
@@ -522,7 +524,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedBlob)) {
+  if (!data.messageId || !data.encryptedBlob) {
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -632,7 +634,7 @@ async function handleOffer(offer, targetId) {
   try {
     if (peerConnection.signalingState === 'have-local-offer') {
       console.log(`Negotiation glare detected for ${targetId}, rolling back local offer`);
-      await peerConnection.setLocalDescription({type: 'rollback'});
+      await peerConnection.setLocalDescription({ type: 'rollback' });
     }
     await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await peerConnection.createAnswer();
@@ -912,8 +914,10 @@ async function autoConnect(codeParam) {
       chatContainer.classList.add('hidden');
       statusElement.textContent = 'Please enter a username to join the chat';
       const usernameInput = document.getElementById('usernameInput');
-      usernameInput.value = username || '';
-      if (usernameInput) usernameInput.focus();
+      if (usernameInput) {
+        usernameInput.value = username || '';
+        usernameInput.focus();
+      }
       const joinButton = document.getElementById('joinWithUsernameButton');
       if (joinButton) {
         joinButton.onclick = () => {
@@ -1040,8 +1044,12 @@ function toggleGrokBot() {
   grokBotActive = !grokBotActive;
   const grokButton = document.getElementById('grokButton');
   const grokKeyContainer = document.getElementById('grokKeyContainer');
-  if (grokButton) grokButton.classList.toggle('active', grokBotActive);
-  if (grokKeyContainer) grokKeyContainer.classList.toggle('active', grokBotActive && !grokApiKey);
+  if (grokButton) {
+    grokButton.classList.toggle('active', grokBotActive);
+  }
+  if (grokKeyContainer) {
+    grokKeyContainer.classList.toggle('active', grokBotActive && !grokApiKey);
+  }
   if (grokBotActive) {
     if (!grokApiKey) {
       showStatusMessage('Grok bot enabled. Enter your xAI API key below. For details, visit https://x.ai/api.');
@@ -1216,18 +1224,24 @@ function startVoiceRecording() {
       stream.getTracks().forEach(track => track.stop());
       mediaRecorder = null;
       voiceChunks = [];
-      document.getElementById('voiceButton')?.classList.remove('recording');
-      document.getElementById('voiceTimer')?.style.display = 'none';
-      document.getElementById('voiceTimer')?.textContent = '';
+      const voiceButton = document.getElementById('voiceButton');
+      if (voiceButton) voiceButton.classList.remove('recording');
+      const voiceTimer = document.getElementById('voiceTimer');
+      if (voiceTimer) {
+        voiceTimer.style.display = 'none';
+        voiceTimer.textContent = '';
+      }
       clearInterval(voiceTimerInterval);
     });
     mediaRecorder.start(1000);
-    document.getElementById('voiceButton')?.classList.add('recording');
-    document.getElementById('voiceTimer')?.style.display = 'flex';
+    const voiceButton = document.getElementById('voiceButton');
+    if (voiceButton) voiceButton.classList.add('recording');
+    const voiceTimer = document.getElementById('voiceTimer');
+    if (voiceTimer) voiceTimer.style.display = 'flex';
     let time = 0;
     voiceTimerInterval = setInterval(() => {
       time++;
-      document.getElementById('voiceTimer')?.textContent = `00:${time < 10 ? '0' + time : time}`;
+      if (voiceTimer) voiceTimer.textContent = `00:${time < 10 ? '0' + time : time}`;
       if (time >= 30) {
         stopVoiceRecording();
       }
@@ -1308,41 +1322,25 @@ async function sendOfflineMessage(messageId, to_username, messageText) {
   }));
   showStatusMessage('Offline message sent.');
 }
-// Override claim/login to generate keys
-document.getElementById('claimSubmitButton').onclick = () => {
-  const name = document.getElementById('claimUsernameInput').value.trim();
-  const pass = document.getElementById('claimPasswordInput').value;
-  if (validateUsername(name) && pass.length >= 8) {
-    generateUserKeypair().then(publicKey => {
-      socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
-    }).catch(error => {
-      console.error('Key generation error:', error);
-      showStatusMessage('Failed to generate keys for claim.');
-    });
-  } else {
-    showStatusMessage('Invalid username or password (min 8 chars).');
+
+// Initialize DOM-dependent code
+document.addEventListener('DOMContentLoaded', () => {
+  const claimSubmitButton = document.getElementById('claimSubmitButton');
+  if (claimSubmitButton) {
+    claimSubmitButton.onclick = async () => {
+      const name = document.getElementById('claimUsernameInput').value.trim();
+      const pass = document.getElementById('claimPasswordInput').value;
+      if (validateUsername(name) && pass.length >= 8) {
+        const publicKey = await generateUserKeypair();
+        socket.send(JSON.stringify({ type: 'claim', username: name, password: pass, publicKey, clientId, token }));
+      } else {
+        showStatusMessage('Invalid username or password (min 8 chars).');
+      }
+    };
   }
-};
-document.getElementById('loginSubmitButton').onclick = () => {
-  const name = document.getElementById('loginUsernameInput').value.trim();
-  const pass = document.getElementById('loginPasswordInput').value;
-  if (validateUsername(name) && pass.length >= 8) {
-    if (!userPrivateKey) {
-      generateUserKeypair().then(() => {
-        showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
-        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-      }).catch(error => {
-        console.error('Key generation error:', error);
-        showStatusMessage('Failed to generate keys for login.');
-      });
-    } else {
-      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-    }
-  } else {
-    showStatusMessage('Invalid username or password (min 8 chars).');
-  }
-};
-// main.js
+});
+
+// Export functions for testing
 module.exports = {
   prepareAndSendMessage,
   sendMessage,

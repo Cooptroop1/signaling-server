@@ -253,20 +253,29 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'connected') {
-      token = message.accessToken;
-      refreshToken = message.refreshToken;
-      console.log('Received authentication tokens:', { accessToken: token, refreshToken });
-      socket.send(JSON.stringify({ type: 'login-username', username, password, clientId }));
-      startKeepAlive();
-      setTimeout(refreshAccessToken, 5 * 60 * 1000);
-      if (pendingCode) {
-        autoConnect(pendingCode);
-        pendingCode = null;
-      }
-      processSignalingQueue();
-      updateLogoutButtonVisibility();
-      return;
+  token = message.accessToken;
+  refreshToken = message.refreshToken;
+  console.log('Received authentication tokens:', { accessToken: token, refreshToken });
+  startKeepAlive();
+  setTimeout(refreshAccessToken, 5 * 60 * 1000);
+  if (username && !isLoggedIn) {
+    const password = localStorage.getItem('password'); // Ensure password is retrieved
+    if (password) {
+      console.log('Attempting auto-login with stored username:', username);
+      socket.send(JSON.stringify({ type: 'login-username', username, password, clientId, token }));
+    } else {
+      console.log('No stored password found for auto-login');
+      showStatusMessage('No stored password found. Please log in manually.');
     }
+  }
+  if (pendingCode) {
+    autoConnect(pendingCode);
+    pendingCode = null;
+  }
+  processSignalingQueue();
+  updateLogoutButtonVisibility();
+  return;
+}
     if (message.type === 'token-refreshed') {
       token = message.accessToken;
       refreshToken = message.refreshToken;

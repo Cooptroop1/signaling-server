@@ -211,7 +211,6 @@ socket.onopen = () => {
     const password = localStorage.getItem('password'); // Assuming password is stored securely (for demo; ideally use a session-based approach)
     if (password) {
       console.log('Attempting auto-login with stored username:', username);
-      socket.send(JSON.stringify({ type: 'login-username', username, password, clientId }));
     }
   }
   updateLogoutButtonVisibility();
@@ -257,6 +256,7 @@ socket.onmessage = async (event) => {
       token = message.accessToken;
       refreshToken = message.refreshToken;
       console.log('Received authentication tokens:', { accessToken: token, refreshToken });
+      socket.send(JSON.stringify({ type: 'login-username', username, password, clientId }));
       startKeepAlive();
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingCode) {

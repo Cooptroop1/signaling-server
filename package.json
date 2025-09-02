@@ -24,6 +24,7 @@
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "@babel/preset-env": "^7.25.4",
+    "@babel/plugin-proposal-optional-chaining-assign": "^7.25.7",
     "babel-jest": "^29.7.0"
   },
   "engines": {

@@ -102,7 +102,7 @@ global.document = {
     innerHTML: '',
     setAttribute: jest.fn(),
     textContent: '',
-    style: {},
+    style: { display: '' },
     controls: false,
     src: '',
     dataset: {},
@@ -113,6 +113,7 @@ global.document = {
   querySelectorAll: jest.fn(() => []),
   cookie: '',
   body: { appendChild: jest.fn() },
+  addEventListener: jest.fn(),
 };
 global.navigator = {
   mediaDevices: {
@@ -127,7 +128,4 @@ global.window.DOMPurify = { sanitize: jest.fn(content => content) };
 global.window.otplib = {
   authenticator: {
     generateSecret: jest.fn(() => 'JBSWY3DPEHPK3PXP'),
-    keyuri: jest.fn(() => 'otpauth://totp/Anonomoose%20Chat:test-room?secret=JBSWY3DPEHPK3PXP'),
-  },
-};
-global.window.QRCode = jest.fn(() => ({}));
+    keyuri: jest.fn(() => 'otpauth://totp/Anonomoose%20Chat

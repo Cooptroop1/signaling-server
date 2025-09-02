@@ -12,6 +12,10 @@ function showStatusMessage(message, duration = 3000) {
 }
 
 function sanitizeMessage(content) {
+  if (typeof DOMPurify === 'undefined') {
+    console.warn('DOMPurify not available, returning plain text');
+    return content;
+  }
   return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); // Plain text only, no HTML
 }
 
@@ -21,12 +25,12 @@ function generateMessageId() {
 
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
-  return username && regex.test(username);
+  return username && regex.test(username) ? true : false;
 }
 
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
-  return code && regex.test(code);
+  return code && regex.test(code) ? true : false;
 }
 
 let keepAliveTimer = null;
@@ -123,6 +127,7 @@ function initializeMaxClientsUI() {
 
 function updateMaxClientsUI() {
   log('info', `updateMaxClientsUI called, maxClients: ${maxClients}, isInitiator: ${isInitiator}`);
+  const statusElement = document.getElementById('status');
   if (statusElement) {
     statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
   }
@@ -137,6 +142,7 @@ function updateMaxClientsUI() {
     button.classList.toggle('active', value === maxClients);
     button.disabled = !isInitiator;
   });
+  const messages = document.getElementById('messages');
   if (messages) {
     if (!isConnected) {
       messages.classList.add('waiting');
@@ -231,10 +237,18 @@ function createAudioModal(base64, focusId) {
 }
 
 function generateTotpSecret() {
+  if (typeof otplib === 'undefined') {
+    console.warn('otplib not available, generating fallback secret');
+    return Math.random().toString(36).slice(2, 34).toUpperCase(); // Fallback
+  }
   return otplib.authenticator.generateSecret(32);
 }
 
 function generateTotpUri(roomCode, secret) {
+  if (typeof otplib === 'undefined') {
+    console.warn('otplib not available, returning empty URI');
+    return '';
+  }
   return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
 }
 

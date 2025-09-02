@@ -1,4 +1,4 @@
-
+// crypto.js
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -6,7 +6,6 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   const base64 = window.btoa(binary);
-  // Strict validation: Check if it's valid base64
   if (!/^[A-Za-z0-9+/=]+$/.test(base64)) {
     throw new Error('Invalid base64 generated');
   }
@@ -14,9 +13,7 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
-  // Decode HTML entities (e.g., &#x2F; to /)
   const decodedBase64 = base64.replace(/&#x2F;/g, '/');
-  // Strict validation: Check if input is valid base64
   if (!/^[A-Za-z0-9+/=]+$/.test(decodedBase64)) {
     throw new Error('Invalid base64 input');
   }
@@ -41,7 +38,7 @@ async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
     const base64 = arrayBufferToBase64(exported);
-    if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
+    if (base64.length < 128 || base64.length > 132) {
       throw new Error(`Invalid public key length: ${base64.length} chars`);
     }
     console.log('Exported public key:', base64);
@@ -64,7 +61,6 @@ async function importPublicKey(base64) {
     } else if (buffer.byteLength !== 97) {
       throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
     }
-    // Validate point on curve
     const bytes = new Uint8Array(buffer);
     if (bytes[0] !== 4) {
       throw new Error('Invalid uncompressed public key prefix');
@@ -273,3 +269,21 @@ async function deriveMessageKey() {
     throw new Error('Message key derivation failed');
   }
 }
+
+// Export functions for testing
+module.exports = {
+  arrayBufferToBase64,
+  base64ToArrayBuffer,
+  bytesToBigInt,
+  exportPublicKey,
+  importPublicKey,
+  encryptBytes,
+  decryptBytes,
+  deriveSharedKey,
+  encryptRaw,
+  decryptRaw,
+  signMessage,
+  verifyMessage,
+  deriveSigningKey,
+  deriveMessageKey,
+};

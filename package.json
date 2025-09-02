@@ -2,9 +2,9 @@
   "name": "anonmess-signaling",
   "version": "1.0.0",
   "description": "Signaling server for AnonMess WebRTC chat",
-  "main": "server.js",
+  "main": "server1.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server1.js"
   },
   "dependencies": {
     "ioredis": "^5.7.0",

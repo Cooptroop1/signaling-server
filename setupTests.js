@@ -8,7 +8,7 @@ global.window.crypto = {
     })),
     importKey: jest.fn().mockImplementation(async (format, keyData, algorithm, extractable, usages) => ({
       format,
-      keyData,
+      keyData: typeof keyData === 'string' ? new TextEncoder().encode(keyData) : keyData,
       algorithm,
       extractable,
       usages,
@@ -25,7 +25,10 @@ global.window.crypto = {
     sign: jest.fn().mockImplementation(async (algorithm, key, data) => new Uint8Array(32).buffer),
     verify: jest.fn().mockImplementation(async (algorithm, key, signature, data) => true),
   },
-  getRandomValues: jest.fn(arr => arr),
+  getRandomValues: jest.fn(arr => {
+    for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
+    return arr;
+  }),
   randomUUID: jest.fn(() => 'mock-uuid'),
 };
 global.TextEncoder = class {
@@ -127,3 +130,4 @@ global.window.otplib = {
     keyuri: jest.fn(() => 'otpauth://totp/Anonomoose%20Chat:test-room?secret=JBSWY3DPEHPK3PXP'),
   },
 };
+global.window.QRCode = jest.fn(() => ({}));

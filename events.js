@@ -206,13 +206,6 @@ socket.onopen = () => {
     codeDisplayElement.classList.add('hidden');
     copyCodeButton.classList.add('hidden');
   }
-  // New: Attempt to log in if username exists in localStorage
-  if (username && !isLoggedIn) {
-    const password = localStorage.getItem('password'); // Assuming password is stored securely (for demo; ideally use a session-based approach)
-    if (password) {
-      console.log('Attempting auto-login with stored username:', username);
-    }
-  }
   updateLogoutButtonVisibility();
 };
 socket.onerror = (error) => {
@@ -252,22 +245,12 @@ socket.onmessage = async (event) => {
       console.log('Received ping, sent pong');
       return;
     }
-    if (message.type === 'connected') {
+  if (message.type === 'connected') {
   token = message.accessToken;
   refreshToken = message.refreshToken;
   console.log('Received authentication tokens:', { accessToken: token, refreshToken });
   startKeepAlive();
   setTimeout(refreshAccessToken, 5 * 60 * 1000);
-  if (username && !isLoggedIn) {
-    const password = localStorage.getItem('password'); // Ensure password is retrieved
-    if (password) {
-      console.log('Attempting auto-login with stored username:', username);
-      socket.send(JSON.stringify({ type: 'login-username', username, password, clientId, token }));
-    } else {
-      console.log('No stored password found for auto-login');
-      showStatusMessage('No stored password found. Please log in manually.');
-    }
-  }
   if (pendingCode) {
     autoConnect(pendingCode);
     pendingCode = null;

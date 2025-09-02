@@ -466,6 +466,14 @@ function validateMessage(data) {
       if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
         return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
       }
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'send-offline-message: messageId required as string' };
+      }
+      break;
+    case 'confirm-offline-message':
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'confirm-offline-message: messageId required as string' };
+      }
       break;
     case 'logout':
       break;
@@ -654,7 +662,6 @@ wss.on('connection', (ws, req) => {
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
-        // Update last_active on connect
         await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]);
         return;
       }
@@ -938,7 +945,7 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
-        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
+        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0;
         if (!restrictClientSize(data.clientId, payloadSize)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
@@ -1131,6 +1138,7 @@ wss.on('connection', (ws, req) => {
               [username, passwordHash, data.clientId, public_key || null]
             );
             ws.send(JSON.stringify({ type: 'username-registered', username }));
+            console.log(`Registered username ${username} for clientId ${data.clientId}`);
           } catch (err) {
             console.error('DB error registering username:', err.message, err.stack);
             ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username. Check server logs for details.' }));
@@ -1155,25 +1163,31 @@ wss.on('connection', (ws, req) => {
               ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
               return;
             }
-            // Update client_id and last_active
             await dbPool.query('UPDATE users SET client_id = $1, last_active = CURRENT_TIMESTAMP WHERE id = $2', [data.clientId, user.id]);
-            // Fetch offline messages with from_username
             const msgRes = await dbPool.query(`
-              SELECT om.*, u.username AS from_username
+              SELECT om.id, om.message, u.username AS from_username
               FROM offline_messages om
               JOIN users u ON om.from_user_id = u.id
               WHERE om.to_user_id = $1
             `, [user.id]);
-            const offlineMessages = msgRes.rows.map(msg => ({
-              from: msg.from_username,
-              code: JSON.parse(msg.message).code || null,
-              type: JSON.parse(msg.message).type || 'connection-request',
-              encrypted: JSON.parse(msg.message).encrypted || null,
-              iv: JSON.parse(msg.message).iv || null,
-              ephemeral_public: JSON.parse(msg.message).ephemeral_public || null
-            }));
-            // Delete delivered messages
-            await dbPool.query('DELETE FROM offline_messages WHERE to_user_id = $1', [user.id]);
+            const offlineMessages = msgRes.rows.map(msg => {
+              try {
+                const parsedMessage = JSON.parse(msg.message);
+                return {
+                  id: msg.id, // Include message ID for confirmation
+                  from: msg.from_username,
+                  code: parsedMessage.code || null,
+                  type: parsedMessage.type || 'connection-request',
+                  encrypted: parsedMessage.encrypted || null,
+                  iv: parsedMessage.iv || null,
+                  ephemeral_public: parsedMessage.ephemeral_public || null
+                };
+              } catch (err) {
+                console.error(`Failed to parse offline message for user ${user.id}:`, err.message);
+                return null;
+              }
+            }).filter(msg => msg !== null);
+            console.log(`Fetched ${offlineMessages.length} offline messages for user ${username} (id: ${user.id})`);
             ws.send(JSON.stringify({ type: 'login-success', username, offlineMessages }));
             console.log(`User ${username} logged in with clientId ${data.clientId}`);
           } catch (err) {
@@ -1223,7 +1237,7 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'send-offline-message') {
-        const { to_username, encrypted, iv, ephemeral_public } = data;
+        const { to_username, encrypted, iv, ephemeral_public, messageId } = data;
         try {
           const res = await dbPool.query('SELECT id FROM users WHERE username = $1', [to_username]);
           if (res.rows.length === 0) {
@@ -1240,13 +1254,24 @@ wss.on('connection', (ws, req) => {
           const from_user_id = from_res.rows[0].id;
           await dbPool.query(
             'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-            [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public })]
+            [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, messageId })]
           );
-          ws.send(JSON.stringify({ type: 'offline-message-sent' }));
-          console.log(`Offline message sent from clientId ${data.clientId} to ${to_username}`);
+          ws.send(JSON.stringify({ type: 'offline-message-sent', messageId }));
+          console.log(`Offline message ${messageId} sent from clientId ${data.clientId} (user_id: ${from_user_id}) to ${to_username} (user_id: ${to_user_id})`);
         } catch (err) {
           console.error('DB error sending offline message:', err.message, err.stack);
           ws.send(JSON.stringify({ type: 'error', message: 'Failed to send offline message.' }));
+        }
+        return;
+      }
+      if (data.type === 'confirm-offline-message') {
+        try {
+          await dbPool.query('DELETE FROM offline_messages WHERE id = $1', [data.messageId]);
+          console.log(`Confirmed and deleted offline message ${data.messageId} for clientId ${data.clientId}`);
+          ws.send(JSON.stringify({ type: 'confirm-offline-message-ack', messageId: data.messageId }));
+        } catch (err) {
+          console.error('DB error confirming offline message:', err.message, err.stack);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to confirm offline message.' }));
         }
         return;
       }
@@ -1635,3 +1660,4 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

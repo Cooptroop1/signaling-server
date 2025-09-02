@@ -10,7 +10,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
     "ioredis": "^5.7.0",
     "jsonwebtoken": "^9.0.2",
     "otplib": "^12.0.1",

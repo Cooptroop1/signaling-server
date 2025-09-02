@@ -1550,3 +1550,13 @@ cornerLogo.addEventListener('click', () => {
   processedMessageIds.clear();
   showStatusMessage('Chat history cleared locally.');
 });
+
+// events.js
+module.exports = {
+  getCookie,
+  setCookie,
+  processSignalingQueue,
+  generateCode,
+  updateLogoutButtonVisibility,
+  logout,
+};

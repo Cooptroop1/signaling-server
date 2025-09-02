@@ -1,5 +1,6 @@
-
+// utils.js
 function showStatusMessage(message, duration = 3000) {
+  const statusElement = document.getElementById('status');
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
     statusElement.setAttribute('aria-live', 'assertive');
@@ -11,7 +12,6 @@ function showStatusMessage(message, duration = 3000) {
 }
 
 function sanitizeMessage(content) {
-  // Switch to DOMPurify for better sanitization
   return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); // Plain text only, no HTML
 }
 
@@ -73,7 +73,7 @@ function cleanupPeerConnection(targetId) {
     audio.remove();
     remoteAudios.delete(targetId);
     if (remoteAudios.size === 0) {
-      document.getElementById('remoteAudioContainer').classList.add('hidden');
+      document.getElementById('remoteAudioContainer')?.classList.add('hidden');
     }
   }
   isConnected = dataChannels.size > 0;
@@ -237,3 +237,23 @@ function generateTotpSecret() {
 function generateTotpUri(roomCode, secret) {
   return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
 }
+
+// Export functions for testing
+module.exports = {
+  showStatusMessage,
+  sanitizeMessage,
+  generateMessageId,
+  validateUsername,
+  validateCode,
+  startKeepAlive,
+  stopKeepAlive,
+  cleanupPeerConnection,
+  initializeMaxClientsUI,
+  updateMaxClientsUI,
+  setMaxClients,
+  log,
+  createImageModal,
+  createAudioModal,
+  generateTotpSecret,
+  generateTotpUri,
+};

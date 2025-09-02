@@ -225,7 +225,7 @@ async function sendMessage(content) {
   const messageInput = document.getElementById('messageInput');
   messageInput.value = '';
   messageInput.style.height = '2.5rem';
-  messageInput?.focus();
+  if (messageInput) messageInput.focus();
 }
 
 async function sendMedia(file, type) {
@@ -238,7 +238,8 @@ async function sendMedia(file, type) {
     return;
   }
   await prepareAndSendMessage({ type, file });
-  document.getElementById(`${type}Button`)?.focus();
+  const typeButton = document.getElementById(`${type}Button`);
+  if (typeButton) typeButton.focus();
 }
 
 async function startPeerConnection(targetId, isOfferer) {
@@ -351,8 +352,9 @@ async function startPeerConnection(targetId, isOfferer) {
       audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
       audio.play().catch(error => console.error('Error playing remote audio:', error));
       remoteAudios.set(targetId, audio);
-      document.getElementById('remoteAudioContainer')?.appendChild(audio);
-      document.getElementById('remoteAudioContainer')?.classList.remove('hidden');
+      const remoteAudioContainer = document.getElementById('remoteAudioContainer');
+      if (remoteAudioContainer) remoteAudioContainer.appendChild(audio);
+      if (remoteAudioContainer) remoteAudioContainer.classList.remove('hidden');
       setAudioOutput(audio, targetId);
     }
   };
@@ -417,11 +419,14 @@ function setupDataChannel(dataChannel, targetId) {
     clearTimeout(connectionTimeouts.get(targetId));
     retryCounts.delete(targetId);
     updateMaxClientsUI();
-    document.getElementById('messageInput')?.focus();
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) messageInput.focus();
     if (features.enableVoiceCalls && features.enableAudioToggle) {
-      document.getElementById('audioOutputButton')?.classList.remove('hidden');
+      const audioOutputButton = document.getElementById('audioOutputButton');
+      if (audioOutputButton) audioOutputButton.classList.remove('hidden');
     } else {
-      document.getElementById('audioOutputButton')?.classList.add('hidden');
+      const audioOutputButton = document.getElementById('audioOutputButton');
+      if (audioOutputButton) audioOutputButton.classList.add('hidden');
     }
   };
   dataChannel.onmessage = async (event) => {
@@ -483,13 +488,15 @@ function setupDataChannel(dataChannel, targetId) {
       audio.remove();
       remoteAudios.delete(targetId);
       if (remoteAudios.size === 0) {
-        document.getElementById('remoteAudioContainer')?.classList.add('hidden');
+        const remoteAudioContainer = document.getElementById('remoteAudioContainer');
+        if (remoteAudioContainer) remoteAudioContainer.classList.add('hidden');
       }
     }
     if (dataChannels.size === 0) {
       inputContainer.classList.add('hidden');
       messages.classList.add('waiting');
-      document.getElementById('audioOutputButton')?.classList.add('hidden');
+      const audioOutputButton = document.getElementById('audioOutputButton');
+      if (audioOutputButton) audioOutputButton.classList.add('hidden');
     }
   };
 }
@@ -733,9 +740,13 @@ async function startVoiceCall() {
       renegotiate(targetId);
     });
     voiceCallActive = true;
-    document.getElementById('voiceCallButton')?.classList.add('active');
-    document.getElementById('voiceCallButton')?.title = 'End Voice Call';
-    document.getElementById('audioOutputButton')?.classList.remove('hidden');
+    const voiceCallButton = document.getElementById('voiceCallButton');
+    if (voiceCallButton) {
+      voiceCallButton.classList.add('active');
+      voiceCallButton.title = 'End Voice Call';
+    }
+    const audioOutputButton = document.getElementById('audioOutputButton');
+    if (audioOutputButton) audioOutputButton.classList.remove('hidden');
     showStatusMessage('Voice call started.');
   } catch (error) {
     console.error('Error starting voice call:', error);
@@ -757,9 +768,13 @@ function stopVoiceCall() {
     renegotiate(targetId);
   });
   voiceCallActive = false;
-  document.getElementById('voiceCallButton')?.classList.remove('active');
-  document.getElementById('voiceCallButton')?.title = 'Start Voice Call';
-  document.getElementById('audioOutputButton')?.classList.add('hidden');
+  const voiceCallButton = document.getElementById('voiceCallButton');
+  if (voiceCallButton) {
+    voiceCallButton.classList.remove('active');
+    voiceCallButton.title = 'Start Voice Call';
+  }
+  const audioOutputButton = document.getElementById('audioOutputButton');
+  if (audioOutputButton) audioOutputButton.classList.add('hidden');
   showStatusMessage('Voice call ended.');
 }
 
@@ -888,20 +903,23 @@ async function autoConnect(codeParam) {
           socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
         }, { once: true });
       }
-      document.getElementById('messageInput')?.focus();
+      const messageInput = document.getElementById('messageInput');
+      if (messageInput) messageInput.focus();
       updateFeaturesUI();
     } else {
       console.log('No valid username, prompting for username');
       usernameContainer.classList.remove('hidden');
       chatContainer.classList.add('hidden');
       statusElement.textContent = 'Please enter a username to join the chat';
-      document.getElementById('usernameInput').value = username || '';
-      document.getElementById('usernameInput')?.focus();
+      const usernameInput = document.getElementById('usernameInput');
+      usernameInput.value = username || '';
+      if (usernameInput) usernameInput.focus();
       document.getElementById('joinWithUsernameButton').onclick = () => {
         const usernameInput = document.getElementById('usernameInput').value.trim();
         if (!validateUsername(usernameInput)) {
           showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-          document.getElementById('usernameInput')?.focus();
+          const usernameInput = document.getElementById('usernameInput');
+          if (usernameInput) usernameInput.focus();
           return;
         }
         username = usernameInput;
@@ -914,7 +932,8 @@ async function autoConnect(codeParam) {
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
-        document.getElementById('messageInput')?.focus();
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) messageInput.focus();
       };
     }
   } else {
@@ -923,7 +942,8 @@ async function autoConnect(codeParam) {
     usernameContainer.classList.add('hidden');
     chatContainer.classList.add('hidden');
     showStatusMessage('Invalid code format. Please enter a valid code.');
-    document.getElementById('connectToggleButton')?.focus();
+    const connectToggleButton = document.getElementById('connectToggleButton');
+    if (connectToggleButton) connectToggleButton.focus();
   }
 }
 
@@ -1017,8 +1037,8 @@ function toggleGrokBot() {
   grokBotActive = !grokBotActive;
   const grokButton = document.getElementById('grokButton');
   const grokKeyContainer = document.getElementById('grokKeyContainer');
-  grokButton.classList.toggle('active', grokBotActive);
-  grokKeyContainer.classList.toggle('active', grokBotActive && !grokApiKey);
+  if (grokButton) grokButton.classList.toggle('active', grokBotActive);
+  if (grokKeyContainer) grokKeyContainer.classList.toggle('active', grokBotActive && !grokApiKey);
   if (grokBotActive) {
     if (!grokApiKey) {
       showStatusMessage('Grok bot enabled. Enter your xAI API key below. For details, visit https://x.ai/api.');
@@ -1035,7 +1055,8 @@ function saveGrokKey() {
   grokApiKey = keyInput.value.trim();
   if (grokApiKey) {
     localStorage.setItem('grokApiKey', grokApiKey);
-    document.getElementById('grokKeyContainer')?.classList.remove('active');
+    const grokKeyContainer = document.getElementById('grokKeyContainer');
+    if (grokKeyContainer) grokKeyContainer.classList.remove('active');
     showStatusMessage('API key saved. Use /grok <query> to ask Grok.');
     keyInput.value = '';
   } else {
@@ -1080,25 +1101,29 @@ function toggleAudioOutput() {
     setAudioOutput(audio, targetId);
   });
   const audioOutputButton = document.getElementById('audioOutputButton');
-  audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
-  audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
-  audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
+  if (audioOutputButton) {
+    audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
+    audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
+    audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
+  }
   showStatusMessage(`Audio output set to ${audioOutputMode}`);
 }
 
 async function startTotpRoom(serverGenerated) {
-  const usernameInput = document.getElementById('totpUsernameInput')?.value.trim();
-  if (!validateUsername(usernameInput)) {
+  const usernameInput = document.getElementById('totpUsernameInput');
+  const usernameValue = usernameInput ? usernameInput.value.trim() : '';
+  if (!validateUsername(usernameValue)) {
     showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
     return;
   }
-  username = usernameInput;
+  username = usernameValue;
   localStorage.setItem('username', username);
   let totpSecret;
   if (serverGenerated) {
     totpSecret = generateTotpSecret();
   } else {
-    totpSecret = document.getElementById('customTotpSecret')?.value.trim();
+    const customTotpSecret = document.getElementById('customTotpSecret');
+    totpSecret = customTotpSecret ? customTotpSecret.value.trim() : '';
     const base32Regex = /^[A-Z2-7]+=*$/i;
     if (!base32Regex.test(totpSecret) || totpSecret.length < 16) {
       showStatusMessage('Invalid custom TOTP secret format (base32, min 16 chars).');
@@ -1113,7 +1138,8 @@ async function startTotpRoom(serverGenerated) {
   code = generateCode();
   pendingTotpSecret = { display: totpSecret, send: secretToSend };
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-  document.getElementById('totpOptionsModal')?.classList.remove('active');
+  const totpOptionsModal = document.getElementById('totpOptionsModal');
+  if (totpOptionsModal) totpOptionsModal.classList.remove('active');
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
   copyCodeButton.classList.remove('hidden');

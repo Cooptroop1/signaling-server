@@ -218,14 +218,6 @@ socket.onopen = () => {
   if (codeParam && validateCode(codeParam)) {
     console.log('Detected code in URL, setting pendingCode for autoConnect after token');
     pendingCode = codeParam;
-  } else {
-    console.log('No valid code in URL, showing initial container');
-    initialContainer.classList.remove('hidden');
-    usernameContainer.classList.add('hidden');
-    connectContainer.classList.add('hidden');
-    chatContainer.classList.add('hidden');
-    codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
   }
   updateLogoutButtonVisibility();
 };
@@ -769,7 +761,7 @@ socket.onmessage = async (event) => {
           } else if (msg.type === 'connection-request') {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message-bubble other';
-            messageDiv.textContent = `Offline request from ${msg.from}: code ${msg.code}`;
+            messageDiv.textContent = `Offline request from ${msg.from}: code ${(..code}`;
             messages.prepend(messageDiv);
           }
         }

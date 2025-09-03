@@ -1,19 +1,4 @@
 
-function getCookie(name) {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop().split(';').shift();
-  return null;
-}
-function setCookie(name, value, days) {
-  let expires = '';
-  if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = '; expires=' + date.toUTCString();
-  }
-  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
-}
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -27,6 +12,7 @@ function processSignalingQueue() {
   });
   signalingQueue.clear();
 }
+
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -56,7 +42,7 @@ const maxRetries = 2;
 let candidatesQueues = new Map();
 let processedMessageIds = new Set();
 let usernames = new Map();
-let messageRateLimits = new Map();
+const messageRateLimits = new Map();
 let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
@@ -74,7 +60,6 @@ let connectedClients = new Set();
 let clientPublicKeys = new Map();
 let initiatorPublic;
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
-let lazyObserver;
 if (typeof window !== 'undefined') {
   socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
   console.log('WebSocket created');
@@ -107,6 +92,16 @@ if (typeof window !== 'undefined') {
       ['deriveKey', 'deriveBits']
     );
   })();
+  let cycleTimeout;
+  function triggerCycle() {
+    if (cycleTimeout) clearTimeout(cycleTimeout);
+    cornerLogo.classList.add('wink');
+    cycleTimeout = setTimeout(() => {
+      cornerLogo.classList.remove('wink');
+    }, 500);
+    setTimeout(triggerCycle, 60000);
+  }
+  setTimeout(triggerCycle, 60000);
 }
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
@@ -145,50 +140,6 @@ let pendingJoin = null;
 const maxReconnectAttempts = 5;
 let refreshFailures = 0;
 let refreshBackoff = 1000;
-let isLoggedIn = false; // New: Track login state
-function updateLogoutButtonVisibility() {
-  const logoutButton = document.getElementById('logoutButton');
-  if (logoutButton) {
-    logoutButton.classList.toggle('hidden', !isLoggedIn);
-  }
-}
-function logout() {
-  if (socket.readyState === WebSocket.OPEN && token) {
-    socket.send(JSON.stringify({ type: 'logout', clientId, token }));
-  }
-  username = '';
-  token = '';
-  refreshToken = '';
-  isLoggedIn = false; // Reset login state
-  clientId = Math.random().toString(36).substr(2, 9);
-  setCookie('clientId', clientId, 365);
-  localStorage.removeItem('username');
-  localStorage.removeItem('userPrivateKey');
-  userPrivateKey = null;
-  userPublicKey = null;
-  processedMessageIds.clear();
-  connectedClients.clear();
-  peerConnections.forEach((pc) => pc.close());
-  peerConnections.clear();
-  dataChannels.forEach((dc) => dc.close());
-  dataChannels.clear();
-  socket.close();
-  initialContainer.classList.remove('hidden');
-  usernameContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  chatContainer.classList.add('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  newSessionButton.classList.add('hidden');
-  maxClientsContainer.classList.add('hidden');
-  inputContainer.classList.add('hidden');
-  messages.classList.remove('waiting');
-  messages.innerHTML = '';
-  statusElement.textContent = 'Start a new chat or connect to an existing one';
-  updateLogoutButtonVisibility();
-  showStatusMessage('Logged out successfully.');
-  document.getElementById('startChatToggleButton')?.focus();
-}
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -207,15 +158,6 @@ socket.onopen = () => {
     codeDisplayElement.classList.add('hidden');
     copyCodeButton.classList.add('hidden');
   }
-  // New: Attempt to log in if username exists in localStorage
-  if (username && !isLoggedIn) {
-    const password = localStorage.getItem('password'); // Assuming password is stored securely (for demo; ideally use a session-based approach)
-    if (password) {
-      console.log('Attempting auto-login with stored username:', username);
-      socket.send(JSON.stringify({ type: 'login-username', username, password, clientId }));
-    }
-  }
-  updateLogoutButtonVisibility();
 };
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
@@ -224,6 +166,7 @@ socket.onerror = (error) => {
 };
 socket.onclose = () => {
   console.log('WebSocket closed');
+  // Removed showStatusMessage to suppress transient error
   stopKeepAlive();
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
@@ -265,13 +208,13 @@ socket.onmessage = async (event) => {
         pendingCode = null;
       }
       processSignalingQueue();
-      updateLogoutButtonVisibility();
       return;
     }
     if (message.type === 'token-refreshed') {
       token = message.accessToken;
       refreshToken = message.refreshToken;
       console.log('Received new tokens:', { accessToken: token, refreshToken });
+      // Removed showStatusMessage to suppress transient error
       refreshFailures = 0;
       refreshBackoff = 1000;
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
@@ -281,40 +224,21 @@ socket.onmessage = async (event) => {
       }
       processSignalingQueue();
       refreshingToken = false;
-      updateLogoutButtonVisibility();
       return;
     }
     if (message.type === 'error') {
-      console.log('Server response:', message.message, 'Code:', message.code || 'N/A');
+      console.log('Server response:', message.message, 'Code:', message.code || 'N/A'); // Changed from console.error to console.log for non-critical like "Username taken."
       if (message.message.includes('Username taken')) {
         const claimError = document.getElementById('claimError');
         claimError.textContent = 'Username already taken. Please try another.';
         setTimeout(() => {
           claimError.textContent = '';
-        }, 5000);
+        }, 5000); // Clear after 5 seconds
+        // Clear fields
         document.getElementById('claimUsernameInput').value = '';
         document.getElementById('claimPasswordInput').value = '';
+        // Keep modal open for retry
         document.getElementById('claimUsernameInput')?.focus();
-        return;
-      }
-      if (message.message.includes('Invalid login credentials')) {
-        const loginError = document.getElementById('loginError');
-        loginError.textContent = 'Invalid username or password. Please try again.';
-        setTimeout(() => {
-          loginError.textContent = '';
-        }, 5000);
-        document.getElementById('loginUsernameInput').value = '';
-        document.getElementById('loginPasswordInput').value = '';
-        document.getElementById('loginUsernameInput')?.focus();
-        isLoggedIn = false;
-        updateLogoutButtonVisibility();
-        return;
-      }
-      if (message.message.includes('Must be logged in to search users.')) {
-        showStatusMessage('Please log in to search for users.');
-        document.getElementById('searchUserModal').classList.remove('active');
-        document.getElementById('loginModal').classList.add('active');
-        document.getElementById('loginUsernameInput')?.focus();
         return;
       }
       if (message.message.includes('Invalid or expired token') || message.message.includes('Missing authentication token')) {
@@ -339,7 +263,8 @@ socket.onmessage = async (event) => {
           refreshBackoff = 1000;
           socket.close();
         } else {
-          const jitter = Math.random() * 4000 + 1000;
+          // Exponential backoff with jitter (1-5s random delay)
+          const jitter = Math.random() * 4000 + 1000; // 1-5s
           const delay = Math.min(refreshBackoff + jitter, 8000);
           setTimeout(() => {
             if (refreshToken && !refreshingToken) {
@@ -349,6 +274,7 @@ socket.onmessage = async (event) => {
           }, delay);
           refreshBackoff = Math.min(refreshBackoff * 2, 8000);
         }
+        // Removed showStatusMessage to suppress transient error
       } else if (message.message.includes('Rate limit exceeded')) {
         showStatusMessage('Rate limit exceeded. Waiting before retrying...');
         setTimeout(() => {
@@ -356,9 +282,9 @@ socket.onmessage = async (event) => {
             socket.send(JSON.stringify({ type: 'connect', clientId }));
           }
         }, 60000);
-      } else if (message.message.includes('Chat is full') ||
-        message.message.includes('Username already taken') ||
-        message.message.includes('Initiator offline') ||
+      } else if (message.message.includes('Chat is full') || 
+        message.message.includes('Username already taken') || 
+        message.message.includes('Initiator offline') || 
         message.message.includes('Invalid code format')) {
         console.log(`Join failed: ${message.message}`);
         showStatusMessage(`Failed to join chat: ${message.message}`);
@@ -377,8 +303,6 @@ socket.onmessage = async (event) => {
         button2.disabled = false;
         token = '';
         refreshToken = '';
-        updateLogoutButtonVisibility();
-        return;
       } else if (message.message.includes('Service has been disabled by admin.')) {
         showStatusMessage(message.message);
         initialContainer.classList.remove('hidden');
@@ -392,8 +316,6 @@ socket.onmessage = async (event) => {
         inputContainer.classList.add('hidden');
         messages.classList.remove('waiting');
         socket.close();
-        updateLogoutButtonVisibility();
-        return;
       } else {
         showStatusMessage(message.message);
       }
@@ -426,6 +348,7 @@ socket.onmessage = async (event) => {
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
+        // Generate initial roomMaster and salts for E2EE
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingSalt = window.crypto.getRandomValues(new Uint8Array(16));
         messageSalt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -457,7 +380,7 @@ socket.onmessage = async (event) => {
       updateDots();
       turnUsername = message.turnUsername;
       turnCredential = message.turnCredential;
-      updateRecentCodes(code);
+      updateRecentCodes(code); // Save to recent
       return;
     }
     if (message.type === 'initiator-changed') {
@@ -489,7 +412,7 @@ socket.onmessage = async (event) => {
         messages.classList.remove('waiting');
         updateMaxClientsUI();
       }
-      updateRecentCodes(code);
+      updateRecentCodes(code); // Update on join notify
       return;
     }
     if (message.type === 'client-disconnected') {
@@ -618,10 +541,10 @@ socket.onmessage = async (event) => {
       }
       return;
     }
-    if ((message.type === 'message' || message.type === 'image' || message.type === 'file') && useRelay) {
+    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
-      console.log('Received relay message:', message);
+      console.log('Received relay message:', message); // Debug
       const payload = {
         messageId: message.messageId,
         username: message.username,
@@ -630,7 +553,7 @@ socket.onmessage = async (event) => {
         data: message.data,
         encryptedData: message.encryptedData,
         filename: message.filename,
-        timestamp: Number(message.timestamp) || Date.now(),
+        timestamp: Number(message.timestamp) || Date.now(), // Ensure valid timestamp
         iv: message.iv,
         signature: message.signature
       };
@@ -712,8 +635,6 @@ socket.onmessage = async (event) => {
     if (message.type === 'username-registered') {
       const claimSuccess = document.getElementById('claimSuccess');
       claimSuccess.textContent = `Username claimed successfully: ${message.username}`;
-      isLoggedIn = true; // Set login state
-      localStorage.setItem('username', message.username);
       setTimeout(() => {
         claimSuccess.textContent = '';
         document.getElementById('claimUsernameModal').classList.remove('active');
@@ -724,128 +645,7 @@ socket.onmessage = async (event) => {
         codeDisplayElement.classList.add('hidden');
         copyCodeButton.classList.add('hidden');
         statusElement.textContent = 'Start a new chat or connect to an existing one';
-        updateLogoutButtonVisibility();
-      }, 5000);
-      return;
-    }
-    if (message.type === 'login-success') {
-      username = message.username;
-      localStorage.setItem('username', username);
-      isLoggedIn = true; // Set login state
-      const loginSuccess = document.getElementById('loginSuccess');
-      loginSuccess.textContent = `Logged in as ${username}`;
-      if (message.offlineMessages && message.offlineMessages.length > 0) {
-        for (const msg of message.offlineMessages) {
-          console.log('Processing offline msg:', msg);
-          if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
-            (async () => {
-              try {
-                const privateKey = await window.crypto.subtle.importKey('jwk', JSON.parse(userPrivateKey), { name: 'ECDH', namedCurve: 'P-384' }, false, ['deriveKey', 'deriveBits']);
-                const ephemeralPublicImported = await importPublicKey(msg.ephemeral_public);
-                const shared = await deriveSharedKey(privateKey, ephemeralPublicImported);
-                const decrypted = await decryptRaw(shared, msg.encrypted, msg.iv);
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message-bubble other';
-                messageDiv.textContent = `Offline message from ${msg.from}: ${decrypted}`;
-                messages.prepend(messageDiv);
-              } catch (error) {
-                console.error('Failed to decrypt offline message:', error);
-                showStatusMessage('Failed to decrypt an offline message.');
-              }
-            })();
-          } else if (msg.type === 'connection-request') {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'message-bubble other';
-            messageDiv.textContent = `Offline request from ${msg.from}: code ${msg.code}`;
-            messages.prepend(messageDiv);
-          }
-        }
-        showStatusMessage('Pending offline messages loaded.');
-      }
-      setTimeout(() => {
-        loginSuccess.textContent = '';
-        document.getElementById('loginModal').classList.remove('active');
-        initialContainer.classList.remove('hidden');
-        usernameContainer.classList.add('hidden');
-        connectContainer.classList.add('hidden');
-        chatContainer.classList.add('hidden');
-        codeDisplayElement.classList.add('hidden');
-        copyCodeButton.classList.add('hidden');
-        statusElement.textContent = 'Start a new chat or connect to an existing one';
-        updateLogoutButtonVisibility();
-      }, 5000);
-      return;
-    }
-    if (message.type === 'user-found') {
-      const searchedUsername = document.getElementById('searchUsernameInput').value.trim();
-      const searchResult = document.getElementById('searchResult');
-      searchResult.innerHTML = `User ${searchedUsername} is ${message.status}. Code: `;
-      const codeLink = document.createElement('a');
-      codeLink.href = '#';
-      codeLink.textContent = message.code;
-      codeLink.onclick = (e) => {
-        e.preventDefault();
-        autoConnect(message.code);
-        document.getElementById('searchUserModal').classList.remove('active');
-      };
-      searchResult.appendChild(codeLink);
-      if (message.status === 'offline' && message.public_key) {
-        userPublicKey = message.public_key;
-        const offlineMsgContainer = document.createElement('div');
-        const textarea = document.createElement('textarea');
-        textarea.placeholder = 'Send offline message...';
-        const sendBtn = document.createElement('button');
-        sendBtn.textContent = 'Send';
-        console.log('Setting up offline send button for', searchedUsername);
-        sendBtn.onclick = () => {
-          const msgText = textarea.value.trim();
-          console.log('Offline send button clicked, text:', msgText, 'to:', searchedUsername);
-          if (msgText) {
-            sendOfflineMessage(searchedUsername, msgText).then(() => {
-              console.log('Offline message sent successfully');
-              textarea.value = '';
-            }).catch(error => {
-              console.error('Offline send error:', error);
-              showStatusMessage('Failed to send offline message.');
-            });
-          } else {
-            console.log('No message text, not sending');
-          }
-        };
-        offlineMsgContainer.appendChild(textarea);
-        offlineMsgContainer.appendChild(sendBtn);
-        searchResult.appendChild(offlineMsgContainer);
-      }
-      return;
-    }
-    if (message.type === 'incoming-connection') {
-      const fromUser = message.from === username ? 'Someone' : message.from;
-      document.getElementById('incomingMessage').textContent = `${fromUser} wants to connect. Accept?`;
-      document.getElementById('acceptButton').onclick = () => {
-        socket.send(JSON.stringify({ type: 'connection-accepted', code: message.code, clientId, token }));
-        autoConnect(message.code);
-        document.getElementById('incomingConnectionModal').classList.remove('active');
-      };
-      document.getElementById('denyButton').onclick = () => {
-        socket.send(JSON.stringify({ type: 'connection-denied', code: message.code, clientId, token }));
-        document.getElementById('incomingConnectionModal').classList.remove('active');
-      };
-      document.getElementById('incomingConnectionModal').classList.add('active');
-      return;
-    }
-    if (message.type === 'connection-denied') {
-      showStatusMessage(`Connection request denied by ${message.from}`);
-      return;
-    }
-    if (message.type === 'user-not-found') {
-      document.getElementById('searchError').textContent = 'User not found.';
-      setTimeout(() => {
-        document.getElementById('searchError').textContent = '';
-      }, 5000);
-      return;
-    }
-    if (message.type === 'offline-message-sent') {
-      showStatusMessage('Offline message sent successfully.');
+      }, 5000); // Clear and proceed after 5 seconds
       return;
     }
   } catch (error) {
@@ -861,9 +661,10 @@ function refreshAccessToken() {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
   }
 }
+
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
-  keyVersion++;
+  keyVersion++; // Increment version
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
   const newSigningSalt = window.crypto.getRandomValues(new Uint8Array(16));
   const newMessageSalt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -902,22 +703,25 @@ async function triggerRatchet() {
     console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster and salts set.`);
     if (failures.length > 0) {
       console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
-      triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, keyVersion, 1);
+      triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, keyVersion, 1); // Start retry with count 1
     }
   } else {
     console.warn(`PFS ratchet failed (version ${keyVersion}): No keys available to send to any clients.`);
-    keyVersion--;
+    keyVersion--; // Revert version on full failure
   }
 }
+
+// Updated: Function to retry ratchet for failed clients with backoff and max retries
 async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
     return;
   }
-  const backoffTimes = [10000, 30000, 60000];
+  const backoffTimes = [10000, 30000, 60000]; // 10s, 30s, 60s
   const delay = backoffTimes[retryCount - 1];
   console.log(`Scheduling retry ${retryCount} in ${delay / 1000}s for version ${version}`);
   await new Promise(resolve => setTimeout(resolve, delay));
+
   let retrySuccess = 0;
   let newFailures = [];
   for (const cId of failures) {
@@ -953,303 +757,6 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
     console.log(`All partial ratchet retries complete for version ${version}.`);
   }
 }
-function updateDots() {
-  const userDots = document.getElementById('userDots');
-  if (!userDots) return;
-  userDots.innerHTML = '';
-  const greenCount = totalClients;
-  const redCount = maxClients - greenCount;
-  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId);
-  const selfDot = document.createElement('div');
-  selfDot.className = 'user-dot online';
-  userDots.appendChild(selfDot);
-  otherClientIds.forEach((targetId, index) => {
-    const dot = document.createElement('div');
-    dot.className = 'user-dot online';
-    dot.dataset.targetId = targetId;
-    if (isInitiator) {
-      const menu = document.createElement('div');
-      menu.className = 'user-menu';
-      const kickButton = document.createElement('button');
-      kickButton.textContent = 'Kick';
-      kickButton.onclick = () => kickUser(targetId);
-      const banButton = document.createElement('button');
-      banButton.textContent = 'Ban';
-      banButton.onclick = () => banUser(targetId);
-      menu.appendChild(kickButton);
-      menu.appendChild(banButton);
-      dot.appendChild(menu);
-    }
-    userDots.appendChild(dot);
-  });
-  for (let i = 0; i < redCount; i++) {
-    const dot = document.createElement('div');
-    dot.className = 'user-dot offline';
-    userDots.appendChild(dot);
-  }
-}
-async function kickUser(targetId) {
-  if (!isInitiator) return;
-  if (!targetId || typeof targetId !== 'string') {
-    console.error('Invalid targetId for kick:', targetId);
-    showStatusMessage('Invalid target user for kick.');
-    return;
-  }
-  console.log('Kicking user', targetId);
-  const toSign = targetId + 'kick' + code;
-  const signature = await signMessage(signingKey, toSign);
-  const message = { type: 'kick', targetId, code, clientId, token, signature };
-  console.log('Sending kick message:', message);
-  socket.send(JSON.stringify(message));
-  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
-}
-async function banUser(targetId) {
-  if (!isInitiator) return;
-  if (!targetId || typeof targetId !== 'string') {
-    console.error('Invalid targetId for ban:', targetId);
-    showStatusMessage('Invalid target user for ban.');
-    return;
-  }
-  console.log('Banning user', targetId);
-  const toSign = targetId + 'ban' + code;
-  const signature = await signMessage(signingKey, toSign);
-  const message = { type: 'ban', targetId, code, clientId, token, signature };
-  console.log('Sending ban message:', message);
-  socket.send(JSON.stringify(message));
-  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
-}
-function setupLazyObserver() {
-  lazyObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        const elem = entry.target;
-        if (elem.dataset.src) {
-          elem.src = elem.dataset.src;
-          delete elem.dataset.src;
-          lazyObserver.unobserve(elem);
-        }
-        if (elem.dataset.fullSrc) {
-          elem.src = elem.dataset.fullSrc;
-          delete elem.dataset.fullSrc;
-          lazyObserver.unobserve(elem);
-        }
-      }
-    });
-  }, { rootMargin: '100px' });
-}
-function loadRecentCodes() {
-  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
-  const recentCodesList = document.getElementById('recentCodesList');
-  recentCodesList.innerHTML = '';
-  if (recentCodes.length > 0) {
-    document.getElementById('recentChats').classList.remove('hidden');
-    recentCodes.forEach(recentCode => {
-      const button = document.createElement('button');
-      button.textContent = recentCode;
-      button.onclick = () => autoConnect(recentCode);
-      recentCodesList.appendChild(button);
-    });
-  } else {
-    document.getElementById('recentChats').classList.add('hidden');
-  }
-}
-function updateRecentCodes(code) {
-  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
-  if (recentCodes.includes(code)) {
-    recentCodes = recentCodes.filter(c => c !== code);
-  }
-  recentCodes.unshift(code);
-  if (recentCodes.length > 5) {
-    recentCodes = recentCodes.slice(0, 5);
-  }
-  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
-  loadRecentCodes();
-}
-function setupWaitingForJoin(codeParam) {
-  code = codeParam;
-  initialContainer.classList.add('hidden');
-  connectContainer.classList.add('hidden');
-  usernameContainer.classList.add('hidden');
-  chatContainer.classList.remove('hidden');
-  codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
-  if (validateCode(codeParam)) {
-    if (validateUsername(username)) {
-      console.log('Valid username and code, waiting for join approval');
-      codeDisplayElement.textContent = `Waiting for approval: ${code}`;
-      codeDisplayElement.classList.remove('hidden');
-      copyCodeButton.classList.remove('hidden');
-      messages.classList.add('waiting');
-      statusElement.textContent = 'Waiting for connection approval...';
-      socket.send(JSON.stringify({ type: 'request-join', code: codeParam, clientId, username, token }));
-      document.getElementById('messageInput')?.focus();
-    } else {
-      console.log('No valid username, prompting for username');
-      usernameContainer.classList.remove('hidden');
-      chatContainer.classList.add('hidden');
-      statusElement.textContent = 'Please enter a username to request to join';
-      document.getElementById('usernameInput').value = username || '';
-      document.getElementById('usernameInput')?.focus();
-      document.getElementById('joinWithUsernameButton').onclick = () => {
-        const usernameInput = document.getElementById('usernameInput').value.trim();
-        if (!validateUsername(usernameInput)) {
-          showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-          document.getElementById('usernameInput')?.focus();
-          return;
-        }
-        username = usernameInput;
-        localStorage.setItem('username', username);
-        usernameContainer.classList.add('hidden');
-        chatContainer.classList.remove('hidden');
-        codeDisplayElement.textContent = `Waiting for approval: ${code}`;
-        codeDisplayElement.classList.remove('hidden');
-        copyCodeButton.classList.remove('hidden');
-        messages.classList.add('waiting');
-        statusElement.textContent = 'Waiting for connection approval...';
-        socket.send(JSON.stringify({ type: 'request-join', code, clientId, username, token }));
-        document.getElementById('messageInput')?.focus();
-      };
-    }
-  } else {
-    console.log('Invalid code, showing initial container');
-    initialContainer.classList.remove('hidden');
-    usernameContainer.classList.add('hidden');
-    chatContainer.classList.add('hidden');
-    showStatusMessage('Invalid code format. Please enter a valid code.');
-    document.getElementById('connectToggleButton')?.focus();
-  }
-}
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('DOM loaded, initializing maxClients UI');
-  initializeMaxClientsUI();
-  const urlParams = new URLSearchParams(window.location.search);
-  const codeParam = urlParams.get('code');
-  if (codeParam && validateCode(codeParam)) {
-    setupWaitingForJoin(codeParam);
-  }
-  const codeInput = document.getElementById('codeInput');
-  if (codeInput) {
-    codeInput.addEventListener('input', (e) => {
-      let val = e.target.value.replace(/[^a-zA-Z0-9]/gi, '');
-      val = val.substring(0, 16);
-      let formatted = '';
-      for (let i = 0; i < val.length; i++) {
-        if (i > 0 && i % 4 === 0) formatted += '-';
-        formatted += val[i];
-      }
-      e.target.value = formatted;
-    });
-  }
-  setupLazyObserver();
-  loadRecentCodes();
-  document.getElementById('userDots').addEventListener('click', (e) => {
-    if (e.target.classList.contains('user-dot')) {
-      e.target.classList.toggle('active');
-    }
-  });
-  const toggleRecent = document.getElementById('toggleRecent');
-  const recentCodesList = document.getElementById('recentCodesList');
-  toggleRecent.addEventListener('click', () => {
-    const isHidden = recentCodesList.classList.toggle('hidden');
-    toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
-  });
-  document.getElementById('loginButton').addEventListener('click', () => {
-    if (isLoggedIn) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    document.getElementById('loginModal').classList.add('active');
-    document.getElementById('loginUsernameInput').value = username || '';
-    document.getElementById('loginUsernameInput')?.focus();
-  });
-  document.getElementById('loginSubmitButton').onclick = () => {
-    if (isLoggedIn) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    const name = document.getElementById('loginUsernameInput').value.trim();
-    const pass = document.getElementById('loginPasswordInput').value;
-    if (validateUsername(name) && pass.length >= 8) {
-      if (!userPrivateKey) {
-        generateUserKeypair().then(() => {
-          showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
-          socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-          localStorage.setItem('password', pass); // Store password securely (for demo; ideally use a more secure method)
-        }).catch(error => {
-          console.error('Key generation error:', error);
-          showStatusMessage('Failed to generate keys for login.');
-        });
-      } else {
-        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-        localStorage.setItem('password', pass); // Store password securely (for demo)
-      }
-    } else {
-      showStatusMessage('Invalid username or password (min 8 chars).');
-    }
-  };
-  document.getElementById('loginCancelButton').onclick = () => {
-    document.getElementById('loginModal').classList.remove('active');
-  };
-  document.getElementById('searchUserButton').addEventListener('click', () => {
-    if (!isLoggedIn) {
-      showStatusMessage('Please log in to search for users.');
-      document.getElementById('loginModal').classList.add('active');
-      document.getElementById('loginUsernameInput')?.focus();
-      return;
-    }
-    document.getElementById('searchUserModal').classList.add('active');
-  });
-  document.getElementById('searchSubmitButton').onclick = () => {
-    if (!isLoggedIn) {
-      showStatusMessage('Please log in to search for users.');
-      document.getElementById('searchUserModal').classList.remove('active');
-      document.getElementById('loginModal').classList.add('active');
-      document.getElementById('loginUsernameInput')?.focus();
-      return;
-    }
-    const name = document.getElementById('searchUsernameInput').value.trim();
-    if (name) {
-      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
-    }
-  };
-  document.getElementById('searchCancelButton').onclick = () => {
-    document.getElementById('searchUserModal').classList.remove('active');
-  };
-  document.getElementById('claimUsernameButton').addEventListener('click', () => {
-    if (isLoggedIn) {
-      showStatusMessage('You are already logged in. Log out first to claim a new username.');
-      return;
-    }
-    document.getElementById('claimUsernameModal').classList.add('active');
-  });
-  document.getElementById('claimCancelButton').onclick = () => {
-    document.getElementById('claimUsernameModal').classList.remove('active');
-  };
-  document.getElementById('claimSubmitButton').onclick = () => {
-    if (isLoggedIn) {
-      showStatusMessage('You are already logged in. Log out first to claim a new username.');
-      return;
-    }
-    const name = document.getElementById('claimUsernameInput').value.trim();
-    const pass = document.getElementById('claimPasswordInput').value;
-    if (validateUsername(name) && pass.length >= 8) {
-      generateUserKeypair().then(publicKey => {
-        socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
-        localStorage.setItem('password', pass); // Store password securely (for demo)
-      }).catch(error => {
-        console.error('Key generation error:', error);
-        showStatusMessage('Failed to generate keys for claim.');
-      });
-    } else {
-      showStatusMessage('Invalid username or password (min 8 chars).');
-    }
-  };
-  document.getElementById('logoutButton').onclick = () => {
-    console.log('Logout button clicked');
-    logout();
-  };
-  updateLogoutButtonVisibility();
-});
 document.getElementById('startChatToggleButton').onclick = () => {
   console.log('Start chat toggle clicked');
   initialContainer.classList.add('hidden');
@@ -1432,7 +939,6 @@ document.getElementById('backButton').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('startChatToggleButton')?.focus();
-  updateLogoutButtonVisibility();
 };
 document.getElementById('backButtonConnect').onclick = () => {
   console.log('Back button clicked from connectContainer');
@@ -1445,7 +951,6 @@ document.getElementById('backButtonConnect').onclick = () => {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   messages.classList.remove('waiting');
   document.getElementById('connectToggleButton')?.focus();
-  updateLogoutButtonVisibility();
 };
 document.getElementById('sendButton').onclick = () => {
   const messageInput = document.getElementById('messageInput');
@@ -1517,7 +1022,7 @@ document.getElementById('codeInput').addEventListener('keydown', (event) => {
   }
 });
 document.getElementById('copyCodeButton').onclick = () => {
-  const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '').replace('Waiting for approval: ', '');
+  const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
   navigator.clipboard.writeText(codeText).then(() => {
     copyCodeButton.textContent = 'Copied!';
     setTimeout(() => {
@@ -1551,3 +1056,340 @@ cornerLogo.addEventListener('click', () => {
   processedMessageIds.clear();
   showStatusMessage('Chat history cleared locally.');
 });
+
+function updateDots() {
+  const userDots = document.getElementById('userDots');
+  if (!userDots) return;
+  userDots.innerHTML = '';
+  const greenCount = totalClients;
+  const redCount = maxClients - greenCount;
+  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId);
+  // Add self dot (no menu)
+  const selfDot = document.createElement('div');
+  selfDot.className = 'user-dot online';
+  userDots.appendChild(selfDot);
+  // Add other users' dots with menu if initiator
+  otherClientIds.forEach((targetId, index) => {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot online';
+    dot.dataset.targetId = targetId;
+    if (isInitiator) {
+      const menu = document.createElement('div');
+      menu.className = 'user-menu';
+      const kickButton = document.createElement('button');
+      kickButton.textContent = 'Kick';
+      kickButton.onclick = () => kickUser(targetId);
+      const banButton = document.createElement('button');
+      banButton.textContent = 'Ban';
+      banButton.onclick = () => banUser(targetId);
+      menu.appendChild(kickButton);
+      menu.appendChild(banButton);
+      dot.appendChild(menu);
+    }
+    userDots.appendChild(dot);
+  });
+  // Add offline (red) dots
+  for (let i = 0; i < redCount; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'user-dot offline';
+    userDots.appendChild(dot);
+  }
+}
+
+async function kickUser(targetId) {
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for kick:', targetId);
+    showStatusMessage('Invalid target user for kick.');
+    return;
+  }
+  console.log('Kicking user', targetId);
+  const toSign = targetId + 'kick' + code;
+  const signature = await signMessage(signingKey, toSign);
+  const message = { type: 'kick', targetId, code, clientId, token, signature };
+  console.log('Sending kick message:', message);
+  socket.send(JSON.stringify(message));
+  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
+}
+
+async function banUser(targetId) {
+  if (!isInitiator) return;
+  if (!targetId || typeof targetId !== 'string') {
+    console.error('Invalid targetId for ban:', targetId);
+    showStatusMessage('Invalid target user for ban.');
+    return;
+  }
+  console.log('Banning user', targetId);
+  const toSign = targetId + 'ban' + code;
+  const signature = await signMessage(signingKey, toSign);
+  const message = { type: 'ban', targetId, code, clientId, token, signature };
+  console.log('Sending ban message:', message);
+  socket.send(JSON.stringify(message));
+  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
+}
+
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
+function setCookie(name, value, days) {
+  let expires = '';
+  if (days) {
+    const date = new Date();
+    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    expires = '; expires=' + date.toUTCString();
+  }
+  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const codeParam = urlParams.get('code');
+  if (codeParam && validateCode(codeParam)) {
+    setupWaitingForJoin(codeParam);
+  }
+  // New: Auto-format code input
+  const codeInput = document.getElementById('codeInput');
+  if (codeInput) {
+    codeInput.addEventListener('input', (e) => {
+      let val = e.target.value.replace(/[^a-zA-Z0-9]/gi, ''); // Remove non-alphanum, case insensitive
+      val = val.substring(0, 16);
+      let formatted = '';
+      for (let i = 0; i < val.length; i++) {
+        if (i > 0 && i % 4 === 0) formatted += '-';
+        formatted += val[i];
+      }
+      e.target.value = formatted;
+    });
+  }
+  // Setup lazy observer
+  setupLazyObserver();
+  // Load recent codes
+  loadRecentCodes();
+  // Setup user dots click for menu
+  document.getElementById('userDots').addEventListener('click', (e) => {
+    if (e.target.classList.contains('user-dot')) {
+      // Toggle menu if needed; already in CSS hover, but for touch/mobile, add click toggle
+      e.target.classList.toggle('active'); // Add .active to show menu on click
+    }
+  });
+  // Toggle recent chats
+  const toggleRecent = document.getElementById('toggleRecent');
+  const recentCodesList = document.getElementById('recentCodesList');
+  toggleRecent.addEventListener('click', () => {
+    const isHidden = recentCodesList.classList.toggle('hidden');
+    toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
+  });
+});
+
+function setupWaitingForJoin(codeParam) {
+  code = codeParam;
+  initialContainer.style.display = 'none';
+  connectContainer.style.display = 'none';
+  usernameContainer.style.display = 'none';
+  chatContainer.style.display = 'flex';
+  codeDisplayElement.style.display = 'none';
+  copyCodeButton.style.display = 'none';
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for connection...';
+  if (!username || !validateUsername(username)) {
+    usernameContainer.style.display = 'block';
+    chatContainer.style.display = 'none';
+    statusElement.textContent = 'Please enter a username to join the chat';
+    document.getElementById('usernameInput').value = username || '';
+    document.getElementById('usernameInput')?.focus();
+    const joinButton = document.getElementById('joinWithUsernameButton');
+    const originalOnclick = joinButton.onclick;
+    joinButton.onclick = () => {
+      const usernameInput = document.getElementById('usernameInput').value.trim();
+      if (!validateUsername(usernameInput)) {
+        showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
+        document.getElementById('usernameInput')?.focus();
+        return;
+      }
+      username = usernameInput;
+      localStorage.setItem('username', username);
+      usernameContainer.style.display = 'none';
+      chatContainer.style.display = 'flex';
+      codeDisplayElement.textContent = `Using code: ${code}`;
+      codeDisplayElement.style.display = 'block';
+      copyCodeButton.style.display = 'block';
+      messages.classList.add('waiting');
+      statusElement.textContent = 'Waiting for connection...';
+      if (socket.readyState === WebSocket.OPEN && token) {
+        socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      } else {
+        pendingJoin = { code, clientId, username };
+        if (socket.readyState !== WebSocket.OPEN) {
+          socket.addEventListener('open', () => {
+            console.log('WebSocket opened, sending join for existing chat');
+            if (token) {
+              socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+              pendingJoin = null;
+            }
+          }, { once: true });
+        }
+      }
+      document.getElementById('messageInput')?.focus();
+      joinButton.onclick = originalOnclick;
+    };
+  } else {
+    codeDisplayElement.textContent = `Using code: ${code}`;
+    codeDisplayElement.style.display = 'block';
+    copyCodeButton.style.display = 'block';
+    if (socket.readyState === WebSocket.OPEN && token) {
+      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+    } else {
+      pendingJoin = { code, clientId, username };
+      if (socket.readyState !== WebSocket.OPEN) {
+        socket.addEventListener('open', () => {
+          console.log('WebSocket opened, sending join for existing chat');
+          if (token) {
+            socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+            pendingJoin = null;
+          }
+        }, { once: true });
+      }
+    }
+    document.getElementById('messageInput')?.focus();
+  }
+}
+
+function setupLazyObserver() {
+  lazyObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const elem = entry.target;
+        if (elem.dataset.src) {
+          elem.src = elem.dataset.src;
+          delete elem.dataset.src;
+          lazyObserver.unobserve(elem);
+        }
+        if (elem.dataset.fullSrc) {
+          elem.src = elem.dataset.fullSrc;
+          delete elem.dataset.fullSrc;
+          lazyObserver.unobserve(elem);
+        }
+      }
+    });
+  }, { rootMargin: '100px' }); // Preload 100px before view
+}
+
+function loadRecentCodes() {
+  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  const recentCodesList = document.getElementById('recentCodesList');
+  recentCodesList.innerHTML = '';
+  if (recentCodes.length > 0) {
+    document.getElementById('recentChats').classList.remove('hidden');
+    recentCodes.forEach(recentCode => {
+      const button = document.createElement('button');
+      button.textContent = recentCode;
+      button.onclick = () => autoConnect(recentCode);
+      recentCodesList.appendChild(button);
+    });
+  } else {
+    document.getElementById('recentChats').classList.add('hidden');
+  }
+}
+
+function updateRecentCodes(code) {
+  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  if (recentCodes.includes(code)) {
+    recentCodes = recentCodes.filter(c => c !== code);
+  }
+  recentCodes.unshift(code);
+  if (recentCodes.length > 5) {
+    recentCodes = recentCodes.slice(0, 5);
+  }
+  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
+  loadRecentCodes(); // Refresh UI
+}
+document.getElementById('loginButton').addEventListener('click', () => {
+    if (isLoggedIn) {
+      showStatusMessage('You are already logged in. Log out first to switch accounts.');
+      return;
+    }
+    document.getElementById('loginModal').classList.add('active');
+    document.getElementById('loginUsernameInput').value = username || '';
+    document.getElementById('loginUsernameInput')?.focus();
+  });
+  document.getElementById('loginSubmitButton').onclick = () => {
+    if (isLoggedIn) {
+      showStatusMessage('You are already logged in. Log out first to switch accounts.');
+      return;
+    }
+    const name = document.getElementById('loginUsernameInput').value.trim();
+    const pass = document.getElementById('loginPasswordInput').value;
+    if (validateUsername(name) && pass.length >= 8) {
+      if (!userPrivateKey) {
+        generateUserKeypair().then(() => {
+          showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+          socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+          localStorage.setItem('password', pass); // Store password securely (for demo; ideally use a more secure method)
+        }).catch(error => {
+          console.error('Key generation error:', error);
+          showStatusMessage('Failed to generate keys for login.');
+        });
+      } else {
+        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+        localStorage.setItem('password', pass); // Store password securely (for demo)
+      }
+    } else {
+      showStatusMessage('Invalid username or password (min 8 chars).');
+    }
+  };
+  document.getElementById('loginCancelButton').onclick = () => {
+    document.getElementById('loginModal').classList.remove('active');
+  };
+  document.getElementById('searchUserButton').addEventListener('click', () => {
+    if (!isLoggedIn) {
+      showStatusMessage('Please log in to search for users.');
+      document.getElementById('loginModal').classList.add('active');
+      document.getElementById('loginUsernameInput')?.focus();
+      return;
+    }
+    document.getElementById('searchUserModal').classList.add('active');
+  });
+  document.getElementById('searchSubmitButton').onclick = () => {
+    if (!isLoggedIn) {
+      showStatusMessage('Please log in to search for users.');
+      document.getElementById('searchUserModal').classList.remove('active');
+      document.getElementById('loginModal').classList.add('active');
+      document.getElementById('loginUsernameInput')?.focus();
+      return;
+    }
+    const name = document.getElementById('searchUsernameInput').value.trim();
+    if (name) {
+      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
+    }
+  };
+  document.getElementById('searchCancelButton').onclick = () => {
+    document.getElementById('searchUserModal').classList.remove('active');
+  };
+// New: Claim username
+document.getElementById('claimUsernameButton').addEventListener('click', () => {
+  document.getElementById('claimUsernameModal').classList.add('active');
+});
+
+document.getElementById('claimSubmitButton').onclick = async () => {
+  const name = document.getElementById('claimUsernameInput').value.trim();
+  const pass = document.getElementById('claimPasswordInput').value;
+  if (name && pass) {
+    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
+  }
+};
+
+document.getElementById('claimCancelButton').onclick = () => {
+  document.getElementById('claimUsernameModal').classList.remove('active');
+};
+
+// New: Search user
+document.getElementById('searchSubmitButton').onclick = () => {
+  const name = document.getElementById('searchUsernameInput').value.trim();
+  if (name) {
+    socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
+  }
+};

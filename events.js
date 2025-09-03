@@ -1,5 +1,4 @@
 
-
 function getCookie(name) {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
@@ -199,10 +198,18 @@ function logout() {
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   updateLogoutButtonVisibility();
   showStatusMessage('Logged out successfully.');
+  // Reconnect WebSocket immediately
+  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+  console.log('WebSocket created after logout');
+  socket.onopen = socketOnOpen;
+  socket.onerror = socketOnError;
+  socket.onclose = socketOnClose;
+  socket.onmessage = socketOnMessage;
+  reconnectAttempts = 0; // Reset for new connection
   document.getElementById('startChatToggleButton')?.focus();
 }
 
-socket.onopen = () => {
+function socketOnOpen() {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
   reconnectAttempts = 0;
@@ -221,15 +228,15 @@ socket.onopen = () => {
     copyCodeButton.classList.add('hidden');
   }
   updateLogoutButtonVisibility();
-};
+}
 
-socket.onerror = (error) => {
+function socketOnError(error) {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
-};
+}
 
-socket.onclose = () => {
+function socketOnClose() {
   console.log('WebSocket closed');
   stopKeepAlive();
   if (reconnectAttempts >= maxReconnectAttempts) {
@@ -240,14 +247,14 @@ socket.onclose = () => {
   reconnectAttempts++;
   setTimeout(() => {
     socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-    socket.onopen = socket.onopen;
-    socket.onerror = socket.onerror;
-    socket.onclose = socket.onclose;
-    socket.onmessage = socket.onmessage;
+    socket.onopen = socketOnOpen;
+    socket.onerror = socketOnError;
+    socket.onclose = socketOnClose;
+    socket.onmessage = socketOnMessage;
   }, delay);
-};
+}
 
-socket.onmessage = async (event) => {
+function socketOnMessage(event) {
   console.log('Received WebSocket message:', event.data);
   try {
     const message = JSON.parse(event.data);
@@ -852,7 +859,7 @@ socket.onmessage = async (event) => {
   } catch (error) {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
-};
+}
 
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {

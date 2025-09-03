@@ -139,94 +139,6 @@ let pendingJoin = null;
 const maxReconnectAttempts = 5;
 let refreshFailures = 0;
 let refreshBackoff = 1000;
-
-// Function to set up dropdown event listeners
-function setupDropdownListeners() {
-  imageButton = document.getElementById('imageButton');
-  imageButtonSelect = document.getElementById('imageButtonSelect');
-  voiceButton = document.getElementById('voiceButton');
-  voiceCallButton = document.getElementById('voiceCallButton');
-  mediaDropdown = document.getElementById('mediaDropdown');
-
-  if (imageButton && mediaDropdown) {
-    // Remove existing listeners to prevent duplicates
-    imageButton.removeEventListener('click', handleImageButtonClick);
-    imageButton.addEventListener('click', handleImageButtonClick);
-    console.log('Bound click listener to imageButton');
-  } else {
-    console.error('Image button or media dropdown not found in DOM');
-  }
-
-  if (imageButtonSelect) {
-    imageButtonSelect.removeEventListener('click', handleImageButtonSelectClick);
-    imageButtonSelect.addEventListener('click', handleImageButtonSelectClick);
-    console.log('Bound click listener to imageButtonSelect');
-  } else {
-    console.error('ImageButtonSelect not found in DOM');
-  }
-
-  if (voiceButton) {
-    voiceButton.removeEventListener('click', handleVoiceButtonClick);
-    voiceButton.addEventListener('click', handleVoiceButtonClick);
-    console.log('Bound click listener to voiceButton');
-  } else {
-    console.error('VoiceButton not found in DOM');
-  }
-
-  if (voiceCallButton) {
-    voiceCallButton.removeEventListener('click', handleVoiceCallButtonClick);
-    voiceCallButton.addEventListener('click', handleVoiceCallButtonClick);
-    console.log('Bound click listener to voiceCallButton');
-  } else {
-    console.error('VoiceCallButton not found in DOM');
-  }
-
-  // Click outside to close dropdown
-  document.removeEventListener('click', handleOutsideClick);
-  document.addEventListener('click', handleOutsideClick);
-}
-
-// Handler functions to avoid inline function duplication
-function handleImageButtonClick() {
-  console.log('Image button clicked, toggling dropdown');
-  mediaDropdown.classList.toggle('active');
-  const isExpanded = mediaDropdown.classList.contains('active');
-  imageButton.setAttribute('aria-expanded', isExpanded);
-}
-
-function handleImageButtonSelectClick() {
-  console.log('Image/File option selected');
-  document.getElementById('imageInput')?.click();
-  mediaDropdown.classList.remove('active');
-  imageButton.setAttribute('aria-expanded', 'false');
-}
-
-function handleVoiceButtonClick() {
-  console.log('Voice option selected');
-  if (!mediaRecorder || mediaRecorder.state !== 'recording') {
-    startVoiceRecording();
-  } else {
-    stopVoiceRecording();
-  }
-  mediaDropdown.classList.remove('active');
-  imageButton.setAttribute('aria-expanded', 'false');
-}
-
-function handleVoiceCallButtonClick() {
-  console.log('Voice Call option selected');
-  toggleVoiceCall();
-  mediaDropdown.classList.remove('active');
-  imageButton.setAttribute('aria-expanded', 'false');
-}
-
-function handleOutsideClick(event) {
-  if (!mediaDropdown.contains(event.target) && !imageButton.contains(event.target)) {
-    console.log('Clicked outside, closing dropdown');
-    mediaDropdown.classList.remove('active');
-    imageButton.setAttribute('aria-expanded', 'false');
-  }
-}
-
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -324,19 +236,6 @@ socket.onmessage = async (event) => {
         document.getElementById('claimUsernameInput')?.focus();
         return;
       }
-      if (message.type === 'error') {
-      console.log('Server response:', message.message, 'Code:', message.code || 'N/A');
-      if (message.message.includes('Username taken')) {
-        const claimError = document.getElementById('claimError');
-        claimError.textContent = 'Username already taken. Please try another.';
-        setTimeout(() => {
-          claimError.textContent = '';
-        }, 5000);
-        document.getElementById('claimUsernameInput').value = '';
-        document.getElementById('claimPasswordInput').value = '';
-        document.getElementById('claimUsernameInput')?.focus();
-        return;
-      }
       if (message.message.includes('Invalid or expired token') || message.message.includes('Missing authentication token')) {
         if (refreshToken && !refreshingToken) {
           refreshingToken = true;
@@ -350,7 +249,7 @@ socket.onmessage = async (event) => {
         refreshFailures++;
         console.log(`Refresh failure count: ${refreshFailures}`);
         if (refreshFailures > 3) {
-          console.log('Exceeded refresh failures, forcing full reconnect with new clientId');
+          console.log(' exceeding refresh failures, forcing full reconnect with new clientId');
           clientId = Math.random().toString(36).substr(2, 9);
           setCookie('clientId', clientId, 365);
           token = '';
@@ -718,11 +617,7 @@ socket.onmessage = async (event) => {
     if (message.type === 'features-update') {
       features = message;
       console.log('Received features update:', features);
-      setTimeout(() => {
-        updateFeaturesUI();
-        // Re-apply dropdown listeners after features update
-        setupDropdownListeners();
-      }, 0);
+      setTimeout(updateFeaturesUI, 0);
       if (!features.enableService) {
         showStatusMessage(`Service disabled by admin. Disconnecting...`);
         socket.close();
@@ -1097,7 +992,7 @@ document.getElementById('codeInput').addEventListener('keydown', (event) => {
   }
 });
 document.getElementById('copyCodeButton').onclick = () => {
-  const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
+  const codeText = code vento codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
   navigator.clipboard.writeText(codeText).then(() => {
     copyCodeButton.textContent = 'Copied!';
     setTimeout(() => {
@@ -1132,7 +1027,74 @@ cornerLogo.addEventListener('click', () => {
   showStatusMessage('Chat history cleared locally.');
 });
 document.addEventListener('DOMContentLoaded', () => {
-  setupDropdownListeners();
+  // Initialize dropdown-related elements
+  imageButton = document.getElementById('imageButton');
+  imageButtonSelect = document.getElementById('imageButtonSelect');
+  voiceButton = document.getElementById('voiceButton');
+  voiceCallButton = document.getElementById('voiceCallButton');
+  mediaDropdown = document.getElementById('mediaDropdown');
+
+  // Dropdown toggle for imageButton
+  if (imageButton && mediaDropdown) {
+    imageButton.addEventListener('click', () => {
+      console.log('Image button clicked, toggling dropdown');
+      mediaDropdown.classList.toggle('active');
+      const isExpanded = mediaDropdown.classList.contains('active');
+      imageButton.setAttribute('aria-expanded', isExpanded);
+    });
+  } else {
+    console.error('Image button or media dropdown not found in DOM');
+  }
+
+  // Image/File selection
+  if (imageButtonSelect) {
+    imageButtonSelect.addEventListener('click', () => {
+      console.log('Image/File option selected');
+      document.getElementById('imageInput')?.click();
+      mediaDropdown.classList.remove('active');
+      imageButton.setAttribute('aria-expanded', 'false');
+    });
+  } else {
+    console.error('ImageButtonSelect not found in DOM');
+  }
+
+  // Voice recording
+  if (voiceButton) {
+    voiceButton.addEventListener('click', () => {
+      console.log('Voice option selected');
+      if (!mediaRecorder || mediaRecorder.state !== 'recording') {
+        startVoiceRecording();
+      } else {
+        stopVoiceRecording();
+      }
+      mediaDropdown.classList.remove('active');
+      imageButton.setAttribute('aria-expanded', 'false');
+    });
+  } else {
+    console.error('VoiceButton not found in DOM');
+  }
+
+  // Voice call
+  if (voiceCallButton) {
+    voiceCallButton.addEventListener('click', () => {
+      console.log('Voice Call option selected');
+      toggleVoiceCall();
+      mediaDropdown.classList.remove('active');
+      imageButton.setAttribute('aria-expanded', 'false');
+    });
+  } else {
+    console.error('VoiceCallButton not found in DOM');
+  }
+
+  // Click outside to close dropdown
+  document.addEventListener('click', (event) => {
+    if (!mediaDropdown.contains(event.target) && !imageButton.contains(event.target)) {
+      console.log('Clicked outside, closing dropdown');
+      mediaDropdown.classList.remove('active');
+      imageButton.setAttribute('aria-expanded', 'false');
+    }
+  });
+
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
@@ -1239,122 +1201,75 @@ function setupWaitingForJoin(codeParam) {
   }
 }
 
-function updateDots() {
-  const userDots = document.getElementById('userDots');
-  if (!userDots) return;
-  userDots.innerHTML = '';
-  const greenCount = totalClients;
-  const redCount = maxClients - greenCount;
-  const otherClientIds = Array.from(connectedClients).filter(id => id !== clientId);
-  const selfDot = document.createElement('div');
-  selfDot.className = 'user-dot online';
-  userDots.appendChild(selfDot);
-  otherClientIds.forEach((targetId, index) => {
-    const dot = document.createElement('div');
-    dot.className = 'user-dot online';
-    dot.dataset.targetId = targetId;
-    if (isInitiator) {
-      const menu = document.createElement('div');
-      menu.className = 'user-menu';
-      const kickButton = document.createElement('button');
-      kickButton.textContent = 'Kick';
-      kickButton.onclick = () => kickUser(targetId);
-      const banButton = document.createElement('button');
-      banButton.textContent = 'Ban';
-      banButton.onclick = () => banUser(targetId);
-      menu.appendChild(kickButton);
-      menu.appendChild(banButton);
-      dot.appendChild(menu);
-    }
-    userDots.appendChild(dot);
-  });
-  for (let i = 0; i < redCount; i++) {
-    const dot = document.createElement('div');
-    dot.className = 'user-dot offline';
-    userDots.appendChild(dot);
-  }
-}
-
-async function kickUser(targetId) {
-  if (!isInitiator) return;
-  if (!targetId || typeof targetId !== 'string') {
-    console.error('Invalid targetId for kick:', targetId);
-    showStatusMessage('Invalid target user for kick.');
-    return;
-  }
-  console.log('Kicking user', targetId);
-  const toSign = targetId + 'kick' + code;
-  const signature = await signMessage(signingKey, toSign);
-  const message = { type: 'kick', targetId, code, clientId, token, signature };
-  console.log('Sending kick message:', message);
-  socket.send(JSON.stringify(message));
-  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
-}
-
-async function banUser(targetId) {
-  if (!isInitiator) return;
-  if (!targetId || typeof targetId !== 'string') {
-    console.error('Invalid targetId for ban:', targetId);
-    showStatusMessage('Invalid target user for ban.');
-    return;
-  }
-  console.log('Banning user', targetId);
-  const toSign = targetId + 'ban' + code;
-  const signature = await signMessage(signingKey, toSign);
-  const message = { type: 'ban', targetId, code, clientId, token, signature };
-  console.log('Sending ban message:', message);
-  socket.send(JSON.stringify(message));
-  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
-}
-
-function getCookie(name) {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop().split(';').shift();
-  return null;
-}
-
-function setCookie(name, value, days) {
-  let expires = '';
-  if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = '; expires=' + date.toUTCString();
-  }
-  document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  setupDropdownListeners();
-  const urlParams = new URLSearchParams(window.location.search);
-  const codeParam = urlParams.get('code');
-  if (codeParam && validateCode(codeParam)) {
-    setupWaitingForJoin(codeParam);
-  }
-  const codeInput = document.getElementById('codeInput');
-  if (codeInput) {
-    codeInput.addEventListener('input', (e) => {
-      let val = e.target.value.replace(/[^a-zA-Z0-9]/gi, '');
-      val = val.substring(0, 16);
-      let formatted = '';
-      for (let i = 0; i < val.length; i++) {
-        if (i > 0 && i % 4 === 0) formatted += '-';
-        formatted += val[i];
+function setupLazyObserver() {
+  lazyObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const elem = entry.target;
+        if (elem.dataset.src) {
+          elem.src = elem.dataset.src;
+          delete elem.dataset.src;
+          lazyObserver.unobserve(elem);
+        }
+        if (elem.dataset.fullSrc) {
+          elem.src = elem.dataset.fullSrc;
+          delete elem.dataset.fullSrc;
+          lazyObserver.unobserve(elem);
+        }
       }
-      e.target.value = formatted;
     });
-  }
-  setupLazyObserver();
-  loadRecentCodes();
-  document.getElementById('userDots').addEventListener('click', (e) => {
-    if (e.target.classList.contains('user-dot')) {
-      e.target.classList.toggle('active');
-    }
-  });
-  const toggleRecent = document.getElementById('toggleRecent');
+  }, { rootMargin: '100px' });
+}
+
+function loadRecentCodes() {
+  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   const recentCodesList = document.getElementById('recentCodesList');
-  toggleRecent.addEventListener('click', () => {
-    const isHidden = recentCodesList.classList.toggle('hidden');
-    toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
-  });
+  recentCodesList.innerHTML = '';
+  if (recentCodes.length > 0) {
+    document.getElementById('recentChats').classList.remove('hidden');
+    recentCodes.forEach(recentCode => {
+      const button = document.createElement('button');
+      button.textContent = recentCode;
+      button.onclick = () => autoConnect(recentCode);
+      recentCodesList.appendChild(button);
+    });
+  } else {
+    document.getElementById('recentChats').classList.add('hidden');
+  }
+}
+
+function updateRecentCodes(code) {
+  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  if (recentCodes.includes(code)) {
+    recentCodes = recentCodes.filter(c => c !== code);
+  }
+  recentCodes.unshift(code);
+  if (recentCodes.length > 5) {
+    recentCodes = recentCodes.slice(0, 5);
+  }
+  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
+  loadRecentCodes();
+}
+
+document.getElementById('claimUsernameButton').addEventListener('click', () => {
+  document.getElementById('claimUsernameModal').classList.add('active');
 });
+
+document.getElementById('claimSubmitButton').onclick = async () => {
+  const name = document.getElementById('claimUsernameInput').value.trim();
+  const pass = document.getElementById('claimPasswordInput').value;
+  if (name && pass) {
+    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
+  }
+};
+
+document.getElementById('claimCancelButton').onclick = () => {
+  document.getElementById('claimUsernameModal').classList.remove('active');
+};
+
+document.getElementById('searchSubmitButton').onclick = () => {
+  const name = document.getElementById('searchUsernameInput').value.trim();
+  if (name) {
+    socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
+  }
+};

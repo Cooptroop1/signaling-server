@@ -119,39 +119,6 @@ if (typeof window !== 'undefined') {
       ['deriveKey', 'deriveBits']
     );
   })();
-  let cycleTimeout;
-  function triggerCycle() {
-    if (cycleTimeout) clearTimeout(cycleTimeout);
-    cornerLogo.classList.add('wink');
-    cycleTimeout = setTimeout(() => {
-      cornerLogo.classList.remove('wink');
-    }, 500);
-    setTimeout(triggerCycle, 60000);
-  }
-  setTimeout(triggerCycle, 60000);
-}
-
-function initializeMaxClientsUI() {
-  if (!isInitiator) {
-    maxClientsContainer.classList.add('hidden');
-    return;
-  }
-  maxClientsContainer.classList.remove('hidden');
-  const select = document.getElementById('maxClientsSelect');
-  if (select) {
-    select.value = maxClients;
-    select.onchange = () => {
-      const newMax = parseInt(select.value);
-      if (newMax >= totalClients && newMax <= 10) {
-        maxClients = newMax;
-        socket.send(JSON.stringify({ type: 'set-max-clients', maxClients, code, clientId, token }));
-        updateMaxClientsUI();
-      } else {
-        showStatusMessage('Invalid max clients value.');
-        select.value = maxClients;
-      }
-    };
-  }
 }
 
 function updateLogoutButtonVisibility() {
@@ -1225,7 +1192,6 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('Logout button clicked');
     logout();
   };
-  updateLogoutButtonVisibility();
 });
 
 document.getElementById('startChatToggleButton').onclick = () => {

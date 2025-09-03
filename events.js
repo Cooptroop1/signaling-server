@@ -131,6 +131,29 @@ if (typeof window !== 'undefined') {
   setTimeout(triggerCycle, 60000);
 }
 
+function initializeMaxClientsUI() {
+  if (!isInitiator) {
+    maxClientsContainer.classList.add('hidden');
+    return;
+  }
+  maxClientsContainer.classList.remove('hidden');
+  const select = document.getElementById('maxClientsSelect');
+  if (select) {
+    select.value = maxClients;
+    select.onchange = () => {
+      const newMax = parseInt(select.value);
+      if (newMax >= totalClients && newMax <= 10) {
+        maxClients = newMax;
+        socket.send(JSON.stringify({ type: 'set-max-clients', maxClients, code, clientId, token }));
+        updateMaxClientsUI();
+      } else {
+        showStatusMessage('Invalid max clients value.');
+        select.value = maxClients;
+      }
+    };
+  }
+}
+
 function updateLogoutButtonVisibility() {
   const logoutButton = document.getElementById('logoutButton');
   if (logoutButton) {

@@ -10,6 +10,32 @@ const url = require('url');
 const crypto = require('crypto');
 const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
+const { Pool } = require('pg');
+const bcrypt = require('bcrypt');
+
+// New: Hash password
+async function hashPassword(password) {
+  return bcrypt.hash(password, 10);
+}
+
+// New: Validate password
+async function validatePassword(input, hash) {
+  return bcrypt.compare(input, hash);
+}
+
+const dbPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false } // For Render Postgres
+});
+
+// Test DB connection on startup
+dbPool.connect((err) => {
+  if (err) {
+    console.error('DB connection error:', err.message, err.stack);
+  } else {
+    console.log('Connected to DB successfully');
+  }
+});
 
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -395,6 +421,46 @@ function validateMessage(data) {
         return { valid: false, error: 'set-totp: valid base32 secret required' };
       }
       break;
+    // New for usernames
+    case 'register-username':
+      if (!data.username) {
+        return { valid: false, error: 'register-username: username required' };
+      }
+      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
+        return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
+      }
+      if (data.public_key && !isValidBase64(data.public_key)) {
+        return { valid: false, error: 'register-username: invalid public_key (base64)' };
+      }
+      break;
+    case 'login-username':
+      if (!data.username) {
+        return { valid: false, error: 'login-username: username required' };
+      }
+      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
+        return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
+      }
+      break;
+    case 'find-user':
+      if (!data.username) {
+        return { valid: false, error: 'find-user: username required' };
+      }
+      break;
+    // New for offline message
+    case 'send-offline-message':
+      if (!data.to_username) {
+        return { valid: false, error: 'send-offline-message: to_username required' };
+      }
+      if (!data.encrypted || !isValidBase64(data.encrypted)) {
+        return { valid: false, error: 'send-offline-message: invalid encrypted (base64)' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'send-offline-message: invalid iv (base64)' };
+      }
+      if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
+        return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
+      }
+      break;
     default:
       return { valid: false, error: 'Unknown message type' };
   }
@@ -504,7 +570,10 @@ wss.on('connection', (ws, req) => {
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature'
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
+        data.type === 'send-offline-message' && 'encrypted',
+        data.type === 'send-offline-message' && 'iv',
+        data.type === 'send-offline-message' && 'ephemeral_public'
       ];
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -577,6 +646,8 @@ wss.on('connection', (ws, req) => {
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+        // Update last_active on connect
+        await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]);
         return;
       }
       if (data.type === 'refresh-token') {
@@ -1039,13 +1110,141 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
+      // New for usernames
+      if (data.type === 'register-username') {
+        const { username, password, public_key } = data;
+        if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
+          try {
+            const checkRes = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
+            if (checkRes.rows.length > 0) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Username taken.' }));
+              return;
+            }
+            const passwordHash = await hashPassword(password);
+            await dbPool.query(
+              'INSERT INTO users (username, password_hash, client_id, public_key) VALUES ($1, $2, $3, $4)',
+              [username, passwordHash, data.clientId, public_key || null]
+            );
+            ws.send(JSON.stringify({ type: 'username-registered', username }));
+          } catch (err) {
+            console.error('DB error registering username:', err.message, err.stack);
+            ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username. Check server logs for details.' }));
+          }
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
+        }
+        return;
+      }
+      if (data.type === 'login-username') {
+        const { username, password } = data;
+        if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
+          try {
+            const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
+            if (res.rows.length === 0) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
+              return;
+            }
+            const user = res.rows[0];
+            const valid = await validatePassword(password, user.password_hash);
+            if (!valid) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
+              return;
+            }
+            // Update client_id
+            await dbPool.query('UPDATE users SET client_id = $1 WHERE id = $2', [data.clientId, user.id]);
+            // Fetch offline messages with from_username
+            const msgRes = await dbPool.query(`
+              SELECT om.*, u.username AS from_username
+              FROM offline_messages om
+              JOIN users u ON om.from_user_id = u.id
+              WHERE om.to_user_id = $1
+            `, [user.id]);
+            const offlineMessages = msgRes.rows.map(msg => ({
+              from: msg.from_username,
+              code: JSON.parse(msg.message).code || null,
+              type: JSON.parse(msg.message).type || 'connection-request',
+              encrypted: JSON.parse(msg.message).encrypted || null,
+              iv: JSON.parse(msg.message).iv || null,
+              ephemeral_public: JSON.parse(msg.message).ephemeral_public || null
+            }));
+            // Delete pending messages
+            await dbPool.query('DELETE FROM offline_messages WHERE to_user_id = $1', [user.id]);
+            ws.send(JSON.stringify({ type: 'login-success', username, offlineMessages }));
+          } catch (err) {
+            console.error('DB error during login:', err.message, err.stack);
+            ws.send(JSON.stringify({ type: 'error', message: 'Failed to login. Check server logs.' }));
+          }
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
+        }
+        return;
+      }
+      if (data.type === 'find-user') {
+        const { username } = data;
+        try {
+          const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
+          if (res.rows.length === 0) {
+            ws.send(JSON.stringify({ type: 'user-not-found' }));
+            return;
+          }
+          const user = res.rows[0];
+          // Create dynamic room
+          const dynamicCode = uuidv4().replace(/-/g, '').substring(0,16).match(/.{1,4}/g).join('-');
+          // Notify online user if connected (via ws)
+          const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
+          if (ownerWs) {
+            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
+          } else {
+            // Queue notification
+            await dbPool.query(
+              'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ((SELECT id FROM users WHERE username = $1), $2, $3)',
+              [data.username, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
+            );
+          }
+          // Use last_active for status
+          const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
+          const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
+          ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
+        } catch (err) {
+          console.error('DB error finding user:', err.message, err.stack);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));
+        }
+        return;
+      }
+      // New: Send offline message
+      if (data.type === 'send-offline-message') {
+        const { to_username, encrypted, iv, ephemeral_public } = data;
+        try {
+          const res = await dbPool.query('SELECT id FROM users WHERE username = $1', [to_username]);
+          if (res.rows.length === 0) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Recipient not found.' }));
+            return;
+          }
+          const to_user_id = res.rows[0].id;
+          const from_res = await dbPool.query('SELECT id FROM users WHERE username = $1', [username]); // Assume sender has username
+          const from_user_id = from_res.rows[0]?.id;
+          if (!from_user_id) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Sender must have a claimed username.' }));
+            return;
+          }
+          await dbPool.query(
+            'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
+            [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public })]
+          );
+          ws.send(JSON.stringify({ type: 'offline-message-sent' }));
+        } catch (err) {
+          console.error('DB error sending offline message:', err.message, err.stack);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to send offline message.' }));
+        }
+        return;
+      }
     } catch (error) {
       console.error('Error processing message:', error.message, error.stack);
       ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again. Check server logs.' }));
       incrementFailure(clientIp, ws.userAgent);
     }
   });
-  ws.on('close', () => {
+  ws.on('close', async () => {
     if (ws.clientId) {
       const tokens = clientTokens.get(ws.clientId);
       if (tokens) {
@@ -1100,6 +1299,8 @@ wss.on('connection', (ws, req) => {
         });
       }
     }
+    // Update last_active on close
+    await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]);
   });
 });
 
@@ -1391,4 +1592,3 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-

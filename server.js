@@ -11,8 +11,19 @@ const crypto = require('crypto');
 const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 
-const server = http.createServer();
-console.log('Using HTTP server');
+const CERT_KEY_PATH = 'path/to/your/private-key.pem';
+const CERT_PATH = 'path/to/your/fullchain.pem';
+let server;
+if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
+  server = http.createServer();
+  console.log('Using HTTP server (production or missing certificates)');
+} else {
+  server = https.createServer({
+    key: fs.readFileSync(CERT_KEY_PATH),
+    cert: fs.readFileSync(CERT_PATH)
+  });
+  console.log('Using HTTPS server for local development');
+}
 
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
@@ -65,12 +76,15 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
+
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const AUDIT_FILE_BASE = path.join(__dirname, 'audit');
+const AUDIT_FILE_BASE = path.join(__dirname, 'audit'); // Base name without extension
+const FEATURES_FILE = path.join('/data', 'features.json');
+const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -83,15 +97,35 @@ const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
 const processedMessageIds = new Map();
-const clientSizeLimits = new Map();
+const clientSizeLimits = new Map(); // New: Per-client size tracking
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
-const JWT_SECRET = process.env.JWT_SECRET;
+const secretFile = path.join('/data', 'jwt_secret.txt');
+const previousSecretFile = path.join('/data', 'previous_jwt_secret.txt');
+let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET environment variable is not set. Please configure it.');
+  if (fs.existsSync(secretFile)) {
+    JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
+  } else {
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(secretFile, JWT_SECRET);
+    console.log('Generated new JWT secret and saved to disk.');
+  }
+}
+if (fs.existsSync(secretFile)) {
+  const stats = fs.statSync(secretFile);
+  const mtime = stats.mtime.getTime();
+  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  if (mtime < thirtyDaysAgo) {
+    const previousSecret = JWT_SECRET;
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(secretFile, JWT_SECRET);
+    fs.writeFileSync(previousSecretFile, previousSecret);
+    console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
+  }
 }
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
@@ -104,19 +138,42 @@ if (!TURN_CREDENTIAL) {
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
   enableService: true,
-  enableImages: true,
-  enableVoice: true,
-  enableVoiceCalls: true,
-  enableAudioToggle: true,
-  enableGrokBot: true,
+  enableImages: false,
+  enableVoice: false,
+  enableVoiceCalls: false,
+  enableAudioToggle: false,
+  enableGrokBot: false,
   enableP2P: true,
   enableRelay: true
 };
-console.log('Loaded features:', features);
+
+if (fs.existsSync(FEATURES_FILE)) {
+  try {
+    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
+    console.log('Loaded features:', features);
+  } catch (err) {
+    console.error('Error loading features file:', err);
+  }
+} else {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+}
+
+let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+
+function saveFeatures() {
+  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
+  console.log('Saved features:', features);
+}
+
+function saveAggregatedStats() {
+  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
+  console.log('Saved aggregated stats to disk');
+}
 
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
+
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -127,6 +184,7 @@ function isValidBase64(str) {
   if (!isValid) console.warn('Invalid base64 detected:', str);
   return isValid;
 }
+
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -320,8 +378,8 @@ function validateMessage(data) {
         return { valid: false, error: 'toggle-feature: feature required as string' };
       }
       break;
-    case 'export-stats-csv':
-    case 'export-logs-csv':
+    case 'export-stats-csv': // New
+    case 'export-logs-csv': // New
       if (!data.secret || typeof data.secret !== 'string') {
         return { valid: false, error: data.type + ': secret required as string' };
       }
@@ -342,6 +400,7 @@ function validateMessage(data) {
   }
   return { valid: true };
 }
+
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -351,6 +410,7 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
+
 setInterval(() => {
   randomCodes.forEach(code => {
     if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
@@ -360,6 +420,7 @@ setInterval(() => {
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
+
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
@@ -367,6 +428,7 @@ const pingInterval = setInterval(() => {
     ws.ping();
   });
 }, 50000);
+
 setInterval(() => {
   const now = Date.now();
   revokedTokens.forEach((expiry, token) => {
@@ -376,7 +438,7 @@ setInterval(() => {
   });
   processedMessageIds.forEach((messageSet, code) => {
     const now = Date.now();
-    messageSet.forEach((timestamp, nonce) => {
+    messageSet.forEach((timestamp, nonce) => { // Changed from messageId to nonce
       if (now - timestamp > 300000) {
         messageSet.delete(nonce);
       }
@@ -386,7 +448,8 @@ setInterval(() => {
     }
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
-}, 600000);
+}, 600000); // Changed to every 10 minutes (600000 ms)
+
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -428,6 +491,7 @@ wss.on('connection', (ws, req) => {
         incrementFailure(clientIp, ws.userAgent);
         return;
       }
+      // Skip escaping for specific fields that should remain untouched
       const skipEscapeFields = [
         data.type === 'public-key' && 'publicKey',
         data.type === 'encrypted-room-key' && 'publicKey',
@@ -440,7 +504,7 @@ wss.on('connection', (ws, req) => {
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature'
       ];
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -483,8 +547,26 @@ wss.on('connection', (ws, req) => {
             return;
           }
         } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-          return;
+          if (fs.existsSync(previousSecretFile)) {
+            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
+            try {
+              let decoded = jwt.verify(data.token, previousSecret);
+              if (decoded.clientId !== data.clientId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
+                return;
+              }
+              if (revokedTokens.has(data.token)) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
+                return;
+              }
+            } catch (previousErr) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+              return;
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+            return;
+          }
         }
       }
       if (data.type === 'connect') {
@@ -519,8 +601,32 @@ wss.on('connection', (ws, req) => {
           clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
           ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
         } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
-          return;
+          if (fs.existsSync(previousSecretFile)) {
+            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
+            try {
+              const decoded = jwt.verify(data.refreshToken, previousSecret);
+              if (decoded.clientId !== data.clientId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
+                return;
+              }
+              if (revokedTokens.has(data.refreshToken)) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
+                return;
+              }
+              const oldRefreshExpiry = decoded.exp * 1000;
+              revokedTokens.set(data.refreshToken, oldRefreshExpiry);
+              const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
+              const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
+              clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
+              ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
+            } catch (previousErr) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+              return;
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+            return;
+          }
         }
         return;
       }
@@ -753,7 +859,7 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
-        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0;
+        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
         if (!restrictClientSize(data.clientId, payloadSize)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
@@ -780,12 +886,12 @@ wss.on('connection', (ws, req) => {
           processedMessageIds.set(data.code, new Map());
         }
         const messageSet = processedMessageIds.get(data.code);
-        if (messageSet.has(data.nonce)) {
+        if (messageSet.has(data.nonce)) { // Changed to check nonce instead of messageId
           console.warn(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
           return;
         }
         const now = Date.now();
-        if (Math.abs(now - data.timestamp) > 300000) {
+        if (Math.abs(now - data.timestamp) > 300000) { // 5 minutes window
           console.warn(`Invalid timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp} (now: ${now})`);
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
           return;
@@ -795,7 +901,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
           return;
         }
-        messageSet.set(data.nonce, data.timestamp);
+        messageSet.set(data.nonce, data.timestamp); // Changed to set nonce
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
@@ -810,7 +916,7 @@ wss.on('connection', (ws, req) => {
               timestamp: data.timestamp,
               iv: data.iv,
               signature: data.signature,
-              nonce: data.nonce
+              nonce: data.nonce // Forward nonce
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
           }
@@ -861,6 +967,7 @@ wss.on('connection', (ws, req) => {
           const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
+            saveFeatures();
             const timestamp = new Date().toISOString();
             fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
@@ -874,8 +981,9 @@ wss.on('connection', (ws, req) => {
               }
             });
             if (data.feature === 'service' && !features.enableService) {
+              // Invalidate all tokens on service toggle off
               clientTokens.forEach((tokens, clientId) => {
-                revokedTokens.set(tokens.accessToken, Date.now() + 1000);
+                revokedTokens.set(tokens.accessToken, Date.now() + 1000); // Immediate revocation
                 if (tokens.refreshToken) {
                   revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
                 }
@@ -895,6 +1003,7 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
+      // New: Handle export requests
       if (data.type === 'export-stats-csv') {
         if (data.secret === ADMIN_SECRET) {
           const csv = generateStatsCSV();
@@ -993,6 +1102,7 @@ wss.on('connection', (ws, req) => {
     }
   });
 });
+
 function restrictRate(ws) {
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
@@ -1009,6 +1119,8 @@ function restrictRate(ws) {
   }
   return true;
 }
+
+// New: Per-client size cap (1MB/min total)
 function restrictClientSize(clientId, size) {
   const now = Date.now();
   const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
@@ -1018,13 +1130,14 @@ function restrictClientSize(clientId, size) {
   }
   sizeLimit.totalSize += size;
   clientSizeLimits.set(clientId, sizeLimit);
-  if (sizeLimit.totalSize > 1048576) {
+  if (sizeLimit.totalSize > 1048576) { // 1MB
     console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
     fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
     return false;
   }
   return true;
 }
+
 function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const now = Date.now();
@@ -1043,6 +1156,7 @@ function restrictIpRate(ip, action) {
   }
   return true;
 }
+
 function restrictIpDaily(ip, action) {
   const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
@@ -1057,6 +1171,7 @@ function restrictIpDaily(ip, action) {
   }
   return true;
 }
+
 function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
   const hashedUa = hashUa(ua);
@@ -1086,19 +1201,22 @@ function incrementFailure(ip, ua) {
     ipFailureCounts.delete(key);
   }
 }
+
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
+
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
+
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
-    clientId: validator.escape(data.clientId || ''),
+    clientId: validator.escape(data.clientId || ''), // Escape all strings
     username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
     targetId: validator.escape(data.targetId || ''),
     code: validator.escape(data.code || ''),
@@ -1131,15 +1249,20 @@ function logStats(data) {
     }
   });
 }
+
+// New: Audit log rotation function
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const currentFile = `${AUDIT_FILE_BASE}.log`;
   const rotatedFile = `${AUDIT_FILE_BASE}-${today}.log`;
+
   if (fs.existsSync(currentFile)) {
     fs.renameSync(currentFile, rotatedFile);
     console.log(`Rotated audit log to ${rotatedFile}`);
   }
+
+  // Delete files older than 7 days
   const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
   files.forEach(file => {
     const fileDate = file.match(/audit-(\d{4}-\d{2}-\d{2})\.log/)[1];
@@ -1149,10 +1272,15 @@ function rotateAuditLog() {
       console.log(`Deleted old audit log: ${file}`);
     }
   });
+
+  // Create new current file
   fs.writeFileSync(currentFile, '');
 }
+
+// Call rotation on startup and every 24 hours
 rotateAuditLog();
 setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
+
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -1167,7 +1295,11 @@ function updateLogFile() {
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
     }
   });
+  if (!aggregatedStats.daily) aggregatedStats.daily = {};
+  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
+  saveAggregatedStats();
 }
+
 fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
@@ -1175,6 +1307,7 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
+
 function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;
@@ -1182,15 +1315,15 @@ function computeAggregate(days) {
     const date = new Date(now);
     date.setDate(date.getDate() - i);
     const key = date.toISOString().slice(0, 10);
-    if (dailyUsers.has(key)) {
-      users += dailyUsers.get(key).size;
-    }
-    if (dailyConnections.has(key)) {
-      connections += dailyConnections.get(key).size;
+    if (aggregatedStats.daily[key]) {
+      users += aggregatedStats.daily[key].users;
+      connections += aggregatedStats.daily[key].connections;
     }
   }
   return { users, connections };
 }
+
+// New: Generate CSV for stats
 function generateStatsCSV() {
   let csv = 'Period,Users,Connections\n';
   const now = new Date();
@@ -1205,6 +1338,8 @@ function generateStatsCSV() {
   csv += `All-Time,${allTimeUsers.size},N/A\n`;
   return csv;
 }
+
+// New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
 function generateLogsCSV() {
   let csv = 'Timestamp,Event\n';
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
@@ -1217,6 +1352,7 @@ function generateLogsCSV() {
   });
   return csv;
 }
+
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -1230,6 +1366,7 @@ function broadcast(code, message) {
     console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
+
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -1238,9 +1375,11 @@ function broadcastRandomCodes() {
   });
   console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
 }
+
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
+
 function hashUa(ua) {
   if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
   const parser = new UAParser(ua);
@@ -1248,6 +1387,7 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
+
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });

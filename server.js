@@ -80,7 +80,6 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const AUDIT_FILE_BASE = path.join(__dirname, 'audit'); // Base name without extension
 const FEATURES_FILE = path.join('/data', 'features.json');
 const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
@@ -95,7 +94,6 @@ const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
 const processedMessageIds = new Map();
-const clientSizeLimits = new Map(); // New: Per-client size tracking
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -296,18 +294,6 @@ function validateMessage(data) {
         return { valid: false, error: 'candidate: code required' };
       }
       break;
-    case 'kick':
-    case 'ban':
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: `${data.type}: targetId required as string` };
-      }
-      if (!data.signature || !isValidBase64(data.signature)) {
-        return { valid: false, error: `${data.type}: valid signature required` };
-      }
-      if (!data.code) {
-        return { valid: false, error: `${data.type}: code required` };
-      }
-      break;
     case 'submit-random':
       if (!data.code) {
         return { valid: false, error: 'submit-random: code required' };
@@ -368,12 +354,6 @@ function validateMessage(data) {
       }
       if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
         return { valid: false, error: 'toggle-feature: feature required as string' };
-      }
-      break;
-    case 'export-stats-csv': // New
-    case 'export-logs-csv': // New
-      if (!data.secret || typeof data.secret !== 'string') {
-        return { valid: false, error: data.type + ': secret required as string' };
       }
       break;
     case 'ping':
@@ -847,12 +827,6 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp);
           return;
         }
-        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
-        if (!restrictClientSize(data.clientId, payloadSize)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
-          incrementFailure(clientIp);
-          return;
-        }
         if (payloadKey && payloadKey.length > 9333333) {
           ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
           incrementFailure(clientIp);
@@ -919,9 +893,9 @@ wss.on('connection', (ws, req) => {
           rooms.forEach(room => {
             totalClients += room.clients.size;
           });
-          let weekly = computeAggregate(7);
-          let monthly = computeAggregate(30);
-          let yearly = computeAggregate(365);
+          const weekly = computeAggregate(7);
+          const monthly = computeAggregate(30);
+          const yearly = computeAggregate(365);
           ws.send(JSON.stringify({
             type: 'stats',
             dailyUsers: dailyUsers.get(day)?.size || 0,
@@ -985,25 +959,6 @@ wss.on('connection', (ws, req) => {
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
           }
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
-        return;
-      }
-      // New: Handle export requests
-      if (data.type === 'export-stats-csv') {
-        if (data.secret === ADMIN_SECRET) {
-          const csv = generateStatsCSV();
-          ws.send(JSON.stringify({ type: 'export-stats-csv', csv }));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
-        return;
-      }
-      if (data.type === 'export-logs-csv') {
-        if (data.secret === ADMIN_SECRET) {
-          const csv = generateLogsCSV();
-          ws.send(JSON.stringify({ type: 'export-logs-csv', csv }));
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
         }
@@ -1100,24 +1055,6 @@ function restrictRate(ws) {
   return true;
 }
 
-// New: Per-client size cap (1MB/min total)
-function restrictClientSize(clientId, size) {
-  const now = Date.now();
-  const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
-  if (now - sizeLimit.startTime >= 60000) {
-    sizeLimit.totalSize = 0;
-    sizeLimit.startTime = now;
-  }
-  sizeLimit.totalSize += size;
-  clientSizeLimits.set(clientId, sizeLimit);
-  if (sizeLimit.totalSize > 1048576) { // 1MB
-    console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
-    fs.appendFileSync(AUDIT_FILE, `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
-    return false;
-  }
-  return true;
-}
-
 function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const now = Date.now();
@@ -1159,7 +1096,6 @@ function incrementFailure(ip) {
   ipFailureCounts.set(hashedIp, failure);
   if (failure.count % 5 === 0) {
     console.warn(`High failure rate for hashed IP ${hashedIp}: ${failure.count} failures`);
-    fs.appendFileSync(AUDIT_FILE, `${new Date().toISOString()} - High failure anomaly for hashed IP ${hashedIp}: ${failure.count} failures\n`);
   }
   if (failure.count >= 10) {
     const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
@@ -1194,11 +1130,11 @@ function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
-    clientId: validator.escape(data.clientId || ''), // Escape all strings
-    username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
-    targetId: validator.escape(data.targetId || ''),
-    code: validator.escape(data.code || ''),
-    event: validator.escape(data.event || ''),
+    clientId: data.clientId,
+    username: data.username ? crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex') : '',
+    targetId: data.targetId || '',
+    code: data.code || '',
+    event: data.event || '',
     totalClients: data.totalClients || 0,
     isInitiator: data.isInitiator || false,
     timestamp,
@@ -1211,12 +1147,12 @@ function logStats(data) {
     if (!dailyConnections.has(day)) {
       dailyConnections.set(day, new Set());
     }
-    dailyUsers.get(day).add(stats.clientId);
-    allTimeUsers.add(stats.clientId);
+    dailyUsers.get(day).add(data.clientId);
+    allTimeUsers.add(data.clientId);
     if (data.event === 'webrtc-connection' && data.targetId) {
-      dailyUsers.get(day).add(stats.targetId);
-      allTimeUsers.add(stats.targetId);
-      const connectionKey = `${stats.clientId}-${stats.targetId}-${stats.code}`;
+      dailyUsers.get(day).add(data.targetId);
+      allTimeUsers.add(data.targetId);
+      const connectionKey = `${data.clientId}-${data.targetId}-${data.code}`;
       dailyConnections.get(day).add(connectionKey);
     }
   }
@@ -1227,37 +1163,6 @@ function logStats(data) {
     }
   });
 }
-
-// New: Audit log rotation function
-function rotateAuditLog() {
-  const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const currentFile = `${AUDIT_FILE_BASE}.log`;
-  const rotatedFile = `${AUDIT_FILE_BASE}-${today}.log`;
-
-  if (fs.existsSync(currentFile)) {
-    fs.renameSync(currentFile, rotatedFile);
-    console.log(`Rotated audit log to ${rotatedFile}`);
-  }
-
-  // Delete files older than 7 days
-  const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
-  files.forEach(file => {
-    const fileDate = file.match(/audit-(\d{4}-\d{2}-\d{2})\.log/)[1];
-    const fileTime = new Date(fileDate).getTime();
-    if (now.getTime() - fileTime > 7 * 24 * 60 * 60 * 1000) {
-      fs.unlinkSync(path.join(__dirname, file));
-      console.log(`Deleted old audit log: ${file}`);
-    }
-  });
-
-  // Create new current file
-  fs.writeFileSync(currentFile, '');
-}
-
-// Call rotation on startup and every 24 hours
-rotateAuditLog();
-setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
 
 function updateLogFile() {
   const now = new Date();
@@ -1299,36 +1204,6 @@ function computeAggregate(days) {
     }
   }
   return { users, connections };
-}
-
-// New: Generate CSV for stats
-function generateStatsCSV() {
-  let csv = 'Period,Users,Connections\n';
-  const now = new Date();
-  const day = now.toISOString().slice(0, 10);
-  csv += `Daily,${dailyUsers.get(day)?.size || 0},${dailyConnections.get(day)?.size || 0}\n`;
-  const weekly = computeAggregate(7);
-  csv += `Weekly,${weekly.users},${weekly.connections}\n`;
-  const monthly = computeAggregate(30);
-  csv += `Monthly,${monthly.users},${monthly.connections}\n`;
-  const yearly = computeAggregate(365);
-  csv += `Yearly,${yearly.users},${yearly.connections}\n`;
-  csv += `All-Time,${allTimeUsers.size},N/A\n`;
-  return csv;
-}
-
-// New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
-function generateLogsCSV() {
-  let csv = 'Timestamp,Event\n';
-  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
-  logContent.split('\n').forEach(line => {
-    if (line.trim()) csv += `${line}\n`;
-  });
-  const auditContent = fs.readFileSync(`${AUDIT_FILE_BASE}.log`, 'utf8');
-  auditContent.split('\n').forEach(line => {
-    if (line.trim()) csv += `${line}\n`;
-  });
-  return csv;
 }
 
 function broadcast(code, message) {

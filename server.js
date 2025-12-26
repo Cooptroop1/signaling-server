@@ -12,22 +12,18 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
-
 // Validate password
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
-
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false } // For Render Postgres
 });
-
 // Test DB connection on startup
 dbPool.connect((err) => {
   if (err) {
@@ -36,7 +32,6 @@ dbPool.connect((err) => {
     console.log('Connected to DB successfully');
   }
 });
-
 // Clean up old offline messages (TTL: 24 hours)
 setInterval(async () => {
   try {
@@ -46,7 +41,6 @@ setInterval(async () => {
     console.error('Error cleaning up offline messages:', err.message, err.stack);
   }
 }, 24 * 60 * 60 * 1000); // Run daily
-
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
@@ -60,7 +54,6 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   });
   console.log('Using HTTPS server for local development');
 }
-
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
   if (proto && proto !== 'https') {
@@ -112,15 +105,12 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
-
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
 const AUDIT_FILE_BASE = path.join(__dirname, 'audit');
-const FEATURES_FILE = path.join('/data', 'features.json');
-const STATS_FILE = path.join('/data', 'stats.json');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -139,29 +129,10 @@ if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
-const secretFile = path.join('/data', 'jwt_secret.txt');
-const previousSecretFile = path.join('/data', 'previous_jwt_secret.txt');
 let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  if (fs.existsSync(secretFile)) {
-    JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
-  } else {
-    JWT_SECRET = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(secretFile, JWT_SECRET);
-    console.log('Generated new JWT secret and saved to disk.');
-  }
-}
-if (fs.existsSync(secretFile)) {
-  const stats = fs.statSync(secretFile);
-  const mtime = stats.mtime.getTime();
-  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-  if (mtime < thirtyDaysAgo) {
-    const previousSecret = JWT_SECRET;
-    JWT_SECRET = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(secretFile, JWT_SECRET);
-    fs.writeFileSync(previousSecretFile, previousSecret);
-    console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
-  }
+  JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  console.log('Generated new JWT secret (in-memory).');
 }
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
@@ -182,32 +153,17 @@ let features = {
   enableP2P: true,
   enableRelay: true
 };
-if (fs.existsSync(FEATURES_FILE)) {
-  try {
-    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
-    console.log('Loaded features:', features);
-  } catch (err) {
-    console.error('Error loading features file:', err);
-  }
-} else {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
-}
-let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
-
+console.log('Using default features (in-memory):', features);
+let aggregatedStats = { daily: {} };
 function saveFeatures() {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
-  console.log('Saved features:', features);
+  console.log('Features updated (in-memory):', features);
 }
-
 function saveAggregatedStats() {
-  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
-  console.log('Saved aggregated stats to disk');
+  console.log('Saved aggregated stats (in-memory)');
 }
-
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
-
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -218,7 +174,6 @@ function isValidBase64(str) {
   if (!isValid) console.warn('Invalid base64 detected:', str);
   return isValid;
 }
-
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -482,7 +437,6 @@ function validateMessage(data) {
   }
   return { valid: true };
 }
-
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -492,7 +446,6 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
-
 setInterval(() => {
   randomCodes.forEach(code => {
     if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
@@ -502,7 +455,6 @@ setInterval(() => {
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
-
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
@@ -510,7 +462,6 @@ const pingInterval = setInterval(() => {
     ws.ping();
   });
 }, 50000);
-
 setInterval(() => {
   const now = Date.now();
   revokedTokens.forEach((expiry, token) => {
@@ -531,7 +482,6 @@ setInterval(() => {
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 600000);
-
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -632,26 +582,8 @@ wss.on('connection', (ws, req) => {
             return;
           }
         } catch (err) {
-          if (fs.existsSync(previousSecretFile)) {
-            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
-            try {
-              let decoded = jwt.verify(data.token, previousSecret);
-              if (decoded.clientId !== data.clientId) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
-                return;
-              }
-              if (revokedTokens.has(data.token)) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
-                return;
-              }
-            } catch (previousErr) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-              return;
-            }
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-            return;
-          }
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+          return;
         }
       }
       if (data.type === 'connect') {
@@ -687,32 +619,8 @@ wss.on('connection', (ws, req) => {
           clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
           ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
         } catch (err) {
-          if (fs.existsSync(previousSecretFile)) {
-            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
-            try {
-              const decoded = jwt.verify(data.refreshToken, previousSecret);
-              if (decoded.clientId !== data.clientId) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
-                return;
-              }
-              if (revokedTokens.has(data.refreshToken)) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
-                return;
-              }
-              const oldRefreshExpiry = decoded.exp * 1000;
-              revokedTokens.set(data.refreshToken, oldRefreshExpiry);
-              const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
-              const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
-              clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
-              ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
-            } catch (previousErr) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
-              return;
-            }
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
-            return;
-          }
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+          return;
         }
         return;
       }
@@ -1388,7 +1296,6 @@ wss.on('connection', (ws, req) => {
     await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]);
   });
 });
-
 function restrictRate(ws) {
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
@@ -1405,7 +1312,6 @@ function restrictRate(ws) {
   }
   return true;
 }
-
 function restrictClientSize(clientId, size) {
   const now = Date.now();
   const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
@@ -1422,7 +1328,6 @@ function restrictClientSize(clientId, size) {
   }
   return true;
 }
-
 function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const now = Date.now();
@@ -1441,7 +1346,6 @@ function restrictIpRate(ip, action) {
   }
   return true;
 }
-
 function restrictIpDaily(ip, action) {
   const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
@@ -1456,7 +1360,6 @@ function restrictIpDaily(ip, action) {
   }
   return true;
 }
-
 function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
   const hashedUa = hashUa(ua);
@@ -1486,17 +1389,14 @@ function incrementFailure(ip, ua) {
     ipFailureCounts.delete(key);
   }
 }
-
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
-
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
-
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
@@ -1534,7 +1434,6 @@ function logStats(data) {
     }
   });
 }
-
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -1555,10 +1454,8 @@ function rotateAuditLog() {
   });
   fs.writeFileSync(currentFile, '');
 }
-
 rotateAuditLog();
 setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
-
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);

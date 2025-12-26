@@ -8,6 +8,8 @@ const http = require('http');
 const https = require('https');
 const url = require('url'); // Added for parsing URL to ignore query params
 const crypto = require('crypto');
+const otplib = require('otplib');
+
 
 // Check for certificate files for local HTTPS
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
@@ -92,12 +94,37 @@ const ipFailureCounts = new Map();
 const ipBans = new Map();
 const revokedTokens = new Map();
 const clientTokens = new Map();
+const totpSecrets = new Map(); // New: Store TOTP secrets per room code
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-fallback';
+const secretFile = path.join('/data', 'jwt_secret.txt');
+const previousSecretFile = path.join('/data', 'previous_jwt_secret.txt');
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  if (fs.existsSync(secretFile)) {
+    JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
+  } else {
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(secretFile, JWT_SECRET);
+    console.log('Generated new JWT secret and saved to disk.');
+  }
+}
+// Check for rotation on startup
+if (fs.existsSync(secretFile)) {
+  const stats = fs.statSync(secretFile);
+  const mtime = stats.mtime.getTime();
+  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  if (mtime < thirtyDaysAgo) {
+    const previousSecret = JWT_SECRET;
+    JWT_SECRET = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(secretFile, JWT_SECRET);
+    fs.writeFileSync(previousSecretFile, previousSecret);
+    console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
+  }
+}
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
   throw new Error('TURN_USERNAME environment variable is not set. Please configure it.');
@@ -143,6 +170,11 @@ function saveAggregatedStats() {
   console.log('Saved aggregated stats to disk');
 }
 
+// Validate base32 secret
+function isValidBase32(str) {
+  return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
+}
+
 // Validate base64 string
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
@@ -183,19 +215,19 @@ function validateMessage(data) {
       }
       break;
     case 'public-key':
-      if (!data.publicKey || !isValidBase64(data.publicKey)) {
-        return { valid: false, error: 'public-key: invalid publicKey format' };
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length > 1024) { // Limit key size
+        return { valid: false, error: 'public-key: invalid or too large publicKey format' };
       }
       if (!data.code) {
         return { valid: false, error: 'public-key: code required' };
       }
       break;
     case 'encrypted-room-key':
-      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
-        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey' };
+      if (!data.encryptedKey || !isValidBase64(data.encryptedKey) || data.encryptedKey.length > 1024) {
+        return { valid: false, error: 'encrypted-room-key: invalid or too large encryptedKey' };
       }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'encrypted-room-key: invalid iv' };
+      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 1024) {
+        return { valid: false, error: 'encrypted-room-key: invalid or too large iv' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'encrypted-room-key: targetId required as string' };
@@ -205,11 +237,11 @@ function validateMessage(data) {
       }
       break;
     case 'new-room-key':
-      if (!data.encrypted || !isValidBase64(data.encrypted)) {
-        return { valid: false, error: 'new-room-key: invalid encrypted' };
+      if (!data.encrypted || !isValidBase64(data.encrypted) || data.encrypted.length > 1024) {
+        return { valid: false, error: 'new-room-key: invalid or too large encrypted' };
       }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'new-room-key: invalid iv' };
+      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 1024) {
+        return { valid: false, error: 'new-room-key: invalid or too large iv' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'new-room-key: targetId required as string' };
@@ -225,6 +257,9 @@ function validateMessage(data) {
       if (!data.username) {
         return { valid: false, error: 'join: username required' };
       }
+      if (data.totpCode && typeof data.totpCode !== 'string') {
+        return { valid: false, error: 'join: totpCode must be a string if provided' };
+      }
       break;
     case 'set-max-clients':
       if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
@@ -239,6 +274,12 @@ function validateMessage(data) {
       if (!data.offer && !data.answer) {
         return { valid: false, error: `${data.type}: offer or answer required` };
       }
+      if (data.offer && JSON.stringify(data.offer).length > 10240) { // 10KB limit for offer/answer
+        return { valid: false, error: `${data.type}: offer/answer too large` };
+      }
+      if (data.answer && JSON.stringify(data.answer).length > 10240) {
+        return { valid: false, error: `${data.type}: offer/answer too large` };
+      }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: `${data.type}: targetId required as string` };
       }
@@ -249,6 +290,9 @@ function validateMessage(data) {
     case 'candidate':
       if (!data.candidate) {
         return { valid: false, error: 'candidate: candidate required' };
+      }
+      if (JSON.stringify(data.candidate).length > 1024) { // Limit candidate size
+        return { valid: false, error: 'candidate: candidate too large' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'candidate: targetId required as string' };
@@ -269,17 +313,17 @@ function validateMessage(data) {
     case 'relay-image':
     case 'relay-voice':
       const payloadField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
-      if (!data[payloadField] || !isValidBase64(data[payloadField])) {
-        return { valid: false, error: `${data.type}: invalid ${payloadField}` };
+      if (!data[payloadField] || !isValidBase64(data[payloadField]) || data[payloadField].length > 13653) { // 10KB base64 limit
+        return { valid: false, error: `${data.type}: invalid or too large ${payloadField}` };
       }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: `${data.type}: invalid iv` };
+      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 1024) {
+        return { valid: false, error: `${data.type}: invalid or too large iv` };
       }
-      if (!data.salt || !isValidBase64(data.salt)) {
-        return { valid: false, error: `${data.type}: invalid salt` };
+      if (!data.salt || !isValidBase64(data.salt) || data.salt.length > 1024) {
+        return { valid: false, error: `${data.type}: invalid or too large salt` };
       }
-      if (!data.signature || !isValidBase64(data.signature)) {
-        return { valid: false, error: `${data.type}: invalid signature` };
+      if (!data.signature || !isValidBase64(data.signature) || data.signature.length > 1024) {
+        return { valid: false, error: `${data.type}: invalid or too large signature` };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: `${data.type}: messageId required as string` };
@@ -301,6 +345,14 @@ function validateMessage(data) {
     case 'ping':
     case 'pong':
       // No additional fields needed
+      break;
+    case 'set-totp':
+      if (!data.code) {
+        return { valid: false, error: 'set-totp: code required' };
+      }
+      if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
+        return { valid: false, error: 'set-totp: valid base32 secret required' };
+      }
       break;
     default:
       return { valid: false, error: 'Unknown message type' };
@@ -422,7 +474,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         try {
-          const decoded = jwt.verify(data.token, JWT_SECRET);
+          let decoded = jwt.verify(data.token, JWT_SECRET);
           if (decoded.clientId !== data.clientId) {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
             return;
@@ -432,8 +484,27 @@ wss.on('connection', (ws, req) => {
             return;
           }
         } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-          return;
+          // Try previous secret if exists
+          if (fs.existsSync(previousSecretFile)) {
+            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
+            try {
+              let decoded = jwt.verify(data.token, previousSecret);
+              if (decoded.clientId !== data.clientId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
+                return;
+              }
+              if (revokedTokens.has(data.token)) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
+                return;
+              }
+            } catch (previousErr) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+              return;
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+            return;
+          }
         }
       }
       if (data.type === 'connect') {
@@ -470,8 +541,35 @@ wss.on('connection', (ws, req) => {
           clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
           ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
         } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
-          return;
+          // Try previous secret for refresh token
+          if (fs.existsSync(previousSecretFile)) {
+            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
+            try {
+              const decoded = jwt.verify(data.refreshToken, previousSecret);
+              if (decoded.clientId !== data.clientId) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
+                return;
+              }
+              if (revokedTokens.has(data.refreshToken)) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
+                return;
+              }
+              // Revoke old
+              const oldRefreshExpiry = decoded.exp * 1000;
+              revokedTokens.set(data.refreshToken, oldRefreshExpiry);
+              // Issue new with current secret
+              const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
+              const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
+              clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
+              ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
+            } catch (previousErr) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+              return;
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+            return;
+          }
         }
         return;
       }
@@ -532,6 +630,19 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid code format: xxxx-xxxx-xxxx-xxxx.', code: data.code }));
           incrementFailure(clientIp);
           return;
+        }
+        const roomTotpSecret = totpSecrets.get(code);
+        if (roomTotpSecret && !data.totpCode) {
+          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+          return;
+        }
+        if (roomTotpSecret && data.totpCode) {
+          const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
+          if (!isValid) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
+            incrementFailure(clientIp);
+            return;
+          }
         }
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
@@ -600,6 +711,14 @@ wss.on('connection', (ws, req) => {
           room.maxClients = Math.min(data.maxClients, 10);
           broadcast(data.code, { type: 'max-clients', maxClients: room.maxClients, totalClients: room.clients.size });
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.clients.size });
+        }
+      }
+      if (data.type === 'set-totp') {
+        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
+          totpSecrets.set(data.code, data.secret);
+          broadcast(data.code, { type: 'totp-enabled', code: data.code });
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
         }
       }
       if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
@@ -750,6 +869,7 @@ wss.on('connection', (ws, req) => {
             if (data.feature === 'service' && !features.enableService) {
               rooms.clear();
               randomCodes.clear();
+              totpSecrets.clear(); // Clear TOTP secrets on service disable
             }
           } else {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
@@ -799,6 +919,7 @@ wss.on('connection', (ws, req) => {
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
         randomCodes.delete(ws.code);
+        totpSecrets.delete(ws.code); // Delete TOTP secret on room close
         broadcast(ws.code, {
           type: 'client-disconnected',
           clientId: ws.clientId,

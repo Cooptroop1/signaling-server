@@ -10,46 +10,9 @@ const url = require('url');
 const crypto = require('crypto');
 const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
-const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
 
-// New: Hash password
-async function hashPassword(password) {
-  return bcrypt.hash(password, 10);
-}
-
-// New: Validate password
-async function validatePassword(input, hash) {
-  return bcrypt.compare(input, hash);
-}
-
-const dbPool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // For Render Postgres
-});
-
-// Test DB connection on startup
-dbPool.connect((err) => {
-  if (err) {
-    console.error('DB connection error:', err.message, err.stack);
-  } else {
-    console.log('Connected to DB successfully');
-  }
-});
-
-const CERT_KEY_PATH = 'path/to/your/private-key.pem';
-const CERT_PATH = 'path/to/your/fullchain.pem';
-let server;
-if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
-  server = http.createServer();
-  console.log('Using HTTP server (production or missing certificates)');
-} else {
-  server = https.createServer({
-    key: fs.readFileSync(CERT_KEY_PATH),
-    cert: fs.readFileSync(CERT_PATH)
-  });
-  console.log('Using HTTPS server for local development');
-}
+const server = http.createServer();
+console.log('Using HTTP server');
 
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
@@ -102,15 +65,12 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
-
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const AUDIT_FILE_BASE = path.join(__dirname, 'audit'); // Base name without extension
-const FEATURES_FILE = path.join('/data', 'features.json');
-const STATS_FILE = path.join('/data', 'stats.json');
+const AUDIT_FILE_BASE = path.join(__dirname, 'audit');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -123,35 +83,15 @@ const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
 const processedMessageIds = new Map();
-const clientSizeLimits = new Map(); // New: Per-client size tracking
+const clientSizeLimits = new Map();
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
-const secretFile = path.join('/data', 'jwt_secret.txt');
-const previousSecretFile = path.join('/data', 'previous_jwt_secret.txt');
-let JWT_SECRET = process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  if (fs.existsSync(secretFile)) {
-    JWT_SECRET = fs.readFileSync(secretFile, 'utf8').trim();
-  } else {
-    JWT_SECRET = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(secretFile, JWT_SECRET);
-    console.log('Generated new JWT secret and saved to disk.');
-  }
-}
-if (fs.existsSync(secretFile)) {
-  const stats = fs.statSync(secretFile);
-  const mtime = stats.mtime.getTime();
-  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-  if (mtime < thirtyDaysAgo) {
-    const previousSecret = JWT_SECRET;
-    JWT_SECRET = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(secretFile, JWT_SECRET);
-    fs.writeFileSync(previousSecretFile, previousSecret);
-    console.log('Rotated JWT secret. New secret saved, previous retained for grace period.');
-  }
+  throw new Error('JWT_SECRET environment variable is not set. Please configure it.');
 }
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
@@ -172,34 +112,11 @@ let features = {
   enableP2P: true,
   enableRelay: true
 };
-
-if (fs.existsSync(FEATURES_FILE)) {
-  try {
-    features = JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf8'));
-    console.log('Loaded features:', features);
-  } catch (err) {
-    console.error('Error loading features file:', err);
-  }
-} else {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
-}
-
-let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
-
-function saveFeatures() {
-  fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
-  console.log('Saved features:', features);
-}
-
-function saveAggregatedStats() {
-  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
-  console.log('Saved aggregated stats to disk');
-}
+console.log('Loaded features:', features);
 
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
-
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -210,7 +127,6 @@ function isValidBase64(str) {
   if (!isValid) console.warn('Invalid base64 detected:', str);
   return isValid;
 }
-
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -404,8 +320,8 @@ function validateMessage(data) {
         return { valid: false, error: 'toggle-feature: feature required as string' };
       }
       break;
-    case 'export-stats-csv': // New
-    case 'export-logs-csv': // New
+    case 'export-stats-csv':
+    case 'export-logs-csv':
       if (!data.secret || typeof data.secret !== 'string') {
         return { valid: false, error: data.type + ': secret required as string' };
       }
@@ -421,52 +337,11 @@ function validateMessage(data) {
         return { valid: false, error: 'set-totp: valid base32 secret required' };
       }
       break;
-    // New for usernames
-    case 'register-username':
-      if (!data.username) {
-        return { valid: false, error: 'register-username: username required' };
-      }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-        return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
-      }
-      if (data.public_key && !isValidBase64(data.public_key)) {
-        return { valid: false, error: 'register-username: invalid public_key (base64)' };
-      }
-      break;
-    case 'login-username':
-      if (!data.username) {
-        return { valid: false, error: 'login-username: username required' };
-      }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-        return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
-      }
-      break;
-    case 'find-user':
-      if (!data.username) {
-        return { valid: false, error: 'find-user: username required' };
-      }
-      break;
-    // New for offline message
-    case 'send-offline-message':
-      if (!data.to_username) {
-        return { valid: false, error: 'send-offline-message: to_username required' };
-      }
-      if (!data.encrypted || !isValidBase64(data.encrypted)) {
-        return { valid: false, error: 'send-offline-message: invalid encrypted (base64)' };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'send-offline-message: invalid iv (base64)' };
-      }
-      if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
-        return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
-      }
-      break;
     default:
       return { valid: false, error: 'Unknown message type' };
   }
   return { valid: true };
 }
-
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -476,7 +351,6 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
-
 setInterval(() => {
   randomCodes.forEach(code => {
     if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
@@ -486,7 +360,6 @@ setInterval(() => {
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
-
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
@@ -494,7 +367,6 @@ const pingInterval = setInterval(() => {
     ws.ping();
   });
 }, 50000);
-
 setInterval(() => {
   const now = Date.now();
   revokedTokens.forEach((expiry, token) => {
@@ -504,7 +376,7 @@ setInterval(() => {
   });
   processedMessageIds.forEach((messageSet, code) => {
     const now = Date.now();
-    messageSet.forEach((timestamp, nonce) => { // Changed from messageId to nonce
+    messageSet.forEach((timestamp, nonce) => {
       if (now - timestamp > 300000) {
         messageSet.delete(nonce);
       }
@@ -514,8 +386,7 @@ setInterval(() => {
     }
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
-}, 600000); // Changed to every 10 minutes (600000 ms)
-
+}, 600000);
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -557,7 +428,6 @@ wss.on('connection', (ws, req) => {
         incrementFailure(clientIp, ws.userAgent);
         return;
       }
-      // Skip escaping for specific fields that should remain untouched
       const skipEscapeFields = [
         data.type === 'public-key' && 'publicKey',
         data.type === 'encrypted-room-key' && 'publicKey',
@@ -571,9 +441,6 @@ wss.on('connection', (ws, req) => {
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
-        data.type === 'send-offline-message' && 'encrypted',
-        data.type === 'send-offline-message' && 'iv',
-        data.type === 'send-offline-message' && 'ephemeral_public'
       ];
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -616,26 +483,8 @@ wss.on('connection', (ws, req) => {
             return;
           }
         } catch (err) {
-          if (fs.existsSync(previousSecretFile)) {
-            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
-            try {
-              let decoded = jwt.verify(data.token, previousSecret);
-              if (decoded.clientId !== data.clientId) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Invalid token: clientId mismatch' }));
-                return;
-              }
-              if (revokedTokens.has(data.token)) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Token revoked' }));
-                return;
-              }
-            } catch (previousErr) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-              return;
-            }
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
-            return;
-          }
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired token' }));
+          return;
         }
       }
       if (data.type === 'connect') {
@@ -646,8 +495,6 @@ wss.on('connection', (ws, req) => {
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
-        // Update last_active on connect
-        await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]);
         return;
       }
       if (data.type === 'refresh-token') {
@@ -672,32 +519,8 @@ wss.on('connection', (ws, req) => {
           clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
           ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
         } catch (err) {
-          if (fs.existsSync(previousSecretFile)) {
-            const previousSecret = fs.readFileSync(previousSecretFile, 'utf8').trim();
-            try {
-              const decoded = jwt.verify(data.refreshToken, previousSecret);
-              if (decoded.clientId !== data.clientId) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Invalid refresh token: clientId mismatch' }));
-                return;
-              }
-              if (revokedTokens.has(data.refreshToken)) {
-                ws.send(JSON.stringify({ type: 'error', message: 'Refresh token revoked' }));
-                return;
-              }
-              const oldRefreshExpiry = decoded.exp * 1000;
-              revokedTokens.set(data.refreshToken, oldRefreshExpiry);
-              const newAccessToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '10m' });
-              const newRefreshToken = jwt.sign({ clientId: data.clientId }, JWT_SECRET, { expiresIn: '1h' });
-              clientTokens.set(data.clientId, { accessToken: newAccessToken, refreshToken: newRefreshToken });
-              ws.send(JSON.stringify({ type: 'token-refreshed', accessToken: newAccessToken, refreshToken: newRefreshToken }));
-            } catch (previousErr) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
-              return;
-            }
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
-            return;
-          }
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or expired refresh token' }));
+          return;
         }
         return;
       }
@@ -930,7 +753,7 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
-        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
+        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0;
         if (!restrictClientSize(data.clientId, payloadSize)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
@@ -957,12 +780,12 @@ wss.on('connection', (ws, req) => {
           processedMessageIds.set(data.code, new Map());
         }
         const messageSet = processedMessageIds.get(data.code);
-        if (messageSet.has(data.nonce)) { // Changed to check nonce instead of messageId
+        if (messageSet.has(data.nonce)) {
           console.warn(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
           return;
         }
         const now = Date.now();
-        if (Math.abs(now - data.timestamp) > 300000) { // 5 minutes window
+        if (Math.abs(now - data.timestamp) > 300000) {
           console.warn(`Invalid timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp} (now: ${now})`);
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
           return;
@@ -972,7 +795,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
           return;
         }
-        messageSet.set(data.nonce, data.timestamp); // Changed to set nonce
+        messageSet.set(data.nonce, data.timestamp);
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
@@ -987,7 +810,7 @@ wss.on('connection', (ws, req) => {
               timestamp: data.timestamp,
               iv: data.iv,
               signature: data.signature,
-              nonce: data.nonce // Forward nonce
+              nonce: data.nonce
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
           }
@@ -1038,7 +861,6 @@ wss.on('connection', (ws, req) => {
           const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
-            saveFeatures();
             const timestamp = new Date().toISOString();
             fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
@@ -1052,9 +874,8 @@ wss.on('connection', (ws, req) => {
               }
             });
             if (data.feature === 'service' && !features.enableService) {
-              // Invalidate all tokens on service toggle off
               clientTokens.forEach((tokens, clientId) => {
-                revokedTokens.set(tokens.accessToken, Date.now() + 1000); // Immediate revocation
+                revokedTokens.set(tokens.accessToken, Date.now() + 1000);
                 if (tokens.refreshToken) {
                   revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
                 }
@@ -1074,7 +895,6 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      // New: Handle export requests
       if (data.type === 'export-stats-csv') {
         if (data.secret === ADMIN_SECRET) {
           const csv = generateStatsCSV();
@@ -1110,141 +930,13 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      // New for usernames
-      if (data.type === 'register-username') {
-        const { username, password, public_key } = data;
-        if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
-          try {
-            const checkRes = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
-            if (checkRes.rows.length > 0) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Username taken.' }));
-              return;
-            }
-            const passwordHash = await hashPassword(password);
-            await dbPool.query(
-              'INSERT INTO users (username, password_hash, client_id, public_key) VALUES ($1, $2, $3, $4)',
-              [username, passwordHash, data.clientId, public_key || null]
-            );
-            ws.send(JSON.stringify({ type: 'username-registered', username }));
-          } catch (err) {
-            console.error('DB error registering username:', err.message, err.stack);
-            ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username. Check server logs for details.' }));
-          }
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
-        }
-        return;
-      }
-      if (data.type === 'login-username') {
-        const { username, password } = data;
-        if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
-          try {
-            const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
-            if (res.rows.length === 0) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
-              return;
-            }
-            const user = res.rows[0];
-            const valid = await validatePassword(password, user.password_hash);
-            if (!valid) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
-              return;
-            }
-            // Update client_id
-            await dbPool.query('UPDATE users SET client_id = $1 WHERE id = $2', [data.clientId, user.id]);
-            // Fetch offline messages with from_username
-            const msgRes = await dbPool.query(`
-              SELECT om.*, u.username AS from_username
-              FROM offline_messages om
-              JOIN users u ON om.from_user_id = u.id
-              WHERE om.to_user_id = $1
-            `, [user.id]);
-            const offlineMessages = msgRes.rows.map(msg => ({
-              from: msg.from_username,
-              code: JSON.parse(msg.message).code || null,
-              type: JSON.parse(msg.message).type || 'connection-request',
-              encrypted: JSON.parse(msg.message).encrypted || null,
-              iv: JSON.parse(msg.message).iv || null,
-              ephemeral_public: JSON.parse(msg.message).ephemeral_public || null
-            }));
-            // Delete pending messages
-            await dbPool.query('DELETE FROM offline_messages WHERE to_user_id = $1', [user.id]);
-            ws.send(JSON.stringify({ type: 'login-success', username, offlineMessages }));
-          } catch (err) {
-            console.error('DB error during login:', err.message, err.stack);
-            ws.send(JSON.stringify({ type: 'error', message: 'Failed to login. Check server logs.' }));
-          }
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
-        }
-        return;
-      }
-      if (data.type === 'find-user') {
-        const { username } = data;
-        try {
-          const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
-          if (res.rows.length === 0) {
-            ws.send(JSON.stringify({ type: 'user-not-found' }));
-            return;
-          }
-          const user = res.rows[0];
-          // Create dynamic room
-          const dynamicCode = uuidv4().replace(/-/g, '').substring(0,16).match(/.{1,4}/g).join('-');
-          // Notify online user if connected (via ws)
-          const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
-          if (ownerWs) {
-            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
-          } else {
-            // Queue notification
-            await dbPool.query(
-              'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ((SELECT id FROM users WHERE username = $1), $2, $3)',
-              [data.username, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
-            );
-          }
-          // Use last_active for status
-          const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
-          const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
-          ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
-        } catch (err) {
-          console.error('DB error finding user:', err.message, err.stack);
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));
-        }
-        return;
-      }
-      // New: Send offline message
-      if (data.type === 'send-offline-message') {
-        const { to_username, encrypted, iv, ephemeral_public } = data;
-        try {
-          const res = await dbPool.query('SELECT id FROM users WHERE username = $1', [to_username]);
-          if (res.rows.length === 0) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Recipient not found.' }));
-            return;
-          }
-          const to_user_id = res.rows[0].id;
-          const from_res = await dbPool.query('SELECT id FROM users WHERE username = $1', [username]); // Assume sender has username
-          const from_user_id = from_res.rows[0]?.id;
-          if (!from_user_id) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Sender must have a claimed username.' }));
-            return;
-          }
-          await dbPool.query(
-            'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-            [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public })]
-          );
-          ws.send(JSON.stringify({ type: 'offline-message-sent' }));
-        } catch (err) {
-          console.error('DB error sending offline message:', err.message, err.stack);
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to send offline message.' }));
-        }
-        return;
-      }
     } catch (error) {
       console.error('Error processing message:', error.message, error.stack);
       ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again. Check server logs.' }));
       incrementFailure(clientIp, ws.userAgent);
     }
   });
-  ws.on('close', async () => {
+  ws.on('close', () => {
     if (ws.clientId) {
       const tokens = clientTokens.get(ws.clientId);
       if (tokens) {
@@ -1299,11 +991,8 @@ wss.on('connection', (ws, req) => {
         });
       }
     }
-    // Update last_active on close
-    await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]);
   });
 });
-
 function restrictRate(ws) {
   const now = Date.now();
   const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
@@ -1320,8 +1009,6 @@ function restrictRate(ws) {
   }
   return true;
 }
-
-// New: Per-client size cap (1MB/min total)
 function restrictClientSize(clientId, size) {
   const now = Date.now();
   const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
@@ -1331,14 +1018,13 @@ function restrictClientSize(clientId, size) {
   }
   sizeLimit.totalSize += size;
   clientSizeLimits.set(clientId, sizeLimit);
-  if (sizeLimit.totalSize > 1048576) { // 1MB
+  if (sizeLimit.totalSize > 1048576) {
     console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
     fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
     return false;
   }
   return true;
 }
-
 function restrictIpRate(ip, action) {
   const hashedIp = hashIp(ip);
   const now = Date.now();
@@ -1357,7 +1043,6 @@ function restrictIpRate(ip, action) {
   }
   return true;
 }
-
 function restrictIpDaily(ip, action) {
   const hashedIp = hashIp(ip);
   const day = new Date().toISOString().slice(0, 10);
@@ -1372,7 +1057,6 @@ function restrictIpDaily(ip, action) {
   }
   return true;
 }
-
 function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
   const hashedUa = hashUa(ua);
@@ -1402,22 +1086,19 @@ function incrementFailure(ip, ua) {
     ipFailureCounts.delete(key);
   }
 }
-
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
-
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
-
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
-    clientId: validator.escape(data.clientId || ''), // Escape all strings
+    clientId: validator.escape(data.clientId || ''),
     username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
     targetId: validator.escape(data.targetId || ''),
     code: validator.escape(data.code || ''),
@@ -1450,20 +1131,15 @@ function logStats(data) {
     }
   });
 }
-
-// New: Audit log rotation function
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const currentFile = `${AUDIT_FILE_BASE}.log`;
   const rotatedFile = `${AUDIT_FILE_BASE}-${today}.log`;
-
   if (fs.existsSync(currentFile)) {
     fs.renameSync(currentFile, rotatedFile);
     console.log(`Rotated audit log to ${rotatedFile}`);
   }
-
-  // Delete files older than 7 days
   const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
   files.forEach(file => {
     const fileDate = file.match(/audit-(\d{4}-\d{2}-\d{2})\.log/)[1];
@@ -1473,15 +1149,10 @@ function rotateAuditLog() {
       console.log(`Deleted old audit log: ${file}`);
     }
   });
-
-  // Create new current file
   fs.writeFileSync(currentFile, '');
 }
-
-// Call rotation on startup and every 24 hours
 rotateAuditLog();
 setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
-
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -1496,11 +1167,7 @@ function updateLogFile() {
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
     }
   });
-  if (!aggregatedStats.daily) aggregatedStats.daily = {};
-  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
-  saveAggregatedStats();
 }
-
 fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
@@ -1508,7 +1175,6 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
-
 function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;
@@ -1516,15 +1182,15 @@ function computeAggregate(days) {
     const date = new Date(now);
     date.setDate(date.getDate() - i);
     const key = date.toISOString().slice(0, 10);
-    if (aggregatedStats.daily[key]) {
-      users += aggregatedStats.daily[key].users;
-      connections += aggregatedStats.daily[key].connections;
+    if (dailyUsers.has(key)) {
+      users += dailyUsers.get(key).size;
+    }
+    if (dailyConnections.has(key)) {
+      connections += dailyConnections.get(key).size;
     }
   }
   return { users, connections };
 }
-
-// New: Generate CSV for stats
 function generateStatsCSV() {
   let csv = 'Period,Users,Connections\n';
   const now = new Date();
@@ -1539,8 +1205,6 @@ function generateStatsCSV() {
   csv += `All-Time,${allTimeUsers.size},N/A\n`;
   return csv;
 }
-
-// New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
 function generateLogsCSV() {
   let csv = 'Timestamp,Event\n';
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
@@ -1553,7 +1217,6 @@ function generateLogsCSV() {
   });
   return csv;
 }
-
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -1567,7 +1230,6 @@ function broadcast(code, message) {
     console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
-
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -1576,11 +1238,9 @@ function broadcastRandomCodes() {
   });
   console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
 }
-
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
-
 function hashUa(ua) {
   if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
   const parser = new UAParser(ua);
@@ -1588,7 +1248,6 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
-
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });

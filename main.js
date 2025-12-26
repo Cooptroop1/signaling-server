@@ -2,8 +2,6 @@ let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
-let grokBotActive = false;
-let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map();
 let audioOutputMode = 'earpiece';
 let totpEnabled = false;
@@ -22,13 +20,11 @@ const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
-
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');
     return;
   }
-
   // Global send rate limit check (aggregate all types)
   const now = performance.now();
   if (now - globalSendRate.startTime >= 60000) {
@@ -39,7 +35,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Global message rate limit exceeded (50/min). Please wait.');
     return;
   }
-
   // New: Client-side size limit check (mirror server 1MB/min)
   if (now - globalSizeRate.startTime >= 60000) {
     globalSizeRate.totalSize = 0;
@@ -50,7 +45,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
     return;
   }
-
   let dataToSend = content || base64;
   if (type === 'image' || type === 'file') {
     if (!features.enableImages) {
@@ -63,12 +57,10 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       return;
     }
   }
-
   if (file && file.size > 5 * 1024 * 1024) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
     return;
   }
-
   const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
   const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
@@ -81,14 +73,12 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} rate limit reached (5/min). Please wait.`);
     return;
   }
-
   if (file && type === 'image') {
     const maxWidth = 640;
     const maxHeight = 360;
     let quality = 0.4;
     if (file.size > 3 * 1024 * 1024) quality = 0.3;
     else if (file.size > 1 * 1024 * 1024) quality = 0.35;
-
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
@@ -120,7 +110,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       reader.readAsDataURL(file);
     });
   }
-
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
@@ -137,11 +126,9 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
   const signature = await signMessage(signingKey, toSign);
   let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
-
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
   }
-
   const jsonString = JSON.stringify(payload);
   if (useRelay) {
     sendRelayMessage(`relay-${type}`, payload);
@@ -172,11 +159,9 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Error: No connections.');
     return;
   }
-
   // Increment global count and size after successful send
   globalSendRate.count += 1;
   globalSizeRate.totalSize += payloadSize;
-
   const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-bubble self';
@@ -185,7 +170,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   messageDiv.appendChild(document.createTextNode(`${username}: `));
-
   if (type === 'image' || type === 'voice' || type === 'file') {
     let element;
     if (type === 'image') {
@@ -215,7 +199,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   } else {
     messageDiv.appendChild(document.createTextNode(sanitizedContent));
   }
-
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
@@ -225,13 +208,9 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     await triggerRatchet();
   }
 }
-
 async function sendMessage(content) {
   if (!content) return;
-  if (grokBotActive && content.startsWith('/grok ')) {
-    const query = content.slice(6).trim();
-    if (query) await sendToGrok(query);
-  } else if (content === '/ratchet' && isInitiator) {
+  if (content === '/ratchet' && isInitiator) {
     await triggerRatchet();
     showStatusMessage('Key ratchet triggered manually.');
   } else {
@@ -242,7 +221,6 @@ async function sendMessage(content) {
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
 }
-
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
@@ -255,7 +233,6 @@ async function sendMedia(file, type) {
   await prepareAndSendMessage({ type, file });
   document.getElementById(`${type}Button`)?.focus();
 }
-
 // Rest of the code remains the same...
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
@@ -420,7 +397,6 @@ async function startPeerConnection(targetId, isOfferer) {
   }, 10000);
   connectionTimeouts.set(targetId, timeout);
 }
-
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
@@ -517,7 +493,6 @@ function setupDataChannel(dataChannel, targetId) {
     }
   };
 }
-
 async function processReceivedMessage(data, targetId) {
   if (data.type === 'voice-call-start') {
     if (!voiceCallActive) {
@@ -635,7 +610,6 @@ async function processReceivedMessage(data, targetId) {
     });
   }
 }
-
 async function handleOffer(offer, targetId) {
   console.log(`Handling offer from ${targetId} for code: ${code}`);
   if (offer.type !== 'offer') {
@@ -665,7 +639,6 @@ async function handleOffer(offer, targetId) {
     // Removed showStatusMessage to suppress transient error
   }
 }
-
 async function handleAnswer(answer, targetId) {
   console.log(`Handling answer from ${targetId} for code: ${code}`);
   if (!peerConnections.has(targetId)) {
@@ -695,7 +668,6 @@ async function handleAnswer(answer, targetId) {
     // Removed showStatusMessage to suppress transient error
   }
 }
-
 async function handleCandidate(candidate, targetId) {
   console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
   if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
@@ -716,7 +688,6 @@ async function handleCandidate(candidate, targetId) {
     candidatesQueues.set(targetId, queue);
   }
 }
-
 // New helper to process queue with Promises for efficiency
 async function processCandidateQueue(peerConnection, queue) {
   for (const item of queue) {
@@ -737,7 +708,6 @@ async function processCandidateQueue(peerConnection, queue) {
     }
   }
 }
-
 async function toggleVoiceCall() {
   if (!features.enableVoiceCalls) {
     showStatusMessage('Voice calls are disabled by admin.');
@@ -751,7 +721,6 @@ async function toggleVoiceCall() {
     broadcastVoiceCallEvent('voice-call-start');
   }
 }
-
 async function startVoiceCall() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showStatusMessage('Microphone not supported.');
@@ -775,7 +744,6 @@ async function startVoiceCall() {
     showStatusMessage('Failed to access microphone for voice call.');
   }
 }
-
 function stopVoiceCall() {
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
@@ -795,7 +763,6 @@ function stopVoiceCall() {
   document.getElementById('audioOutputButton').classList.add('hidden');
   showStatusMessage('Voice call ended.');
 }
-
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection) {
@@ -807,7 +774,6 @@ async function renegotiate(targetId) {
       return;
     }
     renegotiationCounts.set(targetId, count + 1);
-
     if (!negotiationQueues.has(targetId)) {
       negotiationQueues.set(targetId, Promise.resolve());
     }
@@ -838,7 +804,6 @@ async function renegotiate(targetId) {
     console.log(`No peer connection for ${targetId}, cannot renegotiate.`);
   }
 }
-
 function sendSignalingMessage(type, additionalData) {
   if (!token || refreshingToken) {
     console.log('Token missing or refresh in progress, queuing signaling message');
@@ -856,7 +821,6 @@ function sendSignalingMessage(type, additionalData) {
     signalingQueue.get('global').push({ type, additionalData });
   }
 }
-
 function broadcastVoiceCallEvent(eventType) {
   dataChannels.forEach((dataChannel) => {
     if (dataChannel.readyState === 'open') {
@@ -864,7 +828,6 @@ function broadcastVoiceCallEvent(eventType) {
     }
   });
 }
-
 function sendRelayMessage(type, additionalData) {
   if (!token || refreshingToken) {
     console.log('Token missing or refresh in progress, queuing relay message');
@@ -882,7 +845,6 @@ function sendRelayMessage(type, additionalData) {
     signalingQueue.get('global').push({ type, additionalData });
   }
 }
-
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -896,7 +858,6 @@ function processSignalingQueue() {
   });
   signalingQueue.clear();
 }
-
 async function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
   code = codeParam;
@@ -962,13 +923,11 @@ async function autoConnect(codeParam) {
     document.getElementById('connectToggleButton')?.focus();
   }
 }
-
 function updateFeaturesUI() {
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
   const voiceCallButton = document.getElementById('voiceCallButton');
   const audioOutputButton = document.getElementById('audioOutputButton');
-  const grokButton = document.getElementById('grokButton');
   if (imageButton) {
     imageButton.classList.toggle('hidden', !features.enableImages);
     imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
@@ -994,10 +953,6 @@ function updateFeaturesUI() {
     audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
     audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
   }
-  if (grokButton) {
-    grokButton.classList.toggle('hidden', !features.enableGrokBot);
-    grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
-  }
   if (!features.enableService) {
     showStatusMessage('Service disabled by admin. Disconnecting...');
     socket.close();
@@ -1010,83 +965,14 @@ function updateFeaturesUI() {
     messages.classList.remove('waiting');
   }
 }
-
-async function sendToGrok(query) {
-  if (!grokApiKey) {
-    showStatusMessage('Error: xAI API key not set. Enter it in the Grok bot settings.');
-    return;
-  }
-  try {
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${grokApiKey}`
-      },
-      body: JSON.stringify({
-        model: 'grok-4',
-        messages: [{ role: 'user', content: query }]
-      })
-    });
-    if (!response.ok) {
-      throw new Error(`API error: ${response.statusText}`);
-    }
-    const data = await response.json();
-    const botResponse = data.choices[0].message.content;
-    const messages = document.getElementById('messages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message-bubble other';
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'timestamp';
-    timeSpan.textContent = new Date().toLocaleTimeString();
-    messageDiv.appendChild(timeSpan);
-    messageDiv.appendChild(document.createTextNode(`Grok Bot: ${sanitizeMessage(botResponse)}`));
-    messages.prepend(messageDiv);
-    messages.scrollTop = 0;
-  } catch (error) {
-    console.error('Grok API error:', error);
-    showStatusMessage('Error querying Grok: ' + error.message + '. Check your API key or visit https://x.ai/api for details.');
-  }
-}
-
-function toggleGrokBot() {
-  grokBotActive = !grokBotActive;
-  const grokButton = document.getElementById('grokButton');
-  const grokKeyContainer = document.getElementById('grokKeyContainer');
-  grokButton.classList.toggle('active', grokBotActive);
-  grokKeyContainer.classList.toggle('active', grokBotActive && !grokApiKey);
-  if (grokBotActive) {
-    if (!grokApiKey) {
-      showStatusMessage('Grok bot enabled. Enter your xAI API key below. For details, visit https://x.ai/api.');
-    } else {
-      showStatusMessage('Grok bot enabled. Use /grok <query> to ask questions.');
-    }
-  } else {
-    showStatusMessage('Grok bot disabled.');
-  }
-}
-
-function saveGrokKey() {
-  const keyInput = document.getElementById('grokApiKey');
-  grokApiKey = keyInput.value.trim();
-  if (grokApiKey) {
-    localStorage.setItem('grokApiKey', grokApiKey);
-    document.getElementById('grokKeyContainer').classList.remove('active');
-    showStatusMessage('API key saved. Use /grok <query> to ask Grok.');
-    keyInput.value = '';
-  } else {
-    showStatusMessage('Error: Enter a valid API key.');
-  }
-}
-
 async function setAudioOutput(audioElement, targetId) {
   try {
     if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
       if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker' 
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
+        const targetDevice = audioOutputMode === 'speaker'
+          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default')
           : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
         if (targetDevice) {
           await audioElement.setSinkId(targetDevice.deviceId);
@@ -1108,7 +994,6 @@ async function setAudioOutput(audioElement, targetId) {
     audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
   }
 }
-
 function toggleAudioOutput() {
   audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
   console.log(`Toggling audio output to ${audioOutputMode}`);
@@ -1121,7 +1006,6 @@ function toggleAudioOutput() {
   audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
   showStatusMessage(`Audio output set to ${audioOutputMode}`);
 }
-
 async function startTotpRoom(serverGenerated) {
   const usernameInput = document.getElementById('totpUsernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -1161,7 +1045,6 @@ async function startTotpRoom(serverGenerated) {
   statusElement.textContent = 'Waiting for connection...';
   document.getElementById('messageInput')?.focus();
 }
-
 function showTotpSecretModal(secret) {
   console.log('Showing TOTP modal with secret:', secret);
   document.getElementById('totpSecretDisplay').textContent = secret;
@@ -1170,11 +1053,9 @@ function showTotpSecretModal(secret) {
   new QRCode(qrCanvas, generateTotpUri(code, secret));
   document.getElementById('totpSecretModal').classList.add('active');
 }
-
 async function joinWithTotp(code, totpCode) {
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }
-
 function startVoiceRecording() {
   if (!features.enableVoice) {
     showStatusMessage('Voice messages are disabled by admin.');
@@ -1241,13 +1122,11 @@ function startVoiceRecording() {
     showStatusMessage('Failed to access microphone for voice message.');
   });
 }
-
 function stopVoiceRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
 }
-
 async function isWebPSupported() {
   const elem = document.createElement('canvas');
   if (!!(elem.getContext && elem.getContext('2d'))) {
@@ -1255,7 +1134,6 @@ async function isWebPSupported() {
   }
   return false;
 }
-
 async function generateThumbnail(dataURL, width = 100, height = 100) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -1271,7 +1149,6 @@ async function generateThumbnail(dataURL, width = 100, height = 100) {
     img.onerror = () => resolve(dataURL); // Fallback to full if error
   });
 }
-
 // New: Cleanup old nonces every 5min
 setInterval(() => {
   const now = Date.now();

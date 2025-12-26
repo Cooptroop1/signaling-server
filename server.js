@@ -80,7 +80,8 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const FEATURES_FILE = path.join(__dirname, 'features.json');
+const FEATURES_FILE = path.join('/data', 'features.json'); // Persistent disk
+const STATS_FILE = path.join('/data', 'stats.json'); // New: For aggregated stats
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -111,6 +112,7 @@ let features = {
   enableImages: true,
   enableVoice: true,
   enableVoiceCalls: true,
+  enableAudioToggle: true,
   enableGrokBot: true
 };
 
@@ -126,14 +128,19 @@ if (fs.existsSync(FEATURES_FILE)) {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
 }
 
+// New: Aggregated stats structure { daily: { "YYYY-MM-DD": { "users": number, "connections": number } } }
+let aggregatedStats = fs.existsSync(STATS_FILE) ? JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')) : { daily: {} };
+
 // Function to save features to file
 function saveFeatures() {
   fs.writeFileSync(FEATURES_FILE, JSON.stringify(features));
   console.log('Saved features:', features);
 }
 
-function hashIp(ip) {
-  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+// New: Function to save aggregated stats
+function saveAggregatedStats() {
+  fs.writeFileSync(STATS_FILE, JSON.stringify(aggregatedStats));
+  console.log('Saved aggregated stats to disk');
 }
 
 // Validate base64 string
@@ -141,6 +148,165 @@ function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   return base64Regex.test(str) && str.length % 4 === 0;
+}
+
+// New: Function to validate incoming message structures
+function validateMessage(data) {
+  if (typeof data !== 'object' || data === null || !data.type) {
+    return { valid: false, error: 'Invalid message: must be an object with "type" field' };
+  }
+
+  // Common fields validation
+  if (data.token && typeof data.token !== 'string') {
+    return { valid: false, error: 'Invalid token: must be a string' };
+  }
+  if (data.clientId && typeof data.clientId !== 'string') {
+    return { valid: false, error: 'Invalid clientId: must be a string' };
+  }
+  if (data.code && !validateCode(data.code)) {
+    return { valid: false, error: 'Invalid code format' };
+  }
+  if (data.username && !validateUsername(data.username)) {
+    return { valid: false, error: 'Invalid username: 1-16 alphanumeric characters' };
+  }
+
+  // Type-specific validation
+  switch (data.type) {
+    case 'connect':
+      if (!data.clientId || typeof data.clientId !== 'string') {
+        return { valid: false, error: 'connect: clientId required as string' };
+      }
+      break;
+    case 'refresh-token':
+      if (!data.refreshToken || typeof data.refreshToken !== 'string') {
+        return { valid: false, error: 'refresh-token: refreshToken required as string' };
+      }
+      break;
+    case 'public-key':
+      if (!data.publicKey || !isValidBase64(data.publicKey)) {
+        return { valid: false, error: 'public-key: invalid publicKey format' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'public-key: code required' };
+      }
+      break;
+    case 'encrypted-room-key':
+      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
+        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'encrypted-room-key: invalid iv' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'encrypted-room-key: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'encrypted-room-key: code required' };
+      }
+      break;
+    case 'new-room-key':
+      if (!data.encrypted || !isValidBase64(data.encrypted)) {
+        return { valid: false, error: 'new-room-key: invalid encrypted' };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'new-room-key: invalid iv' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'new-room-key: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'new-room-key: code required' };
+      }
+      break;
+    case 'join':
+      if (!data.code) {
+        return { valid: false, error: 'join: code required' };
+      }
+      if (!data.username) {
+        return { valid: false, error: 'join: username required' };
+      }
+      break;
+    case 'set-max-clients':
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
+        return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'set-max-clients: code required' };
+      }
+      break;
+    case 'offer':
+    case 'answer':
+      if (!data.offer && !data.answer) {
+        return { valid: false, error: `${data.type}: offer or answer required` };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: `${data.type}: targetId required as string` };
+      }
+      if (!data.code) {
+        return { valid: false, error: `${data.type}: code required` };
+      }
+      break;
+    case 'candidate':
+      if (!data.candidate) {
+        return { valid: false, error: 'candidate: candidate required' };
+      }
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'candidate: targetId required as string' };
+      }
+      if (!data.code) {
+        return { valid: false, error: 'candidate: code required' };
+      }
+      break;
+    case 'submit-random':
+      if (!data.code) {
+        return { valid: false, error: 'submit-random: code required' };
+      }
+      break;
+    case 'get-random-codes':
+      // No additional fields needed
+      break;
+    case 'relay-message':
+    case 'relay-image':
+    case 'relay-voice':
+      const payloadField = data.type === 'relay-message' ? 'encryptedContent' : 'encryptedData';
+      if (!data[payloadField] || !isValidBase64(data[payloadField])) {
+        return { valid: false, error: `${data.type}: invalid ${payloadField}` };
+      }
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: `${data.type}: invalid iv` };
+      }
+      if (!data.salt || !isValidBase64(data.salt)) {
+        return { valid: false, error: `${data.type}: invalid salt` };
+      }
+      if (!data.signature || !isValidBase64(data.signature)) {
+        return { valid: false, error: `${data.type}: invalid signature` };
+      }
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: `${data.type}: messageId required as string` };
+      }
+      if (!data.code) {
+        return { valid: false, error: `${data.type}: code required` };
+      }
+      break;
+    case 'get-stats':
+    case 'get-features':
+    case 'toggle-feature':
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: `${data.type}: secret required as string` };
+      }
+      if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
+        return { valid: false, error: 'toggle-feature: feature required as string' };
+      }
+      break;
+    case 'ping':
+    case 'pong':
+      // No additional fields needed
+      break;
+    default:
+      return { valid: false, error: 'Unknown message type' };
+  }
+
+  return { valid: true };
 }
 
 // Load historical unique users from log on startup
@@ -172,7 +338,7 @@ const pingInterval = setInterval(() => {
     ws.isAlive = false;
     ws.ping();
   });
-}, 30000);
+}, 50000); // Changed to 50 seconds
 
 // Cleanup expired revoked tokens
 setInterval(() => {
@@ -211,7 +377,20 @@ wss.on('connection', (ws, req) => {
     }
     try {
       const data = JSON.parse(message);
-      console.log('Received:', data);
+      // New: Validate incoming data structure
+      const validation = validateMessage(data);
+      if (!validation.valid) {
+        ws.send(JSON.stringify({ type: 'error', message: validation.error }));
+        incrementFailure(clientIp);
+        return;
+      }
+
+      // Redact sensitive fields from logs
+      const loggedData = { ...data };
+      if (loggedData.secret) {
+        loggedData.secret = '[REDACTED]'; // Hide admin secret from logs
+      }
+      console.log('Received:', loggedData);
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string' && !(data.type === 'public-key' && key === 'publicKey')) {
           data[key] = validator.escape(validator.trim(data[key]));
@@ -520,10 +699,20 @@ wss.on('connection', (ws, req) => {
           rooms.forEach(room => {
             totalClients += room.clients.size;
           });
+          // Compute aggregates
+          const weekly = computeAggregate(7);
+          const monthly = computeAggregate(30);
+          const yearly = computeAggregate(365);
           ws.send(JSON.stringify({
             type: 'stats',
             dailyUsers: dailyUsers.get(day)?.size || 0,
             dailyConnections: dailyConnections.get(day)?.size || 0,
+            weeklyUsers: weekly.users,
+            weeklyConnections: weekly.connections,
+            monthlyUsers: monthly.users,
+            monthlyConnections: monthly.connections,
+            yearlyUsers: yearly.users,
+            yearlyConnections: yearly.connections,
             allTimeUsers: allTimeUsers.size,
             activeRooms: rooms.size,
             totalClients: totalClients
@@ -571,6 +760,11 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
+      if (data.type === 'pong') {
+        console.log('Received pong from client');
+        return;
       }
     } catch (error) {
       console.error('Error processing message:', error);
@@ -782,6 +976,10 @@ function updateLogFile() {
       console.log(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
     }
   });
+  // New: Update aggregated stats
+  if (!aggregatedStats.daily) aggregatedStats.daily = {};
+  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
+  saveAggregatedStats();
 }
 
 fs.writeFileSync(LOG_FILE, '', (err) => {
@@ -791,6 +989,22 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
+
+// New: Compute aggregate for last N days
+function computeAggregate(days) {
+  const now = new Date();
+  let users = 0, connections = 0;
+  for (let i = 0; i < days; i++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    if (aggregatedStats.daily[key]) {
+      users += aggregatedStats.daily[key].users;
+      connections += aggregatedStats.daily[key].connections;
+    }
+  }
+  return { users, connections };
+}
 
 function broadcast(code, message) {
   const room = rooms.get(code);
@@ -809,6 +1023,10 @@ function broadcastRandomCodes() {
       client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
     }
   });
+}
+
+function hashIp(ip) {
+  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
 
 server.listen(process.env.PORT || 10000, () => {

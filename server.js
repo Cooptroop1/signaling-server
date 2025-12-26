@@ -594,7 +594,9 @@ wss.on('connection', (ws, req) => {
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
-        await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]);
+        dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]).catch(err => {
+          console.error('DB error on connect:', err.message, err.stack);
+        });
         return;
       }
       if (data.type === 'refresh-token') {
@@ -1238,7 +1240,7 @@ wss.on('connection', (ws, req) => {
       incrementFailure(clientIp, ws.userAgent);
     }
   });
-  ws.on('close', async () => {
+  ws.on('close', () => {
     if (ws.clientId) {
       const tokens = clientTokens.get(ws.clientId);
       if (tokens) {
@@ -1293,7 +1295,11 @@ wss.on('connection', (ws, req) => {
         });
       }
     }
-    await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]);
+    if (ws.clientId) {
+      dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]).catch(err => {
+        console.error('DB error on close:', err.message, err.stack);
+      });
+    }
   });
 });
 function restrictRate(ws) {

@@ -1,3 +1,4 @@
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -12,11 +13,11 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-// New: Hash password
+// Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
-// New: Validate password
+// Validate password
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
@@ -32,6 +33,15 @@ dbPool.connect((err) => {
     console.log('Connected to DB successfully');
   }
 });
+// Clean up old offline messages (TTL: 24 hours)
+setInterval(async () => {
+  try {
+    await dbPool.query('DELETE FROM offline_messages WHERE created_at < NOW() - INTERVAL \'24 hours\'');
+    console.log('Cleaned up expired offline messages');
+  } catch (err) {
+    console.error('Error cleaning up offline messages:', err.message, err.stack);
+  }
+}, 24 * 60 * 60 * 1000); // Run daily
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
@@ -101,7 +111,7 @@ const rooms = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
-const AUDIT_FILE_BASE = path.join(__dirname, 'audit'); // Base name without extension
+const AUDIT_FILE_BASE = path.join(__dirname, 'audit');
 const UPDATE_INTERVAL = 30000;
 const randomCodes = new Set();
 const rateLimits = new Map();
@@ -114,7 +124,7 @@ const revokedTokens = new Map();
 const clientTokens = new Map();
 const totpSecrets = new Map();
 const processedMessageIds = new Map();
-const clientSizeLimits = new Map(); // New: Per-client size tracking
+const clientSizeLimits = new Map();
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
@@ -123,7 +133,7 @@ const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com',
 let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   JWT_SECRET = crypto.randomBytes(32).toString('hex');
-  console.log('Generated new JWT secret in memory.');
+  console.log('Generated new JWT secret (in-memory).');
 }
 const TURN_USERNAME = process.env.TURN_USERNAME;
 if (!TURN_USERNAME) {
@@ -144,12 +154,13 @@ let features = {
   enableP2P: true,
   enableRelay: true
 };
+console.log('Using default features (in-memory):', features);
 let aggregatedStats = { daily: {} };
 function saveFeatures() {
-  console.log('Saved features:', features);
+  console.log('Features updated (in-memory):', features);
 }
 function saveAggregatedStats() {
-  console.log('Saved aggregated stats');
+  console.log('Saved aggregated stats (in-memory)');
 }
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
@@ -297,14 +308,14 @@ function validateMessage(data) {
     case 'get-random-codes':
       break;
     case 'relay-message':
-      if ((!data.content && !data.encryptedContent) || typeof (data.content || data.encryptedContent) !== 'string') {
-        return { valid: false, error: 'relay-message: content or encryptedContent required as string' };
+      if ((!data.content && !data.encryptedContent && !data.data && !data.encryptedData) || typeof (data.content || data.encryptedContent || data.data || data.encryptedData) !== 'string') {
+        return { valid: false, error: 'relay-message: content, encryptedContent, data, or encryptedData required as string' };
       }
-      if (data.encryptedContent && !data.iv) {
-        return { valid: false, error: 'relay-message: iv required for encryptedContent' };
+      if ((data.encryptedContent || data.encryptedData) && !data.iv) {
+        return { valid: false, error: 'relay-message: iv required for encryptedContent or encryptedData' };
       }
-      if (data.encryptedContent && !data.signature) {
-        return { valid: false, error: 'relay-message: signature required for encryptedContent' };
+      if ((data.encryptedContent || data.encryptedData) && !data.signature) {
+        return { valid: false, error: 'relay-message: signature required for encryptedContent or encryptedData' };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: 'relay-message: messageId required as string' };
@@ -357,8 +368,8 @@ function validateMessage(data) {
         return { valid: false, error: 'toggle-feature: feature required as string' };
       }
       break;
-    case 'export-stats-csv': // New
-    case 'export-logs-csv': // New
+    case 'export-stats-csv':
+    case 'export-logs-csv':
       if (!data.secret || typeof data.secret !== 'string') {
         return { valid: false, error: data.type + ': secret required as string' };
       }
@@ -374,7 +385,6 @@ function validateMessage(data) {
         return { valid: false, error: 'set-totp: valid base32 secret required' };
       }
       break;
-    // New for usernames
     case 'register-username':
       if (!data.username) {
         return { valid: false, error: 'register-username: username required' };
@@ -399,7 +409,6 @@ function validateMessage(data) {
         return { valid: false, error: 'find-user: username required' };
       }
       break;
-    // New for offline message
     case 'send-offline-message':
       if (!data.to_username) {
         return { valid: false, error: 'send-offline-message: to_username required' };
@@ -413,6 +422,16 @@ function validateMessage(data) {
       if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
         return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
       }
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'send-offline-message: messageId required as string' };
+      }
+      break;
+    case 'confirm-offline-message':
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'confirm-offline-message: messageId required as string' };
+      }
+      break;
+    case 'logout':
       break;
     default:
       return { valid: false, error: 'Unknown message type' };
@@ -453,7 +472,7 @@ setInterval(() => {
   });
   processedMessageIds.forEach((messageSet, code) => {
     const now = Date.now();
-    messageSet.forEach((timestamp, nonce) => { // Changed from messageId to nonce
+    messageSet.forEach((timestamp, nonce) => {
       if (now - timestamp > 300000) {
         messageSet.delete(nonce);
       }
@@ -463,7 +482,7 @@ setInterval(() => {
     }
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
-}, 600000); // Changed to every 10 minutes (600000 ms)
+}, 600000);
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -576,8 +595,9 @@ wss.on('connection', (ws, req) => {
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
-        // Update last_active on connect
-        await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]);
+        dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]).catch(err => {
+          console.error('DB error on connect:', err.message, err.stack);
+        });
         return;
       }
       if (data.type === 'refresh-token') {
@@ -836,7 +856,7 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
-        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0; // Approximate byte size from base64
+        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0;
         if (!restrictClientSize(data.clientId, payloadSize)) {
           ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
@@ -863,12 +883,12 @@ wss.on('connection', (ws, req) => {
           processedMessageIds.set(data.code, new Map());
         }
         const messageSet = processedMessageIds.get(data.code);
-        if (messageSet.has(data.nonce)) { // Changed to check nonce instead of messageId
+        if (messageSet.has(data.nonce)) {
           console.warn(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
           return;
         }
         const now = Date.now();
-        if (Math.abs(now - data.timestamp) > 300000) { // 5 minutes window
+        if (Math.abs(now - data.timestamp) > 300000) {
           console.warn(`Invalid timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp} (now: ${now})`);
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
           return;
@@ -878,7 +898,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
           return;
         }
-        messageSet.set(data.nonce, data.timestamp); // Changed to set nonce
+        messageSet.set(data.nonce, data.timestamp);
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
@@ -893,7 +913,7 @@ wss.on('connection', (ws, req) => {
               timestamp: data.timestamp,
               iv: data.iv,
               signature: data.signature,
-              nonce: data.nonce // Forward nonce
+              nonce: data.nonce
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
           }
@@ -958,9 +978,8 @@ wss.on('connection', (ws, req) => {
               }
             });
             if (data.feature === 'service' && !features.enableService) {
-              // Invalidate all tokens on service toggle off
               clientTokens.forEach((tokens, clientId) => {
-                revokedTokens.set(tokens.accessToken, Date.now() + 1000); // Immediate revocation
+                revokedTokens.set(tokens.accessToken, Date.now() + 1000);
                 if (tokens.refreshToken) {
                   revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
                 }
@@ -980,7 +999,6 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      // New: Handle export requests
       if (data.type === 'export-stats-csv') {
         if (data.secret === ADMIN_SECRET) {
           const csv = generateStatsCSV();
@@ -1016,7 +1034,6 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      // New for usernames
       if (data.type === 'register-username') {
         const { username, password, public_key } = data;
         if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
@@ -1032,6 +1049,7 @@ wss.on('connection', (ws, req) => {
               [username, passwordHash, data.clientId, public_key || null]
             );
             ws.send(JSON.stringify({ type: 'username-registered', username }));
+            console.log(`Registered username ${username} for clientId ${data.clientId}`);
           } catch (err) {
             console.error('DB error registering username:', err.message, err.stack);
             ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username. Check server logs for details.' }));
@@ -1056,26 +1074,33 @@ wss.on('connection', (ws, req) => {
               ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
               return;
             }
-            // Update client_id
-            await dbPool.query('UPDATE users SET client_id = $1 WHERE id = $2', [data.clientId, user.id]);
-            // Fetch offline messages with from_username
+            await dbPool.query('UPDATE users SET client_id = $1, last_active = CURRENT_TIMESTAMP WHERE id = $2', [data.clientId, user.id]);
             const msgRes = await dbPool.query(`
-              SELECT om.*, u.username AS from_username
+              SELECT om.id, om.message, u.username AS from_username
               FROM offline_messages om
               JOIN users u ON om.from_user_id = u.id
               WHERE om.to_user_id = $1
             `, [user.id]);
-            const offlineMessages = msgRes.rows.map(msg => ({
-              from: msg.from_username,
-              code: JSON.parse(msg.message).code || null,
-              type: JSON.parse(msg.message).type || 'connection-request',
-              encrypted: JSON.parse(msg.message).encrypted || null,
-              iv: JSON.parse(msg.message).iv || null,
-              ephemeral_public: JSON.parse(msg.message).ephemeral_public || null
-            }));
-            // Delete pending messages
-            await dbPool.query('DELETE FROM offline_messages WHERE to_user_id = $1', [user.id]);
+            const offlineMessages = msgRes.rows.map(msg => {
+              try {
+                const parsedMessage = JSON.parse(msg.message);
+                return {
+                  id: msg.id, // Include message ID for confirmation
+                  from: msg.from_username,
+                  code: parsedMessage.code || null,
+                  type: parsedMessage.type || 'connection-request',
+                  encrypted: parsedMessage.encrypted || null,
+                  iv: parsedMessage.iv || null,
+                  ephemeral_public: parsedMessage.ephemeral_public || null
+                };
+              } catch (err) {
+                console.error(`Failed to parse offline message for user ${user.id}:`, err.message);
+                return null;
+              }
+            }).filter(msg => msg !== null);
+            console.log(`Fetched ${offlineMessages.length} offline messages for user ${username} (id: ${user.id})`);
             ws.send(JSON.stringify({ type: 'login-success', username, offlineMessages }));
+            console.log(`User ${username} logged in with clientId ${data.clientId}`);
           } catch (err) {
             console.error('DB error during login:', err.message, err.stack);
             ws.send(JSON.stringify({ type: 'error', message: 'Failed to login. Check server logs.' }));
@@ -1086,40 +1111,44 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'find-user') {
-        const { username } = data;
+        const { username, from_username } = data;
         try {
+          const from_res = await dbPool.query('SELECT id, username FROM users WHERE client_id = $1', [data.clientId]);
+          if (from_res.rows.length === 0) {
+            console.warn(`Find-user failed: No user found for clientId ${data.clientId}`);
+            ws.send(JSON.stringify({ type: 'error', message: 'Must be logged in to search users.' }));
+            return;
+          }
+          const from_user_id = from_res.rows[0].id;
+          const from_username = from_res.rows[0].username;
           const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
           if (res.rows.length === 0) {
             ws.send(JSON.stringify({ type: 'user-not-found' }));
             return;
           }
           const user = res.rows[0];
-          // Create dynamic room
-          const dynamicCode = uuidv4().replace(/-/g, '').substring(0,16).match(/.{1,4}/g).join('-');
-          // Notify online user if connected (via ws)
+          const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 16).match(/.{1,4}/g).join('-');
           const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
           if (ownerWs) {
-            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: data.username, code: dynamicCode }));
+            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: from_username, code: dynamicCode }));
           } else {
-            // Queue notification
             await dbPool.query(
-              'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ((SELECT id FROM users WHERE username = $1), $2, $3)',
-              [data.username, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
+              'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
+              [from_user_id, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
             );
           }
-          // Use last_active for status
           const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
-          const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000); // Online if connected or active in last 5 min
+          const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000);
           ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
+          console.log(`User ${username} found for clientId ${data.clientId}, status: ${isOnline ? 'online' : 'offline'}, code: ${dynamicCode}`);
         } catch (err) {
           console.error('DB error finding user:', err.message, err.stack);
           ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));
         }
         return;
       }
-      // New: Send offline message
       if (data.type === 'send-offline-message') {
-        const { to_username, encrypted, iv, ephemeral_public } = data;
+        const { to_username, encrypted, iv, ephemeral_public, messageId } = data;
         try {
           const res = await dbPool.query('SELECT id FROM users WHERE username = $1', [to_username]);
           if (res.rows.length === 0) {
@@ -1127,21 +1156,83 @@ wss.on('connection', (ws, req) => {
             return;
           }
           const to_user_id = res.rows[0].id;
-          const from_res = await dbPool.query('SELECT id FROM users WHERE username = $1', [username]); // Assume sender has username
-          const from_user_id = from_res.rows[0]?.id;
-          if (!from_user_id) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Sender must have a claimed username.' }));
+          const from_res = await dbPool.query('SELECT id FROM users WHERE client_id = $1', [data.clientId]);
+          if (from_res.rows.length === 0) {
+            console.warn(`Send-offline-message failed: No user found for clientId ${data.clientId}`);
+            ws.send(JSON.stringify({ type: 'error', message: 'Sender not logged in with a username.' }));
             return;
           }
+          const from_user_id = from_res.rows[0].id;
           await dbPool.query(
             'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-            [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public })]
+            [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, messageId })]
           );
-          ws.send(JSON.stringify({ type: 'offline-message-sent' }));
+          ws.send(JSON.stringify({ type: 'offline-message-sent', messageId }));
+          console.log(`Offline message ${messageId} sent from clientId ${data.clientId} (user_id: ${from_user_id}) to ${to_username} (user_id: ${to_user_id})`);
         } catch (err) {
           console.error('DB error sending offline message:', err.message, err.stack);
           ws.send(JSON.stringify({ type: 'error', message: 'Failed to send offline message.' }));
         }
+        return;
+      }
+      if (data.type === 'confirm-offline-message') {
+        try {
+          await dbPool.query('DELETE FROM offline_messages WHERE id = $1', [data.messageId]);
+          console.log(`Confirmed and deleted offline message ${data.messageId} for clientId ${data.clientId}`);
+          ws.send(JSON.stringify({ type: 'confirm-offline-message-ack', messageId: data.messageId }));
+        } catch (err) {
+          console.error('DB error confirming offline message:', err.message, err.stack);
+          ws.send(JSON.stringify({ type: 'error', message: 'Failed to confirm offline message.' }));
+        }
+        return;
+      }
+      if (data.type === 'logout') {
+        if (clientTokens.has(data.clientId)) {
+          const tokens = clientTokens.get(data.clientId);
+          revokedTokens.set(tokens.accessToken, Date.now() + 1000);
+          if (tokens.refreshToken) {
+            revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
+          }
+          clientTokens.delete(data.clientId);
+          console.log(`Client ${data.clientId} logged out, tokens revoked`);
+        }
+        if (ws.code && rooms.has(ws.code)) {
+          const room = rooms.get(ws.code);
+          const isInitiator = ws.clientId === room.initiator;
+          room.clients.delete(ws.clientId);
+          logStats({ clientId: ws.clientId, code: ws.code, event: 'logout', totalClients: room.clients.size, isInitiator });
+          if (room.clients.size === 0 || isInitiator) {
+            rooms.delete(ws.code);
+            randomCodes.delete(ws.code);
+            totpSecrets.delete(ws.code);
+            processedMessageIds.delete(ws.code);
+            broadcast(ws.code, {
+              type: 'client-disconnected',
+              clientId: ws.clientId,
+              totalClients: 0,
+              isInitiator
+            });
+          } else {
+            if (isInitiator) {
+              const newInitiator = room.clients.keys().next().value;
+              if (newInitiator) {
+                room.initiator = newInitiator;
+                broadcast(ws.code, {
+                  type: 'initiator-changed',
+                  newInitiator,
+                  totalClients: room.clients.size
+                });
+              }
+            }
+            broadcast(ws.code, {
+              type: 'client-disconnected',
+              clientId: ws.clientId,
+              totalClients: room.clients.size,
+              isInitiator
+            });
+          }
+        }
+        ws.send(JSON.stringify({ type: 'logout-success' }));
         return;
       }
     } catch (error) {
@@ -1150,7 +1241,7 @@ wss.on('connection', (ws, req) => {
       incrementFailure(clientIp, ws.userAgent);
     }
   });
-  ws.on('close', async () => {
+  ws.on('close', () => {
     if (ws.clientId) {
       const tokens = clientTokens.get(ws.clientId);
       if (tokens) {
@@ -1205,8 +1296,11 @@ wss.on('connection', (ws, req) => {
         });
       }
     }
-    // Update last_active on close
-    await dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]);
+    if (ws.clientId) {
+      dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [ws.clientId]).catch(err => {
+        console.error('DB error on close:', err.message, err.stack);
+      });
+    }
   });
 });
 function restrictRate(ws) {
@@ -1225,7 +1319,6 @@ function restrictRate(ws) {
   }
   return true;
 }
-// New: Per-client size cap (1MB/min total)
 function restrictClientSize(clientId, size) {
   const now = Date.now();
   const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
@@ -1235,7 +1328,7 @@ function restrictClientSize(clientId, size) {
   }
   sizeLimit.totalSize += size;
   clientSizeLimits.set(clientId, sizeLimit);
-  if (sizeLimit.totalSize > 1048576) { // 1MB
+  if (sizeLimit.totalSize > 1048576) {
     console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
     fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
     return false;
@@ -1315,7 +1408,7 @@ function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
   const stats = {
-    clientId: validator.escape(data.clientId || ''), // Escape all strings
+    clientId: validator.escape(data.clientId || ''),
     username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
     targetId: validator.escape(data.targetId || ''),
     code: validator.escape(data.code || ''),
@@ -1348,7 +1441,6 @@ function logStats(data) {
     }
   });
 }
-// New: Audit log rotation function
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -1358,7 +1450,6 @@ function rotateAuditLog() {
     fs.renameSync(currentFile, rotatedFile);
     console.log(`Rotated audit log to ${rotatedFile}`);
   }
-  // Delete files older than 7 days
   const files = fs.readdirSync(__dirname).filter(f => f.startsWith('audit-') && f.endsWith('.log'));
   files.forEach(file => {
     const fileDate = file.match(/audit-(\d{4}-\d{2}-\d{2})\.log/)[1];
@@ -1368,10 +1459,8 @@ function rotateAuditLog() {
       console.log(`Deleted old audit log: ${file}`);
     }
   });
-  // Create new current file
   fs.writeFileSync(currentFile, '');
 }
-// Call rotation on startup and every 24 hours
 rotateAuditLog();
 setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
 function updateLogFile() {
@@ -1390,6 +1479,7 @@ function updateLogFile() {
   });
   if (!aggregatedStats.daily) aggregatedStats.daily = {};
   aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
+  saveAggregatedStats();
 }
 fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);

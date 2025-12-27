@@ -1,0 +1,866 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anonomoose Chat</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; object-src 'none'; base-uri 'self';">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
+  <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * {
+      cursor: default;
+      user-select: none;
+    }
+    input[type="text"],
+    input[type="number"],
+    input[type="file"],
+    textarea {
+      cursor: text;
+      user-select: text;
+    }
+    #codeDisplay {
+      user-select: text;
+    }
+    #totpSecretDisplay {
+      user-select: text;
+      cursor: text;
+    }
+    body {
+      min-height: 100vh;
+      padding-top: 240px;
+      padding-bottom: 140px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #messages {
+      display: flex;
+      flex-direction: column-reverse;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scroll-behavior: auto;
+      z-index: 0;
+      margin-bottom: 0.5rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      height: 296px;
+      background-color: #fce7f3;
+      background-image: none;
+      background-size: 100% 100%;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+    #messages.waiting {
+      background-color: transparent;
+      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
+    }
+    .corner-logo {
+      position: absolute;
+      top: -5px;
+      right: 10px;
+      width: 256px;
+      height: 256px;
+      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logo.png?sanitize=true');
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      z-index: 100;
+      transition: background-image 0.5s ease;
+    }
+    .corner-logo.wink {
+      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logoWink.png?sanitize=true');
+    }
+    .bg-white {
+      z-index: 10;
+      max-width: 500px;
+      width: 100%;
+      margin: 0 auto;
+      margin-top: 100px;
+    }
+    @media (min-width: 641px) and (max-width: 1024px) {
+      .corner-logo {
+        z-index: -1;
+      }
+    }
+    @media (max-width: 640px) {
+      body {
+        padding-top: 80px;
+        padding-bottom: 80px;
+      }
+      .bg-white {
+        padding: 1rem;
+        max-width: none;
+        width: 100%;
+        margin-top: 50px;
+      }
+      .corner-logo {
+        position: absolute;
+        top: 0px;
+        right: 10px;
+        width: 128px;
+        height: 128px;
+        z-index: 1000;
+      }
+      #chatContainer:not(.hidden) #messages.waiting ~ .corner-logo {
+        position: absolute;
+        top: 0px;
+        right: 10px;
+        width: 128px;
+        height: 128px;
+        z-index: 1000;
+      }
+      #maxClientsContainer {
+        position: absolute;
+        bottom: -335px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        max-width: 360px;
+        margin: 0;
+        padding: 0.75rem;
+        background-color: #000000;
+        border-radius: 0.5rem;
+        z-index: 1000;
+      }
+      #maxClientsRadios {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 0.3rem;
+        justify-items: center;
+      }
+      #maxClientsRadios button {
+        background-color: #3b82f6;
+        color: white;
+        border-radius: 0.5rem;
+        padding: 0.4rem;
+        font-size: 0.9rem;
+        width: 100%;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: all 0.2s ease;
+      }
+      #maxClientsRadios button.active {
+        background-color: #10b981;
+      }
+      #maxClientsRadios button:hover:not(:disabled) {
+        background-color: #1d4ed8;
+      }
+      #maxClientsRadios button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .button-group {
+        margin: 0.5rem 0.3rem;
+        width: calc(100% - 0.6rem);
+      }
+      #messages {
+        width: 100%;
+        max-width: none;
+      }
+      h1.text-3xl {
+        font-size: 1.5rem;
+        margin-bottom: 0.75rem;
+        padding: 0.25rem 0;
+      }
+      #status, #privacyStatus {
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+        padding: 0.25rem 0;
+      }
+    }
+    .message-bubble {
+      max-width: 70%;
+      margin: 0.1rem 1rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 1rem;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      hyphens: auto;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .message-bubble img, .message-bubble audio {
+      max-width: 100%;
+      border-radius: 0.5rem;
+      margin: 0.15rem 0 0.5rem;
+    }
+    .message-bubble.self {
+      background-color: #3b82f6;
+      color: white;
+      margin-left: auto;
+      border-bottom-right-radius: 0.25rem;
+    }
+    .message-bubble.other {
+      background-color: #10b981;
+      color: white;
+      margin-right: auto;
+      border-bottom-left-radius: 0.25rem;
+    }
+    .timestamp {
+      font-size: 0.5rem;
+      opacity: 0.8;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.9);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal img, .modal audio {
+      max-width: 90%;
+      max-height: 90%;
+      border-radius: 0.5rem;
+    }
+    .modal.active {
+      display: flex;
+    }
+    .help-modal, .add-user-modal, .totp-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.7);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    .help-modal-content, .add-user-modal-content, .totp-modal-content {
+      background-color: white;
+      padding: 1.5rem;
+      border-radius: 0.5rem;
+      max-width: 90%;
+      max-height: 90%;
+      overflow-y: auto;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+    .help-modal.active, .add-user-modal.active, .totp-modal.active {
+      display: flex;
+    }
+    #chatContainer.hidden {
+      display: none;
+      visibility: hidden;
+    }
+    #chatContainer {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      position: relative;
+    }
+    .input-container {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.375rem;
+      margin: 0.5rem 0.8rem;
+      width: calc(100% - 1.6rem);
+      box-sizing: border-box;
+      z-index: 10;
+    }
+    .input-container.hidden {
+      display: none;
+    }
+    #messageInput {
+      resize: none;
+      overflow-y: auto;
+      height: 2.5rem;
+      max-height: 12.5rem;
+      line-height: 1.5rem;
+      flex: 1;
+      min-width: 0;
+      background-color: #3b82f6;
+      color: white;
+      border-radius: 1rem;
+      padding: 0.5rem 1rem;
+      border: none;
+      box-sizing: border-box;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      transition: all 0.2s ease;
+      width: 100%;
+      margin-right: 0.375rem;
+    }
+    #messageInput.expanded {
+      height: auto;
+    }
+    .text-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.375rem;
+      width: 100%;
+    }
+    .button-row-below {
+      display: flex;
+      justify-content: flex-start;
+      gap: 0.75rem;
+      width: 100%;
+    }
+    #imageButton, #voiceButton, #voiceCallButton, #audioOutputButton, #grokButton, #sendButton {
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+    }
+    #imageButton, #voiceButton, #voiceCallButton, #audioOutputButton, #grokButton {
+      background-color: #10b981;
+      color: white;
+    }
+    #imageButton:hover, #voiceButton:hover, #voiceCallButton:hover, #audioOutputButton:hover, #grokButton:hover {
+      background-color: #059669;
+    }
+    #voiceButton.recording, #voiceCallButton.active, #audioOutputButton.speaker, #grokButton.active {
+      background-color: #ef4444;
+    }
+    #voiceTimer {
+      font-size: 0.8rem;
+      color: white;
+      background-color: #6b7280;
+      padding: 0.3rem 0.6rem;
+      border-radius: 0.5rem;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    @media (max-width: 640px) {
+      .input-container {
+        margin: 0.5rem 0.3rem;
+        width: calc(100% - 0.6rem);
+      }
+      #messageInput {
+        padding: 0.5rem 0.75rem;
+      }
+    }
+    #messageInput::-webkit-scrollbar {
+      display: none;
+    }
+    #messageInput {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    #sendButton {
+      background-color: #2563eb;
+      color: white;
+    }
+    #sendButton:hover {
+      background-color: #1d4ed8;
+    }
+    .button-group {
+      display: flex;
+      justify-content: space-between;
+      margin: 0.5rem 0.8rem;
+      width: calc(100% - 1.6rem);
+      box-sizing: border-box;
+    }
+    .button-group button {
+      padding: 0.35rem 0.9rem;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      transition: all 0.2s ease;
+      flex: 1;
+      margin: 0 0.25rem;
+    }
+    #button1 {
+      background-color: #9b59b6;
+      color: white;
+      margin-left: -3.25mm;
+    }
+    #button1:hover {
+      background-color: #8e44ad;
+    }
+    #button2 {
+      background-color: #f1c40f;
+      color: white;
+    }
+    #button2:hover {
+      background-color: #d4a017;
+    }
+    #button2:disabled {
+      background-color: #d4a017;
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    #copyCodeButton {
+      background-color: #10b981;
+      color: white;
+      margin-right: -3.25mm;
+    }
+    #copyCodeButton:hover {
+      background-color: #059669;
+    }
+    #helpText, #addUserText {
+      color: #3b82f6;
+      cursor: pointer;
+      transition: color 0.2s ease;
+    }
+    #helpText:hover, #addUserText:hover {
+      color: #1d4ed8;
+    }
+    @media (min-width: 1025px) {
+      .bg-white {
+        margin-top: -165px;
+      }
+      #maxClientsContainer {
+        min-height: calc(100% + 37.8px);
+        margin-top: -50px;
+      }
+    }
+    @media (min-width: 641px) and (max-width: 1024px) {
+      .bg-white {
+        margin-top: -165px;
+      }
+      #maxClientsContainer {
+        margin-top: -50px;
+      }
+    }
+    #maxClientsContainer {
+      margin-top: 145px;
+    }
+    @media (min-width: 641px) {
+      #maxClientsRadios {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: center;
+      }
+      #maxClientsRadios button {
+        background-color: #3b82f6;
+        color: white;
+        border-radius: 0.5rem;
+        padding: 0.5rem;
+        font-size: 1rem;
+        width: 60px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: all 0.2s ease;
+      }
+      #maxClientsRadios button.active {
+        background-color: #10b981;
+      }
+      #maxClientsRadios button:hover:not(:disabled) {
+        background-color: #1d4ed8;
+      }
+      #maxClientsRadios button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+    #remoteAudioContainer {
+      display: none;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 0.5rem;
+    }
+    #remoteAudioContainer audio {
+      width: 100%;
+      max-width: 300px;
+      margin: 0.5rem;
+    }
+    .hidden {
+      display: none !important;
+    }
+    #grokKeyContainer {
+      display: none;
+      margin-top: 0.5rem;
+    }
+    #grokKeyContainer.active {
+      display: block;
+    }
+    #grokApiKey {
+      width: 100%;
+      padding: 0.5rem;
+      border-radius: 0.5rem;
+      border: 1px solid #ccc;
+    }
+    #imageInput {
+      display: none;
+    }
+    #maxClientsContainer {
+      display: none;
+    }
+    #maxClientsRadios {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(50px, 1fr));
+      gap: 0.5rem;
+    }
+    #maxClientsRadios button {
+      background-color: #3b82f6;
+      color: white;
+      border-radius: 0.5rem;
+      padding: 0.5rem;
+      font-size: 1rem;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      transition: all 0.2s ease;
+    }
+    #maxClientsRadios button.active {
+      background-color: #10b981;
+    }
+    #maxClientsRadios button:hover:not(:disabled) {
+      background-color: #1d4ed8;
+    }
+    .footer-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+    }
+    .add-user-modal-content h2 {
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+    .messages-wrapper {
+      position: relative;
+      margin-bottom: 0.5rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      height: 296px;
+    }
+    .user-dots {
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      display: flex;
+      gap: 4px;
+      z-index: 10;
+    }
+    .user-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      cursor: pointer;
+      position: relative;
+    }
+    .online {
+      background-color: green;
+    }
+    .offline {
+      background-color: red;
+    }
+    .user-dot.online:hover .user-menu {
+      display: block;
+    }
+    .user-menu {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      background-color: white;
+      border: 1px solid #ccc;
+      border-radius: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      z-index: 100;
+      min-width: 100px;
+    }
+    .user-menu button {
+      display: block;
+      width: 100%;
+      padding: 0.5rem;
+      text-align: left;
+      border: none;
+      background: none;
+      cursor: pointer;
+    }
+    .user-menu button:hover {
+      background-color: #f0f0f0;
+    }
+    [data-has-code] #initialContainer,
+    [data-has-code] #connectContainer,
+    [data-has-code] #usernameContainer,
+    [data-has-code] #codeDisplay,
+    [data-has-code] #copyCodeButton {
+      display: none;
+    }
+    [data-has-code] #chatContainer {
+      display: flex;
+    }
+    [data-has-code] #messages {
+      background-color: transparent;
+      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
+      background-size: contain;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+    [data-has-code] .button-group,
+    [data-has-code] .input-container,
+    [data-has-code] #newSessionButton,
+    [data-has-code] #remoteAudioContainer,
+    [data-has-code] #grokKeyContainer,
+    [data-has-code] .footer-buttons {
+      display: none;
+    }
+    #totpSecretDisplay {
+      text-align: center;
+      margin-top: 1rem;
+    }
+    #qrCodeCanvas {
+      margin: 0 auto;
+      display: block;
+    }
+    #totpInputModal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.7);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    #totpInputModal.active {
+      display: flex;
+    }
+    #totpInputModalContent {
+      background-color: white;
+      padding: 1.5rem;
+      border-radius: 0.5rem;
+      max-width: 90%;
+      max-height: 90%;
+      overflow-y: auto;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+    .totp-modal.active {
+      display: flex !important;
+      z-index: 9999 !important;
+    }
+    .totp-modal-content {
+      background-color: white !important;
+      min-width: 300px;
+    }
+    #recentChats {
+      margin-top: 1rem;
+    }
+    #recentCodesList button {
+      background-color: #3b82f6;
+      color: white;
+      padding: 0.5rem;
+      border-radius: 0.5rem;
+      margin-bottom: 0.5rem;
+      width: 100%;
+    }
+    #recentCodesList button:hover {
+      background-color: #1d4ed8;
+    }
+    #toggleRecent {
+      background: none;
+      border: none;
+      color: #3b82f6;
+      cursor: pointer;
+      font-size: 0.875rem;
+      padding: 0;
+      margin-left: 0.5rem;
+    }
+  </style>
+</head>
+<body class="bg-black min-h-screen flex items-center justify-center">
+  <div class="corner-logo" id="cornerLogo" role="img" aria-label="Anonomoose Chat logo"></div>
+  <div class="flex w-full max-w-xl mx-auto">
+    <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
+      <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Anonomoose Chat</h1>
+      <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Start a new chat or connect to an existing one</div>
+      <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">E2E Encrypted (P2P)</div>
+      <div id="initialContainer">
+        <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
+        <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
+        <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
+        <button id="connect2FAChatButton" class="bg-teal-500 text-white px-4 py-2 rounded w-full hover:bg-teal-600 transition-colors" aria-label="Connect to 2FA Room">Connect to 2FA Room</button>
+        <div id="recentChats" class="mt-4">
+          <h2 class="text-xl font-bold mb-2">Recent Chats <button id="toggleRecent" title="Toggle Recent Chats">Show</button></h2>
+          <div id="recentCodesList" class="hidden"></div>
+        </div>
+      </div>
+      <div id="usernameContainer" class="hidden">
+        <label for="usernameInput" class="sr-only">Enter your username</label>
+        <input id="usernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameHelp" maxlength="16">
+        <div id="usernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
+        <button id="joinWithUsernameButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Join chat with username">Join Chat</button>
+        <button id="backButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
+      </div>
+      <div id="codeDisplay" class="text-center mb-4 font-mono text-lg text-gray-800 hidden" role="region" aria-live="polite"></div>
+      <div id="chatContainer" class="hidden">
+        <button id="newSessionButton" class="bg-red-500 text-white px-2 py-1 rounded w-full mb-1 hover:bg-red-600 transition-colors hidden" aria-label="Start a new session">New Session</button>
+        <div class="button-group">
+          <button id="button1" aria-label="Send code to random chat board">Send Code</button>
+          <button id="button2" aria-label="Join a random chat">Random Chat</button>
+          <button id="copyCodeButton" aria-label="Copy chat code">Copy Code</button>
+        </div>
+        <div class="messages-wrapper">
+          <div id="messages" role="log" aria-live="polite"></div>
+          <div id="userDots" class="user-dots"></div>
+        </div>
+        <div class="input-container hidden">
+          <div class="text-row">
+            <button id="imageButton" title="Send Image/File" aria-label="Send image or file">📷</button>
+            <label for="messageInput" class="sr-only">Type a message</label>
+            <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
+            <button id="sendButton" aria-label="Send message">📤</button>
+          </div>
+          <div class="button-row-below">
+            <input type="file" id="imageInput" aria-label="Upload image or file" />
+            <button id="voiceButton" title="Record Voice" aria-label="Record voice message">🎤</button>
+            <button id="voiceCallButton" title="Start Voice Call" aria-label="Start voice call">📞</button>
+            <button id="audioOutputButton" title="Toggle Speaker/Earpiece" aria-label="Toggle audio output" class="hidden">🔊</button>
+            <button id="grokButton" title="Toggle Grok Bot" aria-label="Toggle Grok bot">🤖</button>
+            <span id="voiceTimer" aria-live="assertive"></span>
+          </div>
+        </div>
+        <div id="remoteAudioContainer" class="hidden"></div>
+        <div id="grokKeyContainer" class="hidden">
+          <label for="grokApiKey" class="text-sm text-gray-600">Enter your xAI API Key (private, stored locally):</label>
+          <input id="grokApiKey" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="xai_xxxxxxxxxxxx">
+          <button id="saveGrokKey" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Save Key</button>
+        </div>
+      </div>
+      <div id="connectContainer" class="hidden">
+        <label for="usernameConnectInput" class="sr-only">Enter your username</label>
+        <input id="usernameConnectInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameConnectHelp" maxlength="16">
+        <div id="usernameConnectHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
+        <label for="codeInput" class="sr-only">Enter chat code</label>
+        <input id="codeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter code (xxxx-xxxx-xxxx-xxxx)" aria-describedby="codeHelp" maxlength="19">
+        <div id="codeHelp" class="text-sm text-gray-600 mb-2">Code format: xxxx-xxxx-xxxx-xxxx</div>
+        <button id="connectButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to chat">Connect</button>
+        <button id="backButtonConnect" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
+      </div>
+      <div class="text-center mt-4 footer-buttons">
+        <button id="claimUsernameButton" class="text-blue-500 hover:underline" aria-label="Claim a username">Claim Username</button>
+        <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
+        <button id="searchUserButton" class="text-blue-500 hover:underline" aria-label="Search for user">Search User</button>
+        <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log out">Log Out</button>
+        <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
+        <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
+      </div>
+    </div>
+    <div id="maxClientsContainer" class="hidden flex flex-col justify-center bg-black p-4 rounded-lg shadow-lg">
+      <span class="text-white mb-2 font-bold">Max Users</span>
+      <div id="maxClientsRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
+    </div>
+  </div>
+  <div id="helpModal" class="help-modal" role="dialog" aria-label="Help information" tabindex="-1">
+    <div class="help-modal-content">
+      <h2 class="text-xl font-bold mb-4">Button Help</h2>
+      <p><strong>Start Chat:</strong> Starts New Chat</p>
+      <p><strong>Connect to Chat:</strong> This connects you to a chat that you have code for</p>
+      <p><strong>Send Code:</strong> This sends your code to Random chat board</p>
+      <p><strong>Random Chat:</strong> This takes you to random chat board for a random chat</p>
+      <p><strong>Copy Code:</strong> Copies the code so you can send to people in text or social chats</p>
+      <p><strong>Send Image/File:</strong> Send an image or file (max 5MB)</p>
+      <p><strong>Record Voice:</strong> Press to start/stop recording a voice message (max 30 seconds)</p>
+      <p><strong>Start Voice Call:</strong> Press to start/stop a voice call</p>
+      <p><strong>Toggle Speaker/Earpiece:</strong> Switch between speaker and earpiece for voice calls</p>
+      <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
+      <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
+      <p><strong>Login:</strong> Login with your claimed username to retrieve it on new devices and get offline messages.</p>
+      <p><strong>Search User:</strong> Search for a claimed username to get a dynamic code to connect.</p>
+    </div>
+  </div>
+  <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
+    <div class="add-user-modal-content">
+      <h2 class="text-xl font-bold mb-4">Select Max Users</h2>
+      <div id="addUserRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
+    </div>
+  </div>
+  <div id="totpOptionsModal" class="totp-modal" role="dialog" aria-label="2FA Options" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">2FA Room Options</h2>
+      <label for="totpUsernameInput" class="sr-only">Enter your username</label>
+      <input id="totpUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="totpUsernameHelp" maxlength="16">
+      <div id="totpUsernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
+      <div id="totpTypeOptions" class="mt-2">
+        <label><input type="radio" name="totpType" value="server" checked> Server-Generated Secret</label>
+        <label><input type="radio" name="totpType" value="custom"> Enter Custom Secret</label>
+      </div>
+      <div id="customTotpSecretContainer" class="hidden mt-2">
+        <label for="customTotpSecret" class="sr-only">Enter custom 2FA secret</label>
+        <input id="customTotpSecret" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter base32 secret (e.g., JBSWY3DPEHPK3PXP)" maxlength="32">
+      </div>
+      <button id="createTotpRoomButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-purple-600">Create 2FA Room</button>
+      <button id="cancelTotpButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+    </div>
+  </div>
+  <div id="totpInputModal" class="totp-modal" role="dialog" aria-label="Enter 2FA Code" tabindex="-1">
+    <div id="totpInputModalContent" class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Enter 2FA Code</h2>
+      <input id="totpCodeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter 6-digit code" maxlength="6">
+      <button id="submitTotpCodeButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Submit</button>
+      <button id="cancelTotpInputButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+    </div>
+  </div>
+  <div id="totpSecretModal" class="totp-modal" role="dialog" aria-label="Share 2FA Secret" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Share 2FA Secret</h2>
+      <p>Share this secret with friends in real life. Copy the text below or scan the QR code.</p>
+      <div id="totpSecretDisplay" class="mt-2 font-mono"></div>
+      <canvas id="qrCodeCanvas"></canvas>
+      <button id="closeTotpSecretButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-blue-600">Close</button>
+    </div>
+  </div>
+  <div id="claimUsernameModal" class="totp-modal" role="dialog" aria-label="Claim Username" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Claim Username</h2>
+      <p class="text-sm text-red-500 mb-2">Warning: Encryption keys are stored locally. On a new device, re-claim to update keys (old offline messages may be lost).</p>
+      <input id="claimUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Desired username (1-16 chars)" maxlength="16">
+      <input id="claimPasswordInput" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Password (min 8 chars)">
+      <div id="claimError" class="text-red-500 mb-2"></div>
+      <div id="claimSuccess" class="text-green-500 mb-2"></div>
+      <button id="claimSubmitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Claim</button>
+      <button id="claimCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+    </div>
+  </div>
+  <div id="loginModal" class="totp-modal hidden" role="dialog" aria-label="Login" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Login</h2>
+      <input id="loginUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Username" maxlength="16">
+      <input id="loginPasswordInput" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Password">
+      <div id="loginError" class="text-red-500 mb-2"></div>
+      <div id="loginSuccess" class="text-green-500 mb-2"></div>
+      <button id="loginSubmitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Login</button>
+      <button id="loginCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+    </div>
+  </div>
+  <div id="searchUserModal" class="totp-modal hidden" role="dialog" aria-label="Search User" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Search User</h2>
+      <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username" maxlength="16">
+      <div id="searchError" class="text-red-500 mb-2"></div>
+      <div id="searchResult" class="mb-2"></div>
+      <button id="searchSubmitButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Search</button>
+      <button id="searchCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
+    </div>
+  </div>
+  <div id="incomingConnectionModal" class="totp-modal hidden" role="dialog" aria-label="Incoming Connection Request" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Incoming Connection</h2>
+      <p id="incomingMessage"></p>
+      <button id="acceptButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600 mt-2">Accept</button>
+      <button id="denyButton" class="bg-red-500 text-white px-4 py-2 rounded w-full hover:bg-red-600 mt-2">Deny</button>
+    </div>
+  </div>
+  <script src="crypto.js"></script>
+  <script src="utils.js"></script>
+  <script src="main.js"></script>
+  <script src="init.js"></script>
+  <script src="events.js"></script>
+</body>
+</html>

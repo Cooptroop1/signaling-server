@@ -3,7 +3,6 @@ let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
-let updateFeaturesUI = () => {console.log('updateFeaturesUI called - implement if needed');  // Placeholder if not defined elsewhere
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map();

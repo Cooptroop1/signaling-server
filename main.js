@@ -18,15 +18,15 @@ let voiceTimerInterval = null;
 let messageCount = 0;
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
-const CHUNK_SIZE = 16384; // Consistent size: 16KB safe for data channels
+const CHUNK_SIZE = 16384; // 16KB safe for data channels
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], received: 0}}
-const negotiationQueues = new Map();
-let globalSendRate = { count: 0, startTime: performance.now() };
-const renegotiationCounts = new Map();
-const maxRenegotiations = 5;
-let keyVersion = 0;
-let globalSizeRate = { totalSize: 0, startTime: performance.now() };
-let processedNonces = new Map();
+const negotiationQueues = new Map(); // Queue pending negotiations per peer
+let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
+const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
+const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
+let keyVersion = 0; // New: Global key version counter for ratcheting
+let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
+let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
 
 // Full working updateFeaturesUI
 function updateFeaturesUI() {
@@ -187,7 +187,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
   const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
- 
+  const signature = await signMessage(signingKey, toSign);
   const payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
@@ -590,11 +590,6 @@ async function processReceivedMessage(data, targetId) {
     console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
     return;
   }
-  const now = Date.now();
-  if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
-    console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
-    return;
-  }
   processedMessageIds.add(data.messageId);
   processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
   let senderUsername, timestamp, contentType, contentOrData;
@@ -622,6 +617,11 @@ async function processReceivedMessage(data, targetId) {
     timestamp = metadata.timestamp;
     contentType = metadata.type;
     contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
+    const now = Date.now();
+    if (Math.abs(now - timestamp) > 300000) { // New: Anti-replay window ±5min
+      console.warn(`Rejecting message with timestamp ${timestamp} (now: ${now}), outside window`);
+      return;
+    }
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
@@ -669,7 +669,7 @@ async function processReceivedMessage(data, targetId) {
   if (isInitiator) {
     dataChannels.forEach((dc, id) => {
       if (id !== targetId && dc.readyState === 'open') {
-        dc.send(event.data);
+        dc.send(JSON.stringify(data));
       }
     });
   }

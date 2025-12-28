@@ -1,6 +1,22 @@
-
-
-
+// generateUserKeypair moved to top to ensure it's defined before onclick handlers
+async function generateUserKeypair() {
+  try {
+    const keyPair = await window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-384' },
+      true, // extractable for local storage
+      ['deriveKey', 'deriveBits']
+    );
+    const exportedPrivate = await window.crypto.subtle.exportKey('jwk', keyPair.privateKey);
+    localStorage.setItem('userPrivateKey', JSON.stringify(exportedPrivate));
+    const exportedPublic = await exportPublicKey(keyPair.publicKey);
+    console.log('Generated and stored user keypair');
+    return exportedPublic;
+  } catch (error) {
+    console.error('generateUserKeypair error:', error);
+    throw new Error('Failed to generate user keypair');
+  }
+}
+console.log('generateUserKeypair function loaded'); // Confirm it's defined
 
 function getCookie(name) {
   const value = `; ${document.cookie}`;

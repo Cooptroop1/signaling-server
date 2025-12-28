@@ -16,8 +16,9 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
-
-const CHUNK_SIZE = 16384; // 16KB safe for data channels
+let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
+let lazyObserver;
+const CHUNK_SIZE = 16384; // Consistent size: 16KB safe for data channels
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], received: 0}}
 const negotiationQueues = new Map();
 let globalSendRate = { count: 0, startTime: performance.now() };
@@ -35,57 +36,58 @@ function updateFeaturesUI() {
     privacyStatus.textContent = useRelay ? 'Relay Mode (E2EE)' : 'E2E Encrypted (P2P)';
     privacyStatus.classList.remove('hidden');
   }
-
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
   const voiceCallButton = document.getElementById('voiceCallButton');
   const audioOutputButton = document.getElementById('audioOutputButton');
   const grokButton = document.getElementById('grokButton');
-
-  if (imageButton) imageButton.classList.toggle('hidden', !features.enableImages);
-  if (voiceButton) voiceButton.classList.toggle('hidden', !features.enableVoice);
-  if (voiceCallButton) voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
-  if (audioOutputButton) {
-    const shouldHide = !features.enableAudioToggle || !voiceCallActive;
-    audioOutputButton.classList.toggle('hidden', shouldHide);
+  if (imageButton) {
+    imageButton.classList.toggle('hidden', !features.enableImages);
+    imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
   }
-  if (grokButton) grokButton.classList.toggle('hidden', !features.enableGrokBot);
+  if (voiceButton) {
+    voiceButton.classList.toggle('hidden', !features.enableVoice);
+    voiceButton.title = features.enableVoice ? 'Record Voice' : 'Voice disabled by admin';
+  }
+  if (voiceCallButton) {
+    voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
+    voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
+    if (!features.enableVoiceCalls && voiceCallActive) {
+      stopVoiceCall();
+    }
+  }
+  if (audioOutputButton) {
+    const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
+    audioOutputButton.classList.toggle('hidden', shouldHide);
+    if (shouldHide && voiceCallActive) {
+      stopVoiceCall();
+    }
+    audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
+    audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
+    audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
+  }
+  if (grokButton) {
+    grokButton.classList.toggle('hidden', !features.enableGrokBot);
+    grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
+  }
+  if (!features.enableService) {
+    showStatusMessage('Service disabled by admin. Disconnecting...');
+    socket.close();
+  }
+  if (!features.enableP2P && !features.enableRelay) {
+    showStatusMessage('Both P2P and relay disabled. Messaging unavailable.');
+    inputContainer.classList.add('hidden');
+  } else if (!features.enableP2P && features.enableRelay && isConnected) {
+    inputContainer.classList.remove('hidden');
+    messages.classList.remove('waiting');
+  }
 }
 
-let grokBotActive = false;
-let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map();
-let audioOutputMode = 'earpiece';
-let totpEnabled = false;
-let totpSecret = '';
-let pendingTotpSecret = null;
-let mediaRecorder = null;
-let voiceChunks = [];
-let voiceTimerInterval = null;
-let messageCount = 0;
-let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
-let lazyObserver;
-const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
-const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
-const negotiationQueues = new Map(); // Queue pending negotiations per peer
-let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
-const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
-const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
-let keyVersion = 0; // New: Global key version counter for ratcheting
-let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
-let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
-const privacyStatus = document.getElementById('privacyStatus');
-  if (privacyStatus) {
-    privacyStatus.textContent = useRelay ? 'Relay Mode (E2EE)' : 'E2E Encrypted (P2P)';
-    privacyStatus.classList.remove('hidden');
-  }
-  // Add image/voice button toggles if needed
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');
     return;
   }
-
   // Global send rate limit check (aggregate all types)
   const now = performance.now();
   if (now - globalSendRate.startTime >= 60000) {
@@ -96,7 +98,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Global message rate limit exceeded (50/min). Please wait.');
     return;
   }
-
   // New: Client-side size limit check (mirror server 1MB/min)
   if (now - globalSizeRate.startTime >= 60000) {
     globalSizeRate.totalSize = 0;
@@ -107,7 +108,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
     return;
   }
-
   let dataToSend = content || base64;
   if (type === 'image' || type === 'file') {
     if (!features.enableImages) {
@@ -120,12 +120,10 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       return;
     }
   }
-
   if (file && file.size > 5 * 1024 * 1024) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
     return;
   }
-
   const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
   const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
   if (now - rateLimit.startTime >= 60000) {
@@ -138,14 +136,12 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} rate limit reached (5/min). Please wait.`);
     return;
   }
-
   if (file && type === 'image') {
     const maxWidth = 640;
     const maxHeight = 360;
     let quality = 0.4;
     if (file.size > 3 * 1024 * 1024) quality = 0.3;
     else if (file.size > 1 * 1024 * 1024) quality = 0.35;
-
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
@@ -177,7 +173,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       reader.readAsDataURL(file);
     });
   }
-
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
@@ -192,40 +187,37 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
   const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
-  
-const payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
-if (dataToSend && type === 'file') {
-  payload.filename = file?.name;
-}
-const jsonString = JSON.stringify(payload);
-const CHUNK_SIZE = 16384; // 16KB safe limit
-if (jsonString.length > CHUNK_SIZE) {
-  const chunkId = generateMessageId();
-  const chunks = [];
-  for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
-    chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
+ 
+  const payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
+  if (dataToSend && type === 'file') {
+    payload.filename = file?.name;
   }
-  for (const dataChannel of dataChannels.values()) {
-    if (dataChannel.readyState === 'open') {
-      for (let index = 0; index < chunks.length; index++) {
-        const chunk = chunks[index];
-        dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
-        await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
+  const jsonString = JSON.stringify(payload);
+  if (jsonString.length > CHUNK_SIZE) {
+    const chunkId = generateMessageId();
+    const chunks = [];
+    for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
+      chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
+    }
+    for (const dataChannel of dataChannels.values()) {
+      if (dataChannel.readyState === 'open') {
+        for (let index = 0; index < chunks.length; index++) {
+          const chunk = chunks[index];
+          dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
+          await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
+        }
+      }
+    }
+  } else {
+    for (const dataChannel of dataChannels.values()) {
+      if (dataChannel.readyState === 'open') {
+        dataChannel.send(jsonString);
       }
     }
   }
-} else {
-  for (const dataChannel of dataChannels.values()) {
-    if (dataChannel.readyState === 'open') {
-      dataChannel.send(jsonString);
-    }
-  }
-}
-
   // Increment global count and size after successful send
   globalSendRate.count += 1;
   globalSizeRate.totalSize += payloadSize;
-
   const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message-bubble self';
@@ -234,7 +226,6 @@ if (jsonString.length > CHUNK_SIZE) {
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   messageDiv.appendChild(document.createTextNode(`${username}: `));
-
   if (type === 'image' || type === 'voice' || type === 'file') {
     let element;
     if (type === 'image') {
@@ -264,7 +255,6 @@ if (jsonString.length > CHUNK_SIZE) {
   } else {
     messageDiv.appendChild(document.createTextNode(sanitizedContent));
   }
-
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
   processedMessageIds.add(messageId);
@@ -493,53 +483,53 @@ function setupDataChannel(dataChannel, targetId) {
     }
   };
   dataChannel.onmessage = async (event) => {
-  const now = performance.now();
-  const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
-  if (now - rateLimit.startTime >= 1000) {
-    rateLimit.count = 0;
-    rateLimit.startTime = now;
-  }
-  let data;
-  try {
-    data = JSON.parse(event.data);
-  } catch (e) {
-    console.error(`Invalid message from ${targetId}:`, e);
-    showStatusMessage('Invalid message received.');
-    return;
-  }
-  if (data.chunk) {
-    // Don't count chunks toward rate limit
-    const { chunkId, index, total, data: chunkData } = data;
-    if (!chunkBuffers.has(chunkId)) {
-      chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
+    const now = performance.now();
+    const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
+    if (now - rateLimit.startTime >= 1000) {
+      rateLimit.count = 0;
+      rateLimit.startTime = now;
     }
-    const buffer = chunkBuffers.get(chunkId);
-    buffer.chunks[index] = chunkData;
-    buffer.received++;
-    if (buffer.received === total) {
-      const fullMessage = buffer.chunks.join('');
-      chunkBuffers.delete(chunkId);
-      // Process the reassembled message
-      try {
-        data = JSON.parse(fullMessage);
-      } catch (e) {
-        console.error(`Invalid reassembled message from ${targetId}:`, e);
-        return;
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (e) {
+      console.error(`Invalid message from ${targetId}:`, e);
+      showStatusMessage('Invalid message received.');
+      return;
+    }
+    if (data.chunk) {
+      // Don't count chunks toward rate limit
+      const { chunkId, index, total, data: chunkData } = data;
+      if (!chunkBuffers.has(chunkId)) {
+        chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
       }
-      await processReceivedMessage(data, targetId);
+      const buffer = chunkBuffers.get(chunkId);
+      buffer.chunks[index] = chunkData;
+      buffer.received++;
+      if (buffer.received === total) {
+        const fullMessage = buffer.chunks.join('');
+        chunkBuffers.delete(chunkId);
+        // Process the reassembled message
+        try {
+          data = JSON.parse(fullMessage);
+        } catch (e) {
+          console.error(`Invalid reassembled message from ${targetId}:`, e);
+          return;
+        }
+        await processReceivedMessage(data, targetId);
+      }
+      return;
     }
-    return;
-  }
-  // Count non-chunk messages
-  rateLimit.count += 1;
-  messageRateLimits.set(targetId, rateLimit);
-  if (rateLimit.count > 10) {
-    console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
-    showStatusMessage('Message rate limit reached, please slow down.');
-    return;
-  }
-  await processReceivedMessage(data, targetId);
-};
+    // Count non-chunk messages
+    rateLimit.count += 1;
+    messageRateLimits.set(targetId, rateLimit);
+    if (rateLimit.count > 10) {
+      console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
+      showStatusMessage('Message rate limit reached, please slow down.');
+      return;
+    }
+    await processReceivedMessage(data, targetId);
+  };
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
     // Removed showStatusMessage to suppress transient error
@@ -856,7 +846,6 @@ async function renegotiate(targetId) {
       return;
     }
     renegotiationCounts.set(targetId, count + 1);
-
     if (!negotiationQueues.has(targetId)) {
       negotiationQueues.set(targetId, Promise.resolve());
     }
@@ -1012,52 +1001,6 @@ async function autoConnect(codeParam) {
   }
 }
 
-  const imageButton = document.getElementById('imageButton');
-  const voiceButton = document.getElementById('voiceButton');
-  const voiceCallButton = document.getElementById('voiceCallButton');
-  const audioOutputButton = document.getElementById('audioOutputButton');
-  const grokButton = document.getElementById('grokButton');
-  if (imageButton) {
-    imageButton.classList.toggle('hidden', !features.enableImages);
-    imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
-  }
-  if (voiceButton) {
-    voiceButton.classList.toggle('hidden', !features.enableVoice);
-    voiceButton.title = features.enableVoice ? 'Record Voice' : 'Voice disabled by admin';
-  }
-  if (voiceCallButton) {
-    voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
-    voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
-    if (!features.enableVoiceCalls && voiceCallActive) {
-      stopVoiceCall();
-    }
-  }
-  if (audioOutputButton) {
-    const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
-    audioOutputButton.classList.toggle('hidden', shouldHide);
-    if (shouldHide && voiceCallActive) {
-      stopVoiceCall();
-    }
-    audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
-    audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
-    audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
-  }
-  if (grokButton) {
-    grokButton.classList.toggle('hidden', !features.enableGrokBot);
-    grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
-  }
-  if (!features.enableService) {
-    showStatusMessage('Service disabled by admin. Disconnecting...');
-    socket.close();
-  }
-  if (!features.enableP2P && !features.enableRelay) {
-    showStatusMessage('Both P2P and relay disabled. Messaging unavailable.');
-    inputContainer.classList.add('hidden');
-  } else if (!features.enableP2P && features.enableRelay && isConnected) {
-    inputContainer.classList.remove('hidden');
-    messages.classList.remove('waiting');
-  }
-
 async function sendToGrok(query) {
   if (!grokApiKey) {
     showStatusMessage('Error: xAI API key not set. Enter it in the Grok bot settings.');
@@ -1132,8 +1075,8 @@ async function setAudioOutput(audioElement, targetId) {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
       if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker' 
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
+        const targetDevice = audioOutputMode === 'speaker'
+          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default')
           : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
         if (targetDevice) {
           await audioElement.setSinkId(targetDevice.deviceId);

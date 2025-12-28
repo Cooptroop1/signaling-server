@@ -48,31 +48,8 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
-const CHUNK_SIZE = 16384; // 16KB safe for data channels
-const chunkBuffers = new Map(); // {chunkId: {chunks: [], received: 0}}
-const negotiationQueues = new Map();
-let globalSendRate = { count: 0, startTime: performance.now() };
-const renegotiationCounts = new Map();
-const maxRenegotiations = 5;
-let keyVersion = 0;
-let globalSizeRate = { totalSize: 0, startTime: performance.now() };
-let processedNonces = new Map();
-
-// END OF BLOCK TO ADD
-
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
-let grokBotActive = false;
-let grokApiKey = localStorage.getItem('grokApiKey') || '';
-let renegotiating = new Map();
-let audioOutputMode = 'earpiece';
-let totpEnabled = false;
-let totpSecret = '';
-let pendingTotpSecret = null;
-let mediaRecorder = null;
-let voiceChunks = [];
-let voiceTimerInterval = null;
-let messageCount = 0;
 const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer

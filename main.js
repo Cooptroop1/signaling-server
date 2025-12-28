@@ -1007,7 +1007,6 @@ async function autoConnect(codeParam) {
     inputContainer.classList.remove('hidden');
     messages.classList.remove('waiting');
   }
-}
 
 async function sendToGrok(query) {
   if (!grokApiKey) {

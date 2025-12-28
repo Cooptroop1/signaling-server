@@ -75,22 +75,21 @@ server.on('request', (req, res) => {
         return;
       }
       let contentType = 'text/plain';
+      let nonce;
       if (filePath.endsWith('.html')) {
         contentType = 'text/html';
-        const nonce = crypto.randomBytes(16).toString('base64');
-        let updatedCSP = "default-src 'self'; " +
+        nonce = crypto.randomBytes(16).toString('base64');
+        const updatedCSP = "default-src 'self'; " +
           `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
           `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
           "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
           "media-src 'self' blob: data:; " +
           "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
           "object-src 'none'; base-uri 'self';";
-        data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
-          `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
-        data = data.toString().replace(/<script(?! src)/g,
-          `<script nonce="${nonce}"`);
-        data = data.toString().replace(/<style/g,
-          `<style nonce="${nonce}"`);
+        res.setHeader('Content-Security-Policy', updatedCSP);
+        let htmlData = data.toString();
+        htmlData = htmlData.replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
+        htmlData = htmlData.replace(/<style/g, `<style nonce="${nonce}"`);
         let clientIdFromCookie;
         const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
           const [name, value] = cookie.trim().split('=');
@@ -102,6 +101,9 @@ server.on('request', (req, res) => {
           clientIdFromCookie = uuidv4();
           res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
         }
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(htmlData);
+        return;
       } else if (filePath.endsWith('.js')) {
         contentType = 'application/javascript';
       }

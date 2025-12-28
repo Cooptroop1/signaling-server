@@ -79,7 +79,7 @@ server.on('request', (req, res) => {
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; " +
         "object-src 'none'; base-uri 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);

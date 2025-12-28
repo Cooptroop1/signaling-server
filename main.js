@@ -2,8 +2,6 @@ let updateFeaturesUI = () => {console.log('updateFeaturesUI called - implement i
 let initiatorPublic;
 let userPrivateKey = localStorage.getItem('userPrivateKey'); // Keep this — loads saved key
 let userPublicKey; // Optional: if you need it later
-
-// ADD THIS ENTIRE BLOCK BELOW THE ABOVE LINES
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -56,7 +54,6 @@ const privacyStatus = document.getElementById('privacyStatus');
     privacyStatus.classList.remove('hidden');
   }
   // Add image/voice button toggles if needed
-};
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');

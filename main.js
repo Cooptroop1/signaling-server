@@ -13,6 +13,7 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
+const chunkBuffers = new Map(); // {chunkId: {chunks: [], received: 0}}
 const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
@@ -135,43 +136,35 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
   const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
-  const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
-
-  if (dataToSend && type === 'file') {
-    payload.filename = file?.name;
+  
+const payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted }; // New: Use encryptedBlob instead
+if (dataToSend && type === 'file') {
+  payload.filename = file?.name;
+}
+const jsonString = JSON.stringify(payload);
+const CHUNK_SIZE = 16384; // 16KB safe limit
+if (jsonString.length > CHUNK_SIZE) {
+  const chunkId = generateMessageId();
+  const chunks = [];
+  for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
+    chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
   }
-
-  const jsonString = JSON.stringify(payload);
-  if (useRelay) {
-    sendRelayMessage(`relay-${type}`, payload);
-  } else if (dataChannels.size > 0) {
-    if (jsonString.length > CHUNK_SIZE) {
-      const chunkId = generateMessageId();
-      const chunks = [];
-      for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
-        chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
-      }
-      for (const dataChannel of dataChannels.values()) {
-        if (dataChannel.readyState === 'open') {
-          for (let index = 0; index < chunks.length; index++) {
-            const chunk = chunks[index];
-            dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
-            await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
-          }
-        }
-      }
-    } else {
-      for (const dataChannel of dataChannels.values()) {
-        if (dataChannel.readyState === 'open') {
-          dataChannel.send(jsonString);
-        }
+  for (const dataChannel of dataChannels.values()) {
+    if (dataChannel.readyState === 'open') {
+      for (let index = 0; index < chunks.length; index++) {
+        const chunk = chunks[index];
+        dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
+        await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
       }
     }
-  } else {
-    showStatusMessage('Error: No connections.');
-    return;
   }
+} else {
+  for (const dataChannel of dataChannels.values()) {
+    if (dataChannel.readyState === 'open') {
+      dataChannel.send(jsonString);
+    }
+  }
+}
 
   // Increment global count and size after successful send
   globalSendRate.count += 1;
@@ -444,53 +437,53 @@ function setupDataChannel(dataChannel, targetId) {
     }
   };
   dataChannel.onmessage = async (event) => {
-    const now = performance.now();
-    const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
-    if (now - rateLimit.startTime >= 1000) {
-      rateLimit.count = 0;
-      rateLimit.startTime = now;
+  const now = performance.now();
+  const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
+  if (now - rateLimit.startTime >= 1000) {
+    rateLimit.count = 0;
+    rateLimit.startTime = now;
+  }
+  let data;
+  try {
+    data = JSON.parse(event.data);
+  } catch (e) {
+    console.error(`Invalid message from ${targetId}:`, e);
+    showStatusMessage('Invalid message received.');
+    return;
+  }
+  if (data.chunk) {
+    // Don't count chunks toward rate limit
+    const { chunkId, index, total, data: chunkData } = data;
+    if (!chunkBuffers.has(chunkId)) {
+      chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
     }
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch (e) {
-      console.error(`Invalid message from ${targetId}:`, e);
-      showStatusMessage('Invalid message received.');
-      return;
-    }
-    if (data.chunk) {
-      // Don't count chunks toward rate limit
-      const { chunkId, index, total, data: chunkData } = data;
-      if (!chunkBuffers.has(chunkId)) {
-        chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
+    const buffer = chunkBuffers.get(chunkId);
+    buffer.chunks[index] = chunkData;
+    buffer.received++;
+    if (buffer.received === total) {
+      const fullMessage = buffer.chunks.join('');
+      chunkBuffers.delete(chunkId);
+      // Process the reassembled message
+      try {
+        data = JSON.parse(fullMessage);
+      } catch (e) {
+        console.error(`Invalid reassembled message from ${targetId}:`, e);
+        return;
       }
-      const buffer = chunkBuffers.get(chunkId);
-      buffer.chunks[index] = chunkData;
-      buffer.received++;
-      if (buffer.received === total) {
-        const fullMessage = buffer.chunks.join('');
-        chunkBuffers.delete(chunkId);
-        // Process the reassembled message
-        try {
-          data = JSON.parse(fullMessage);
-        } catch (e) {
-          console.error(`Invalid reassembled message from ${targetId}:`, e);
-          return;
-        }
-        await processReceivedMessage(data, targetId);
-      }
-      return;
+      await processReceivedMessage(data, targetId);
     }
-    // Count non-chunk messages
-    rateLimit.count += 1;
-    messageRateLimits.set(targetId, rateLimit);
-    if (rateLimit.count > 10) {
-      console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
-      showStatusMessage('Message rate limit reached, please slow down.');
-      return;
-    }
-    await processReceivedMessage(data, targetId);
-  };
+    return;
+  }
+  // Count non-chunk messages
+  rateLimit.count += 1;
+  messageRateLimits.set(targetId, rateLimit);
+  if (rateLimit.count > 10) {
+    console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
+    showStatusMessage('Message rate limit reached, please slow down.');
+    return;
+  }
+  await processReceivedMessage(data, targetId);
+};
   dataChannel.onerror = (error) => {
     console.error(`Data channel error with ${targetId}:`, error);
     // Removed showStatusMessage to suppress transient error

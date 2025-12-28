@@ -95,6 +95,8 @@ let signalingQueue = new Map();
 let connectedClients = new Set();
 let clientPublicKeys = new Map();
 let initiatorPublic;
+let userPrivateKey = localStorage.getItem('userPrivateKey');  // Added: Load from storage at top
+let userPublicKey;  // Added: Will be set if needed
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
 

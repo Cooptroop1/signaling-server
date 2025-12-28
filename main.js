@@ -962,7 +962,6 @@ async function autoConnect(codeParam) {
   }
 }
 
-function updateFeaturesUI() {
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
   const voiceCallButton = document.getElementById('voiceCallButton');

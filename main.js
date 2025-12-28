@@ -1,7 +1,3 @@
-let turnUsername = '';
-let turnCredential = '';
-let localStream = null;
-let voiceCallActive = false;
 let updateFeaturesUI = () => {console.log('updateFeaturesUI called - implement if needed');  // Placeholder if not defined elsewhere
 let initiatorPublic;
 let userPrivateKey = localStorage.getItem('userPrivateKey'); // Keep this — loads saved key
@@ -12,11 +8,6 @@ let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
-
-// Placeholder updateFeaturesUI - safe fallback if real one was deleted
-let updateFeaturesUI = () => {
-  console.log('updateFeaturesUI called - using fallback');
-  const privacyStatus = document.getElementById('privacyStatus');
   if (privacyStatus) {
     privacyStatus.textContent = useRelay ? 'Relay Mode (E2EE)' : 'E2E Encrypted (P2P)';
     privacyStatus.classList.remove('hidden');

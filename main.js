@@ -2,6 +2,7 @@ let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
+let updateFeaturesUI = () => {console.log('updateFeaturesUI called - implement if needed');  // Placeholder if not defined elsewhere
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map();
@@ -13,7 +14,6 @@ let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
 let messageCount = 0;
-const chunkBuffers = new Map(); // {chunkId: {chunks: [], received: 0}}
 const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
@@ -23,7 +23,13 @@ const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
-
+const privacyStatus = document.getElementById('privacyStatus');
+  if (privacyStatus) {
+    privacyStatus.textContent = useRelay ? 'Relay Mode (E2EE)' : 'E2E Encrypted (P2P)';
+    privacyStatus.classList.remove('hidden');
+  }
+  // Add image/voice button toggles if needed
+};
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');

@@ -1,21 +1,47 @@
-let updateFeaturesUI = () => {console.log('updateFeaturesUI called - implement if needed');  // Placeholder if not defined elsewhere
 let initiatorPublic;
-let userPrivateKey = localStorage.getItem('userPrivateKey'); // Keep this — loads saved key
-let userPublicKey; // Optional: if you need it later
+let userPrivateKey = localStorage.getItem('userPrivateKey'); // Loads saved key
+let userPublicKey; // Optional
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
+let grokBotActive = false;
+let grokApiKey = localStorage.getItem('grokApiKey') || '';
+let renegotiating = new Map();
+let audioOutputMode = 'earpiece';
+let totpEnabled = false;
+let totpSecret = '';
+let pendingTotpSecret = null;
+let mediaRecorder = null;
+let voiceChunks = [];
+let voiceTimerInterval = null;
+let messageCount = 0;
+
+const CHUNK_SIZE = 16384; // 16KB safe for data channels
+const chunkBuffers = new Map(); // {chunkId: {chunks: [], received: 0}}
+const negotiationQueues = new Map();
+let globalSendRate = { count: 0, startTime: performance.now() };
+const renegotiationCounts = new Map();
+const maxRenegotiations = 5;
+let keyVersion = 0;
+let globalSizeRate = { totalSize: 0, startTime: performance.now() };
+let processedNonces = new Map();
+
+// Full working updateFeaturesUI
+function updateFeaturesUI() {
+  console.log('updateFeaturesUI called');
+  const privacyStatus = document.getElementById('privacyStatus');
   if (privacyStatus) {
     privacyStatus.textContent = useRelay ? 'Relay Mode (E2EE)' : 'E2E Encrypted (P2P)';
     privacyStatus.classList.remove('hidden');
   }
-  // Toggle buttons based on features
+
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
   const voiceCallButton = document.getElementById('voiceCallButton');
   const audioOutputButton = document.getElementById('audioOutputButton');
   const grokButton = document.getElementById('grokButton');
+
   if (imageButton) imageButton.classList.toggle('hidden', !features.enableImages);
   if (voiceButton) voiceButton.classList.toggle('hidden', !features.enableVoice);
   if (voiceCallButton) voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
@@ -24,7 +50,7 @@ let voiceCallActive = false;
     audioOutputButton.classList.toggle('hidden', shouldHide);
   }
   if (grokButton) grokButton.classList.toggle('hidden', !features.enableGrokBot);
-};
+}
 
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';

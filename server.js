@@ -1,3 +1,5 @@
+
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -254,13 +256,13 @@ function validateMessage(data) {
   }
   switch (data.type) {
     case 'connect':
-      if (!data.clientId || typeof data.clientId !== 'string' || data.clientId.length > 36) {
-        return { valid: false, error: 'connect: clientId required as string (max 36 chars)' };
+      if (!data.clientId || typeof data.clientId !== 'string') {
+        return { valid: false, error: 'connect: clientId required as string' };
       }
       break;
     case 'refresh-token':
-      if (!data.refreshToken || typeof data.refreshToken !== 'string' || data.refreshToken.length > 1024) {
-        return { valid: false, error: 'refresh-token: refreshToken required as string (max 1024 chars)' };
+      if (!data.refreshToken || typeof data.refreshToken !== 'string') {
+        return { valid: false, error: 'refresh-token: refreshToken required as string' };
       }
       break;
     case 'public-key':
@@ -272,31 +274,31 @@ function validateMessage(data) {
       }
       break;
     case 'encrypted-room-key':
-      if (!data.encryptedKey || !isValidBase64(data.encryptedKey) || data.encryptedKey.length > 1024) {
-        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey format or too long' };
+      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
+        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey format' };
       }
-      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 128) {
-        return { valid: false, error: 'encrypted-room-key: invalid iv or too long' };
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'encrypted-room-key: invalid iv' };
       }
       if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
         return { valid: false, error: 'encrypted-room-key: invalid publicKey format or length' };
       }
-      if (!data.targetId || typeof data.targetId !== 'string' || data.targetId.length > 36) {
-        return { valid: false, error: 'encrypted-room-key: targetId required as string (max 36 chars)' };
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'encrypted-room-key: targetId required as string' };
       }
       if (!data.code) {
         return { valid: false, error: 'encrypted-room-key: code required' };
       }
       break;
     case 'new-room-key':
-      if (!data.encrypted || !isValidBase64(data.encrypted) || data.encrypted.length > 1024) {
-        return { valid: false, error: 'new-room-key: invalid encrypted or too long' };
+      if (!data.encrypted || !isValidBase64(data.encrypted)) {
+        return { valid: false, error: 'new-room-key: invalid encrypted' };
       }
-      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 128) {
-        return { valid: false, error: 'new-room-key: invalid iv or too long' };
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'new-room-key: invalid iv' };
       }
-      if (!data.targetId || typeof data.targetId !== 'string' || data.targetId.length > 36) {
-        return { valid: false, error: 'new-room-key: targetId required as string (max 36 chars)' };
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'new-room-key: targetId required as string' };
       }
       if (!data.code) {
         return { valid: false, error: 'new-room-key: code required' };
@@ -309,8 +311,8 @@ function validateMessage(data) {
       if (!data.username) {
         return { valid: false, error: 'join: username required' };
       }
-      if (data.totpCode && (typeof data.totpCode !== 'string' || data.totpCode.length !== 6 || !/^\d{6}$/.test(data.totpCode))) {
-        return { valid: false, error: 'join: totpCode must be a 6-digit string if provided' };
+      if (data.totpCode && typeof data.totpCode !== 'string') {
+        return { valid: false, error: 'join: totpCode must be a string if provided' };
       }
       break;
     case 'check-totp':
@@ -331,25 +333,19 @@ function validateMessage(data) {
       if (!data.offer && !data.answer) {
         return { valid: false, error: data.type + ': offer or answer required' };
       }
-      if (data.offer && typeof data.offer !== 'object') {
-        return { valid: false, error: data.type + ': offer must be an object' };
-      }
-      if (data.answer && typeof data.answer !== 'object') {
-        return { valid: false, error: data.type + ': answer must be an object' };
-      }
-      if (!data.targetId || typeof data.targetId !== 'string' || data.targetId.length > 36) {
-        return { valid: false, error: data.type + ': targetId required as string (max 36 chars)' };
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: data.type + ': targetId required as string' };
       }
       if (!data.code) {
         return { valid: false, error: data.type + ': code required' };
       }
       break;
     case 'candidate':
-      if (!data.candidate || typeof data.candidate !== 'object') {
-        return { valid: false, error: 'candidate: candidate required as object' };
+      if (!data.candidate) {
+        return { valid: false, error: 'candidate: candidate required' };
       }
-      if (!data.targetId || typeof data.targetId !== 'string' || data.targetId.length > 36) {
-        return { valid: false, error: 'candidate: targetId required as string (max 36 chars)' };
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: 'candidate: targetId required as string' };
       }
       if (!data.code) {
         return { valid: false, error: 'candidate: code required' };
@@ -357,11 +353,11 @@ function validateMessage(data) {
       break;
     case 'kick':
     case 'ban':
-      if (!data.targetId || typeof data.targetId !== 'string' || data.targetId.length > 36) {
-        return { valid: false, error: `${data.type}: targetId required as string (max 36 chars)` };
+      if (!data.targetId || typeof data.targetId !== 'string') {
+        return { valid: false, error: `${data.type}: targetId required as string` };
       }
-      if (!data.signature || !isValidBase64(data.signature) || data.signature.length > 128) {
-        return { valid: false, error: `${data.type}: valid signature required (base64, max 128 chars)` };
+      if (!data.signature || !isValidBase64(data.signature)) {
+        return { valid: false, error: `${data.type}: valid signature required` };
       }
       if (!data.code) {
         return { valid: false, error: `${data.type}: code required` };
@@ -378,26 +374,20 @@ function validateMessage(data) {
       if ((!data.content && !data.encryptedContent && !data.data && !data.encryptedData) || typeof (data.content || data.encryptedContent || data.data || data.encryptedData) !== 'string') {
         return { valid: false, error: 'relay-message: content, encryptedContent, data, or encryptedData required as string' };
       }
-      if (data.content && data.content.length > 10000) {
-        return { valid: false, error: 'relay-message: content too long (max 10000 chars)' };
+      if ((data.encryptedContent || data.encryptedData) && !data.iv) {
+        return { valid: false, error: 'relay-message: iv required for encryptedContent or encryptedData' };
       }
-      if (data.data && data.data.length > 10000) {
-        return { valid: false, error: 'relay-message: data too long (max 10000 chars)' };
+      if ((data.encryptedContent || data.encryptedData) && !data.signature) {
+        return { valid: false, error: 'relay-message: signature required for encryptedContent or encryptedData' };
       }
-      if ((data.encryptedContent || data.encryptedData) && (!data.iv || !isValidBase64(data.iv) || data.iv.length > 128)) {
-        return { valid: false, error: 'relay-message: valid iv required for encryptedContent or encryptedData (base64, max 128 chars)' };
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'relay-message: messageId required as string' };
       }
-      if ((data.encryptedContent || data.encryptedData) && (!data.signature || !isValidBase64(data.signature) || data.signature.length > 128)) {
-        return { valid: false, error: 'relay-message: valid signature required for encryptedContent or encryptedData (base64, max 128 chars)' };
+      if (!data.timestamp || typeof data.timestamp !== 'number') {
+        return { valid: false, error: 'relay-message: timestamp required as number' };
       }
-      if (!data.messageId || typeof data.messageId !== 'string' || data.messageId.length > 36) {
-        return { valid: false, error: 'relay-message: messageId required as string (max 36 chars)' };
-      }
-      if (!data.timestamp || typeof data.timestamp !== 'number' || data.timestamp <= 0) {
-        return { valid: false, error: 'relay-message: timestamp required as positive number' };
-      }
-      if (!data.nonce || typeof data.nonce !== 'string' || data.nonce.length > 64) {
-        return { valid: false, error: 'relay-message: nonce required as string (max 64 chars)' };
+      if (!data.nonce || typeof data.nonce !== 'string') {
+        return { valid: false, error: 'relay-message: nonce required as string' };
       }
       if (!data.code) {
         return { valid: false, error: 'relay-message: code required' };
@@ -406,26 +396,26 @@ function validateMessage(data) {
     case 'relay-image':
     case 'relay-voice':
     case 'relay-file':
-      if ((!data.data && !data.encryptedData) || !isValidBase64(data.data || data.encryptedData) || (data.data || data.encryptedData).length > 9333333) {
-        return { valid: false, error: data.type + ': invalid data or encryptedData (base64, max ~5MB)' };
+      if ((!data.data && !data.encryptedData) || !isValidBase64(data.data || data.encryptedData)) {
+        return { valid: false, error: data.type + ': invalid data or encryptedData (base64)' };
       }
-      if (data.encryptedData && (!data.iv || !isValidBase64(data.iv) || data.iv.length > 128)) {
-        return { valid: false, error: data.type + ': valid iv required for encryptedData (base64, max 128 chars)' };
+      if (data.encryptedData && !data.iv) {
+        return { valid: false, error: data.type + ': iv required for encryptedData' };
       }
-      if (data.encryptedData && (!data.signature || !isValidBase64(data.signature) || data.signature.length > 128)) {
-        return { valid: false, error: data.type + ': valid signature required for encryptedData (base64, max 128 chars)' };
+      if (data.encryptedData && !data.signature) {
+        return { valid: false, error: data.type + ': signature required for encryptedData' };
       }
-      if (!data.messageId || typeof data.messageId !== 'string' || data.messageId.length > 36) {
-        return { valid: false, error: data.type + ': messageId required as string (max 36 chars)' };
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: data.type + ': messageId required as string' };
       }
-      if (!data.timestamp || typeof data.timestamp !== 'number' || data.timestamp <= 0) {
-        return { valid: false, error: data.type + ': timestamp required as positive number' };
+      if (!data.timestamp || typeof data.timestamp !== 'number') {
+        return { valid: false, error: data.type + ': timestamp required as number' };
       }
-      if (!data.nonce || typeof data.nonce !== 'string' || data.nonce.length > 64) {
-        return { valid: false, error: data.type + ': nonce required as string (max 64 chars)' };
+      if (!data.nonce || typeof data.nonce !== 'string') {
+        return { valid: false, error: data.type + ': nonce required as string' };
       }
-      if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string' || data.filename.length > 255)) {
-        return { valid: false, error: 'relay-file: filename required as string (max 255 chars)' };
+      if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string')) {
+        return { valid: false, error: 'relay-file: filename required as string' };
       }
       if (!data.code) {
         return { valid: false, error: data.type + ': code required' };
@@ -434,13 +424,17 @@ function validateMessage(data) {
     case 'get-stats':
     case 'get-features':
     case 'toggle-feature':
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: data.type + ': secret required as string' };
+      }
+      if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string')) {
+        return { valid: false, error: 'toggle-feature: feature required as string' };
+      }
+      break;
     case 'export-stats-csv':
     case 'export-logs-csv':
-      if (!data.secret || typeof data.secret !== 'string' || data.secret.length > 64) {
-        return { valid: false, error: data.type + ': secret required as string (max 64 chars)' };
-      }
-      if (data.type === 'toggle-feature' && (!data.feature || typeof data.feature !== 'string' || data.feature.length > 32)) {
-        return { valid: false, error: 'toggle-feature: feature required as string (max 32 chars)' };
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: data.type + ': secret required as string' };
       }
       break;
     case 'ping':
@@ -450,27 +444,27 @@ function validateMessage(data) {
       if (!data.code) {
         return { valid: false, error: 'set-totp: code required' };
       }
-      if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret) || data.secret.length > 256) {
-        return { valid: false, error: 'set-totp: valid base32 secret required (max 256 chars)' };
+      if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
+        return { valid: false, error: 'set-totp: valid base32 secret required' };
       }
       break;
     case 'register-username':
       if (!data.username) {
         return { valid: false, error: 'register-username: username required' };
       }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8 || data.password.length > 128) {
-        return { valid: false, error: 'register-username: password required as string (8-128 chars)' };
+      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
+        return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
       }
-      if (data.public_key && (!isValidBase64(data.public_key) || data.public_key.length > 132)) {
-        return { valid: false, error: 'register-username: invalid public_key (base64, max 132 chars)' };
+      if (data.public_key && !isValidBase64(data.public_key)) {
+        return { valid: false, error: 'register-username: invalid public_key (base64)' };
       }
       break;
     case 'login-username':
       if (!data.username) {
         return { valid: false, error: 'login-username: username required' };
       }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8 || data.password.length > 128) {
-        return { valid: false, error: 'login-username: password required as string (8-128 chars)' };
+      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
+        return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
       }
       break;
     case 'find-user':
@@ -479,25 +473,25 @@ function validateMessage(data) {
       }
       break;
     case 'send-offline-message':
-      if (!data.to_username || typeof data.to_username !== 'string' || !validateUsername(data.to_username)) {
-        return { valid: false, error: 'send-offline-message: valid to_username required' };
+      if (!data.to_username) {
+        return { valid: false, error: 'send-offline-message: to_username required' };
       }
-      if (!data.encrypted || !isValidBase64(data.encrypted) || data.encrypted.length > 1024) {
-        return { valid: false, error: 'send-offline-message: invalid encrypted (base64, max 1024 chars)' };
+      if (!data.encrypted || !isValidBase64(data.encrypted)) {
+        return { valid: false, error: 'send-offline-message: invalid encrypted (base64)' };
       }
-      if (!data.iv || !isValidBase64(data.iv) || data.iv.length > 128) {
-        return { valid: false, error: 'send-offline-message: invalid iv (base64, max 128 chars)' };
+      if (!data.iv || !isValidBase64(data.iv)) {
+        return { valid: false, error: 'send-offline-message: invalid iv (base64)' };
       }
-      if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public) || data.ephemeral_public.length > 132) {
-        return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64, max 132 chars)' };
+      if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
+        return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
       }
-      if (!data.messageId || typeof data.messageId !== 'string' || data.messageId.length > 36) {
-        return { valid: false, error: 'send-offline-message: messageId required as string (max 36 chars)' };
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'send-offline-message: messageId required as string' };
       }
       break;
     case 'confirm-offline-message':
-      if (!data.messageId || typeof data.messageId !== 'string' || data.messageId.length > 36) {
-        return { valid: false, error: 'confirm-offline-message: messageId required as string (max 36 chars)' };
+      if (!data.messageId || typeof data.messageId !== 'string') {
+        return { valid: false, error: 'confirm-offline-message: messageId required as string' };
       }
       break;
     case 'logout':

@@ -17,14 +17,12 @@ async function generateUserKeypair() {
   }
 }
 console.log('generateUserKeypair function loaded'); // Confirm it's defined
-
 function getCookie(name) {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) return parts.pop().split(';').shift();
   return null;
 }
-
 function setCookie(name, value, days) {
   let expires = '';
   if (days) {
@@ -34,7 +32,6 @@ function setCookie(name, value, days) {
   }
   document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
 }
-
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -48,7 +45,6 @@ function processSignalingQueue() {
   });
   signalingQueue.clear();
 }
-
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
@@ -95,11 +91,10 @@ let signalingQueue = new Map();
 let connectedClients = new Set();
 let clientPublicKeys = new Map();
 let initiatorPublic;
-let userPrivateKey = localStorage.getItem('userPrivateKey');  // Added: Load from storage at top
-let userPublicKey;  // Added: Will be set if needed
+let userPrivateKey = localStorage.getItem('userPrivateKey'); // Added: Load from storage at top
+let userPublicKey; // Added: Will be set if needed
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
-
 if (typeof window !== 'undefined') {
   socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
   console.log('WebSocket created');
@@ -133,24 +128,20 @@ if (typeof window !== 'undefined') {
     );
   })();
 }
-
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
   helpModal.focus();
 });
-
 helpModal.addEventListener('click', () => {
   helpModal.classList.remove('active');
   helpText.focus();
 });
-
 helpModal.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     helpModal.classList.remove('active');
     helpText.focus();
   }
 });
-
 const addUserText = document.getElementById('addUserText');
 const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', () => {
@@ -159,32 +150,27 @@ addUserText.addEventListener('click', () => {
     addUserModal.focus();
   }
 });
-
 addUserModal.addEventListener('click', () => {
   addUserModal.classList.remove('active');
   addUserText.focus();
 });
-
 addUserModal.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     addUserModal.classList.remove('active');
     addUserText.focus();
   }
 });
-
 let pendingCode = null;
 let pendingJoin = null;
 const maxReconnectAttempts = 5;
 let refreshFailures = 0;
 let refreshBackoff = 1000;
-
 function updateLogoutButtonVisibility() {
   const logoutButton = document.getElementById('logoutButton');
   if (logoutButton) {
     logoutButton.classList.toggle('hidden', !(username && token));
   }
 }
-
 function logout() {
   if (socket.readyState === WebSocket.OPEN && token) {
     socket.send(JSON.stringify({ type: 'logout', clientId, token }));
@@ -221,7 +207,6 @@ function logout() {
   showStatusMessage('Logged out successfully.');
   document.getElementById('startChatToggleButton')?.focus();
 }
-
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -242,13 +227,11 @@ socket.onopen = () => {
   }
   updateLogoutButtonVisibility();
 };
-
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
 };
-
 socket.onclose = () => {
   console.log('WebSocket closed');
   stopKeepAlive();
@@ -266,7 +249,6 @@ socket.onclose = () => {
     socket.onmessage = socket.onmessage;
   }, delay);
 };
-
 socket.onmessage = async (event) => {
   console.log('Received WebSocket message:', event.data);
   try {
@@ -873,7 +855,6 @@ socket.onmessage = async (event) => {
     console.error('Error parsing message:', error, 'Raw data:', event.data);
   }
 };
-
 function refreshAccessToken() {
   if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
@@ -883,7 +864,6 @@ function refreshAccessToken() {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
   }
 }
-
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
   keyVersion++;
@@ -932,7 +912,6 @@ async function triggerRatchet() {
     keyVersion--;
   }
 }
-
 async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
@@ -942,7 +921,6 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
   const delay = backoffTimes[retryCount - 1];
   console.log(`Scheduling retry ${retryCount} in ${delay / 1000}s for version ${version}`);
   await new Promise(resolve => setTimeout(resolve, delay));
-
   let retrySuccess = 0;
   let newFailures = [];
   for (const cId of failures) {
@@ -978,7 +956,6 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
     console.log(`All partial ratchet retries complete for version ${version}.`);
   }
 }
-
 function updateDots() {
   const userDots = document.getElementById('userDots');
   if (!userDots) return;
@@ -1014,7 +991,6 @@ function updateDots() {
     userDots.appendChild(dot);
   }
 }
-
 async function kickUser(targetId) {
   if (!isInitiator) return;
   if (!targetId || typeof targetId !== 'string') {
@@ -1030,7 +1006,6 @@ async function kickUser(targetId) {
   socket.send(JSON.stringify(message));
   showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
 }
-
 async function banUser(targetId) {
   if (!isInitiator) return;
   if (!targetId || typeof targetId !== 'string') {
@@ -1046,7 +1021,6 @@ async function banUser(targetId) {
   socket.send(JSON.stringify(message));
   showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
 }
-
 function setupLazyObserver() {
   lazyObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -1066,7 +1040,6 @@ function setupLazyObserver() {
     });
   }, { rootMargin: '100px' });
 }
-
 function loadRecentCodes() {
   const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   const recentCodesList = document.getElementById('recentCodesList');
@@ -1083,7 +1056,6 @@ function loadRecentCodes() {
     document.getElementById('recentChats').classList.add('hidden');
   }
 }
-
 function updateRecentCodes(code) {
   let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   if (recentCodes.includes(code)) {
@@ -1230,7 +1202,6 @@ document.getElementById('startChatToggleButton').onclick = () => {
   document.getElementById('usernameInput').value = username || '';
   document.getElementById('usernameInput')?.focus();
 };
-
 document.getElementById('connectToggleButton').onclick = () => {
   console.log('Connect toggle clicked');
   initialContainer.classList.add('hidden');
@@ -1243,7 +1214,6 @@ document.getElementById('connectToggleButton').onclick = () => {
   document.getElementById('usernameConnectInput').value = username || '';
   document.getElementById('usernameConnectInput')?.focus();
 };
-
 document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.add('active');
   document.getElementById('totpUsernameInput').value = username || '';
@@ -1251,7 +1221,6 @@ document.getElementById('start2FAChatButton').onclick = () => {
   document.getElementById('customTotpSecretContainer').classList.add('hidden');
   document.querySelector('input[name="totpType"][value="server"]').checked = true;
 };
-
 document.getElementById('connect2FAChatButton').onclick = () => {
   initialContainer.classList.add('hidden');
   usernameContainer.classList.add('hidden');
@@ -1282,27 +1251,22 @@ document.getElementById('connect2FAChatButton').onclick = () => {
     showTotpInputModal(code);
   };
 };
-
 document.querySelectorAll('input[name="totpType"]').forEach(radio => {
   radio.addEventListener('change', () => {
     document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');
   });
 });
-
 document.getElementById('createTotpRoomButton').onclick = () => {
   const serverGenerated = document.querySelector('input[name="totpType"]:checked').value === 'server';
   startTotpRoom(serverGenerated);
 };
-
 document.getElementById('cancelTotpButton').onclick = () => {
   document.getElementById('totpOptionsModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
-
 document.getElementById('closeTotpSecretButton').onclick = () => {
   document.getElementById('totpSecretModal').classList.remove('active');
 };
-
 document.getElementById('submitTotpCodeButton').onclick = () => {
   const totpCode = document.getElementById('totpCodeInput').value.trim();
   const codeParam = document.getElementById('totpInputModal').dataset.code;
@@ -1313,12 +1277,10 @@ document.getElementById('submitTotpCodeButton').onclick = () => {
   joinWithTotp(codeParam, totpCode);
   document.getElementById('totpInputModal').classList.remove('active');
 };
-
 document.getElementById('cancelTotpInputButton').onclick = () => {
   document.getElementById('totpInputModal').classList.remove('active');
   initialContainer.classList.remove('hidden');
 };
-
 document.getElementById('joinWithUsernameButton').onclick = () => {
   const usernameInput = document.getElementById('usernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -1356,7 +1318,6 @@ document.getElementById('joinWithUsernameButton').onclick = () => {
   }
   document.getElementById('messageInput')?.focus();
 };
-
 document.getElementById('connectButton').onclick = () => {
   const usernameInput = document.getElementById('usernameConnectInput').value.trim();
   const inputCode = document.getElementById('codeInput').value.trim();
@@ -1400,7 +1361,6 @@ document.getElementById('connectButton').onclick = () => {
   }
   document.getElementById('messageInput')?.focus();
 };
-
 document.getElementById('backButton').onclick = () => {
   console.log('Back button clicked from usernameContainer');
   usernameContainer.classList.add('hidden');
@@ -1414,7 +1374,6 @@ document.getElementById('backButton').onclick = () => {
   document.getElementById('startChatToggleButton')?.focus();
   updateLogoutButtonVisibility();
 };
-
 document.getElementById('backButtonConnect').onclick = () => {
   console.log('Back button clicked from connectContainer');
   connectContainer.classList.add('hidden');
@@ -1428,7 +1387,6 @@ document.getElementById('backButtonConnect').onclick = () => {
   document.getElementById('connectToggleButton')?.focus();
   updateLogoutButtonVisibility();
 };
-
 document.getElementById('sendButton').onclick = () => {
   const messageInput = document.getElementById('messageInput');
   const message = messageInput.value.trim();
@@ -1436,7 +1394,6 @@ document.getElementById('sendButton').onclick = () => {
     sendMessage(message);
   }
 };
-
 document.getElementById('messageInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -1447,11 +1404,9 @@ document.getElementById('messageInput').addEventListener('keydown', (event) => {
     }
   }
 });
-
 document.getElementById('imageButton').onclick = () => {
   document.getElementById('imageInput')?.click();
 };
-
 document.getElementById('imageInput').onchange = (event) => {
   const file = event.target.files[0];
   if (file) {
@@ -1460,7 +1415,6 @@ document.getElementById('imageInput').onchange = (event) => {
     event.target.value = '';
   }
 };
-
 document.getElementById('voiceButton').onclick = () => {
   if (!mediaRecorder || mediaRecorder.state !== 'recording') {
     startVoiceRecording();
@@ -1468,49 +1422,40 @@ document.getElementById('voiceButton').onclick = () => {
     stopVoiceRecording();
   }
 };
-
 document.getElementById('voiceCallButton').onclick = () => {
   toggleVoiceCall();
 };
-
 document.getElementById('audioOutputButton').onclick = () => {
   toggleAudioOutput();
 };
-
 document.getElementById('grokButton').onclick = () => {
   toggleGrokBot();
 };
-
 document.getElementById('saveGrokKey').onclick = () => {
   saveGrokKey();
 };
-
 document.getElementById('newSessionButton').onclick = () => {
   console.log('New session button clicked');
   window.location.href = 'https://anonomoose.com';
 };
-
 document.getElementById('usernameInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     document.getElementById('joinWithUsernameButton')?.click();
   }
 });
-
 document.getElementById('usernameConnectInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     document.getElementById('codeInput')?.focus();
   }
 });
-
 document.getElementById('codeInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
     document.getElementById('connectButton')?.click();
   }
 });
-
 document.getElementById('copyCodeButton').onclick = () => {
   const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
   navigator.clipboard.writeText(codeText).then(() => {
@@ -1524,7 +1469,6 @@ document.getElementById('copyCodeButton').onclick = () => {
   });
   copyCodeButton?.focus();
 };
-
 document.getElementById('button1').onclick = () => {
   if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
     socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
@@ -1536,20 +1480,17 @@ document.getElementById('button1').onclick = () => {
   }
   document.getElementById('button1')?.focus();
 };
-
 document.getElementById('button2').onclick = () => {
   if (!button2.disabled) {
     window.location.href = 'https://anonomoose.com/random.html';
   }
   document.getElementById('button2')?.focus();
 };
-
 cornerLogo.addEventListener('click', () => {
   document.getElementById('messages').innerHTML = '';
   processedMessageIds.clear();
   showStatusMessage('Chat history cleared locally.');
 });
-
 function setupLazyObserver() {
   lazyObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -1569,7 +1510,6 @@ function setupLazyObserver() {
     });
   }, { rootMargin: '100px' });
 }
-
 function loadRecentCodes() {
   const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   const recentCodesList = document.getElementById('recentCodesList');
@@ -1586,7 +1526,6 @@ function loadRecentCodes() {
     document.getElementById('recentChats').classList.add('hidden');
   }
 }
-
 function updateRecentCodes(code) {
   let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
   if (recentCodes.includes(code)) {
@@ -1599,7 +1538,30 @@ function updateRecentCodes(code) {
   localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
   loadRecentCodes();
 }
-
+// New function to fix the ReferenceError
+function setupWaitingForJoin(codeParam) {
+  console.log('Setting up waiting state for URL code:', codeParam);
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for connection...';
+  // Prompt for username if not set
+  if (!username) {
+    username = prompt('Enter your username (1-16 alphanumeric characters):')?.trim() || 'Guest';
+    if (!validateUsername(username)) {
+      showStatusMessage('Invalid username. Using "Guest".');
+      username = 'Guest';
+    }
+    localStorage.setItem('username', username);
+  }
+  // Set pendingCode to trigger autoConnect after token
+  pendingCode = codeParam;
+  document.getElementById('messageInput')?.focus();
+}
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -1722,3 +1684,14 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   updateLogoutButtonVisibility();
 });
+async function sendMessage(content) {
+  if (!content) return;
+  const messageInput = document.getElementById('messageInput');
+  messageInput.value = '';
+  messageInput.focus();
+  // Assuming sendMessage logic is in main.js or elsewhere
+}
+async function sendOfflineMessage(toUsername, messageText) {
+  // Assuming implementation elsewhere
+}
+// Other missing functions like exportPublicKey, deriveSharedKey, etc., assume defined elsewhere

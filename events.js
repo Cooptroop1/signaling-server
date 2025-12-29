@@ -2223,7 +2223,7 @@ async function sendMessage(content) {
       if (useRelay) {
         // Relay-only mode: send directly via WebSocket (no P2P)
         const messageId = crypto.randomUUID();
-        const timestamp = Date.now();
+        const timestamp = Date.now() - 1000;  // Subtract 1 second to avoid "timestamp in future" due to clock skew
         const nonce = crypto.randomUUID();
         const toSign = content + timestamp;  // Sign plain content + timestamp (matches verify)
         const signature = await signMessage(signingKey, toSign);
@@ -2278,7 +2278,7 @@ async function sendMedia(file, type) {
       if (useRelay) {
         // Relay-only mode: send as relay-image or relay-file
         const messageId = crypto.randomUUID();
-        const timestamp = Date.now();
+        const timestamp = Date.now() - 1000;  // Subtract 1 second to avoid "timestamp in future" due to clock skew
         const nonce = crypto.randomUUID();
         const toSign = content + timestamp;  // Sign base64 content + timestamp
         const signature = await signMessage(signingKey, toSign);

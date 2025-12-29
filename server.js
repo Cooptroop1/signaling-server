@@ -171,7 +171,7 @@ async function loadFeatures() {
         enableVoice: true,
         enableVoiceCalls: true,
         enableAudioToggle: true,
-        enableGrokBot: true,
+        enableGrokBot: false,
         enableP2P: true,
         enableRelay: true
       };
@@ -1625,3 +1625,4 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

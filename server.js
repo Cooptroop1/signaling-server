@@ -965,7 +965,7 @@ wss.on('connection', (ws, req) => {
             client.ws.send(JSON.stringify({
               type: data.type.replace('relay-', ''),
               messageId: data.messageId,
-              username: data.username,
+              username: room.clients.get(senderId).username,
               content: data.content,
               encryptedContent: data.encryptedContent,
               data: data.data,
@@ -1625,6 +1625,3 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-
-
-

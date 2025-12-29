@@ -2220,7 +2220,41 @@ async function sendMessage(content) {
   } else {
     console.log('Preparing to send regular message');
     try {
-      await prepareAndSendMessage({ content });
+      if (useRelay) {
+        // Relay-only mode: send directly via WebSocket (no P2P)
+        const messageId = crypto.randomUUID();
+        const timestamp = Date.now();
+        const nonce = crypto.randomUUID();
+        const toSign = content + timestamp;
+        const signature = await signMessage(signingKey, toSign);
+        const { encrypted, iv } = await encryptMessage(content);  // Adjust if your encryption function returns differently
+        socket.send(JSON.stringify({
+          type: 'relay-message',
+          code,
+          clientId,
+          token,
+          encryptedContent: encrypted,
+          iv,
+          signature,
+          messageId,
+          timestamp,
+          nonce
+        }));
+        // Display the message locally (to match P2P display logic)
+        const messages = document.getElementById('messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message-bubble self';
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'timestamp';
+        timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
+        messageDiv.appendChild(timeSpan);
+        messageDiv.appendChild(document.createTextNode(`${username}: ${sanitizeMessage(content)}`));
+        messages.prepend(messageDiv);
+        messages.scrollTop = 0;
+      } else {
+        // Existing P2P logic
+        await prepareAndSendMessage({ content });
+      }
       console.log('Message sent successfully');
     } catch (error) {
       console.error('Error sending message:', error);

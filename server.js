@@ -22,7 +22,7 @@ async function validatePassword(input, hash) {
 }
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // For Render Postgres
+  ssl: { rejectUnauthorized: true } // For Render Postgres
 });
 // Test DB connection on startup
 dbPool.connect(async (err) => {
@@ -1625,3 +1625,4 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

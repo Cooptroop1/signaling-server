@@ -12,7 +12,6 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-const helmet = require('helmet');
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
@@ -26,13 +25,11 @@ const dbPool = new Pool({
   ssl: { rejectUnauthorized: false } // For Render Postgres
 });
 // Test DB connection on startup
-dbPool.connect(async (err) => {
+dbPool.connect((err) => {
   if (err) {
     console.error('DB connection error:', err.message, err.stack);
   } else {
     console.log('Connected to DB successfully');
-    await loadFeatures();
-    await loadAggregatedStats();
   }
 });
 // Clean up old offline messages (TTL: 24 hours)
@@ -58,56 +55,54 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   console.log('Using HTTPS server for local development');
 }
 server.on('request', (req, res) => {
-  helmet()(req, res, () => {
-    const proto = req.headers['x-forwarded-proto'];
-    if (proto && proto !== 'https') {
-      res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
-      res.end();
+  const proto = req.headers['x-forwarded-proto'];
+  if (proto && proto !== 'https') {
+    res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
+    res.end();
+    return;
+  }
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  const fullUrl = new URL(req.url, `http://${req.headers.host}`);
+  let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
       return;
     }
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    const fullUrl = new URL(req.url, `http://${req.headers.host}`);
-    let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not Found');
-        return;
+    let contentType = 'text/plain';
+    if (filePath.endsWith('.html')) {
+      contentType = 'text/html';
+      const nonce = crypto.randomBytes(16).toString('base64');
+      let updatedCSP = "default-src 'self'; " +
+        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+        "media-src 'self' blob: data:; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
+        "object-src 'none'; base-uri 'self';";
+      data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
+        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+      data = data.toString().replace(/<script(?! src)/g,
+        `<script nonce="${nonce}"`);
+      data = data.toString().replace(/<style/g,
+        `<style nonce="${nonce}"`);
+      let clientIdFromCookie;
+      const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [name, value] = cookie.trim().split('=');
+        acc[name] = value;
+        return acc;
+      }, {}) : {};
+      clientIdFromCookie = cookies['clientId'];
+      if (!clientIdFromCookie) {
+        clientIdFromCookie = uuidv4();
+        res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
       }
-      let contentType = 'text/plain';
-      if (filePath.endsWith('.html')) {
-        contentType = 'text/html';
-        const nonce = crypto.randomBytes(16).toString('base64');
-        let updatedCSP = "default-src 'self'; " +
-          `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-          `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-          "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-          "media-src 'self' blob: data:; " +
-          "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
-          "object-src 'none'; base-uri 'self';";
-        data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
-          `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
-        data = data.toString().replace(/<script(?! src)/g,
-          `<script nonce="${nonce}"`);
-        data = data.toString().replace(/<style/g,
-          `<style nonce="${nonce}"`);
-        let clientIdFromCookie;
-        const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
-          const [name, value] = cookie.trim().split('=');
-          acc[name] = value;
-          return acc;
-        }, {}) : {};
-        clientIdFromCookie = cookies['clientId'];
-        if (!clientIdFromCookie) {
-          clientIdFromCookie = uuidv4();
-          res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
-        }
-      } else if (filePath.endsWith('.js')) {
-        contentType = 'application/javascript';
-      }
-      res.writeHead(200, { 'Content-Type': contentType });
-      res.end(data);
-    });
+    } else if (filePath.endsWith('.js')) {
+      contentType = 'application/javascript';
+    }
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(data);
   });
 });
 const wss = new WebSocket.Server({ server });
@@ -158,73 +153,13 @@ let features = {
   enableP2P: true,
   enableRelay: true
 };
+console.log('Using default features (in-memory):', features);
 let aggregatedStats = { daily: {} };
-async function loadFeatures() {
-  try {
-    const res = await dbPool.query('SELECT * FROM features LIMIT 1');
-    if (res.rows.length > 0) {
-      features = res.rows[0];
-    } else {
-      await dbPool.query(
-        'INSERT INTO features (enableService, enableImages, enableVoice, enableVoiceCalls, enableAudioToggle, enableGrokBot, enableP2P, enableRelay) VALUES (true, true, true, true, true, true, true, true)'
-      );
-      features = {
-        enableService: true,
-        enableImages: true,
-        enableVoice: true,
-        enableVoiceCalls: true,
-        enableAudioToggle: true,
-        enableGrokBot: true,
-        enableP2P: true,
-        enableRelay: true
-      };
-    }
-    console.log('Loaded features from DB:', features);
-  } catch (err) {
-    console.error('Error loading features from DB:', err.message, err.stack);
-  }
+function saveFeatures() {
+  console.log('Features updated (in-memory):', features);
 }
-async function saveFeatures() {
-  try {
-    await dbPool.query(
-      'UPDATE features SET enableService=$1, enableImages=$2, enableVoice=$3, enableVoiceCalls=$4, enableAudioToggle=$5, enableGrokBot=$6, enableP2P=$7, enableRelay=$8',
-      [
-        features.enableService,
-        features.enableImages,
-        features.enableVoice,
-        features.enableVoiceCalls,
-        features.enableAudioToggle,
-        features.enableGrokBot,
-        features.enableP2P,
-        features.enableRelay
-      ]
-    );
-    console.log('Saved features to DB');
-  } catch (err) {
-    console.error('Error saving features to DB:', err.message, err.stack);
-  }
-}
-async function loadAggregatedStats() {
-  try {
-    const res = await dbPool.query('SELECT data FROM aggregated_stats LIMIT 1');
-    if (res.rows.length > 0) {
-      aggregatedStats = res.rows[0].data;
-    } else {
-      await dbPool.query('INSERT INTO aggregated_stats (data) VALUES ($1)', [JSON.stringify({ daily: {} })]);
-      aggregatedStats = { daily: {} };
-    }
-    console.log('Loaded aggregatedStats from DB');
-  } catch (err) {
-    console.error('Error loading aggregatedStats from DB:', err.message, err.stack);
-  }
-}
-async function saveAggregatedStats() {
-  try {
-    await dbPool.query('UPDATE aggregated_stats SET data = $1', [JSON.stringify(aggregatedStats)]);
-    console.log('Saved aggregatedStats to DB');
-  } catch (err) {
-    console.error('Error saving aggregatedStats to DB:', err.message, err.stack);
-  }
+function saveAggregatedStats() {
+  console.log('Saved aggregated stats (in-memory)');
 }
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
@@ -1028,7 +963,7 @@ wss.on('connection', (ws, req) => {
           const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
-            await saveFeatures();
+            saveFeatures();
             const timestamp = new Date().toISOString();
             fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));

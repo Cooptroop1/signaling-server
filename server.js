@@ -25,11 +25,13 @@ const dbPool = new Pool({
   ssl: { rejectUnauthorized: false } // For Render Postgres
 });
 // Test DB connection on startup
-dbPool.connect((err) => {
+dbPool.connect(async (err) => {
   if (err) {
     console.error('DB connection error:', err.message, err.stack);
   } else {
     console.log('Connected to DB successfully');
+    await loadFeatures();
+    await loadAggregatedStats();
   }
 });
 // Clean up old offline messages (TTL: 24 hours)
@@ -153,13 +155,73 @@ let features = {
   enableP2P: true,
   enableRelay: true
 };
-console.log('Using default features (in-memory):', features);
 let aggregatedStats = { daily: {} };
-function saveFeatures() {
-  console.log('Features updated (in-memory):', features);
+async function loadFeatures() {
+  try {
+    const res = await dbPool.query('SELECT * FROM features LIMIT 1');
+    if (res.rows.length > 0) {
+      features = res.rows[0];
+    } else {
+      await dbPool.query(
+        'INSERT INTO features (enableService, enableImages, enableVoice, enableVoiceCalls, enableAudioToggle, enableGrokBot, enableP2P, enableRelay) VALUES (true, true, true, true, true, true, true, true)'
+      );
+      features = {
+        enableService: true,
+        enableImages: true,
+        enableVoice: true,
+        enableVoiceCalls: true,
+        enableAudioToggle: true,
+        enableGrokBot: true,
+        enableP2P: true,
+        enableRelay: true
+      };
+    }
+    console.log('Loaded features from DB:', features);
+  } catch (err) {
+    console.error('Error loading features from DB:', err.message, err.stack);
+  }
 }
-function saveAggregatedStats() {
-  console.log('Saved aggregated stats (in-memory)');
+async function saveFeatures() {
+  try {
+    await dbPool.query(
+      'UPDATE features SET enableService=$1, enableImages=$2, enableVoice=$3, enableVoiceCalls=$4, enableAudioToggle=$5, enableGrokBot=$6, enableP2P=$7, enableRelay=$8',
+      [
+        features.enableService,
+        features.enableImages,
+        features.enableVoice,
+        features.enableVoiceCalls,
+        features.enableAudioToggle,
+        features.enableGrokBot,
+        features.enableP2P,
+        features.enableRelay
+      ]
+    );
+    console.log('Saved features to DB');
+  } catch (err) {
+    console.error('Error saving features to DB:', err.message, err.stack);
+  }
+}
+async function loadAggregatedStats() {
+  try {
+    const res = await dbPool.query('SELECT data FROM aggregated_stats LIMIT 1');
+    if (res.rows.length > 0) {
+      aggregatedStats = res.rows[0].data;
+    } else {
+      await dbPool.query('INSERT INTO aggregated_stats (data) VALUES ($1)', [JSON.stringify({ daily: {} })]);
+      aggregatedStats = { daily: {} };
+    }
+    console.log('Loaded aggregatedStats from DB');
+  } catch (err) {
+    console.error('Error loading aggregatedStats from DB:', err.message, err.stack);
+  }
+}
+async function saveAggregatedStats() {
+  try {
+    await dbPool.query('UPDATE aggregated_stats SET data = $1', [JSON.stringify(aggregatedStats)]);
+    console.log('Saved aggregatedStats to DB');
+  } catch (err) {
+    console.error('Error saving aggregatedStats to DB:', err.message, err.stack);
+  }
 }
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
@@ -963,7 +1025,7 @@ wss.on('connection', (ws, req) => {
           const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
           if (features.hasOwnProperty(featureKey)) {
             features[featureKey] = !features[featureKey];
-            saveFeatures();
+            await saveFeatures();
             const timestamp = new Date().toISOString();
             fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
             ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));

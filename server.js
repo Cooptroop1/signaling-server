@@ -12,6 +12,7 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
+const helmet = require('helmet');
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
@@ -57,54 +58,56 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   console.log('Using HTTPS server for local development');
 }
 server.on('request', (req, res) => {
-  const proto = req.headers['x-forwarded-proto'];
-  if (proto && proto !== 'https') {
-    res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
-    res.end();
-    return;
-  }
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  const fullUrl = new URL(req.url, `http://${req.headers.host}`);
-  let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not Found');
+  helmet()(req, res, () => {
+    const proto = req.headers['x-forwarded-proto'];
+    if (proto && proto !== 'https') {
+      res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
+      res.end();
       return;
     }
-    let contentType = 'text/plain';
-    if (filePath.endsWith('.html')) {
-      contentType = 'text/html';
-      const nonce = crypto.randomBytes(16).toString('base64');
-      let updatedCSP = "default-src 'self'; " +
-        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
-        "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
-        "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
-        "object-src 'none'; base-uri 'self';";
-      data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
-        `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
-      data = data.toString().replace(/<script(?! src)/g,
-        `<script nonce="${nonce}"`);
-      data = data.toString().replace(/<style/g,
-        `<style nonce="${nonce}"`);
-      let clientIdFromCookie;
-      const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
-        const [name, value] = cookie.trim().split('=');
-        acc[name] = value;
-        return acc;
-      }, {}) : {};
-      clientIdFromCookie = cookies['clientId'];
-      if (!clientIdFromCookie) {
-        clientIdFromCookie = uuidv4();
-        res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    const fullUrl = new URL(req.url, `http://${req.headers.host}`);
+    let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found');
+        return;
       }
-    } else if (filePath.endsWith('.js')) {
-      contentType = 'application/javascript';
-    }
-    res.writeHead(200, { 'Content-Type': contentType });
-    res.end(data);
+      let contentType = 'text/plain';
+      if (filePath.endsWith('.html')) {
+        contentType = 'text/html';
+        const nonce = crypto.randomBytes(16).toString('base64');
+        let updatedCSP = "default-src 'self'; " +
+          `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+          `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+          "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
+          "media-src 'self' blob: data:; " +
+          "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
+          "object-src 'none'; base-uri 'self';";
+        data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
+          `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+        data = data.toString().replace(/<script(?! src)/g,
+          `<script nonce="${nonce}"`);
+        data = data.toString().replace(/<style/g,
+          `<style nonce="${nonce}"`);
+        let clientIdFromCookie;
+        const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
+          const [name, value] = cookie.trim().split('=');
+          acc[name] = value;
+          return acc;
+        }, {}) : {};
+        clientIdFromCookie = cookies['clientId'];
+        if (!clientIdFromCookie) {
+          clientIdFromCookie = uuidv4();
+          res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
+        }
+      } else if (filePath.endsWith('.js')) {
+        contentType = 'application/javascript';
+      }
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(data);
+    });
   });
 });
 const wss = new WebSocket.Server({ server });

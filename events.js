@@ -2225,9 +2225,10 @@ async function sendMessage(content) {
         const messageId = crypto.randomUUID();
         const timestamp = Date.now();
         const nonce = crypto.randomUUID();
-        const toSign = content + timestamp;
+        const toSign = content + timestamp;  // Sign plain content + timestamp (matches verify)
         const signature = await signMessage(signingKey, toSign);
-        const { encrypted, iv } = await encryptMessage(content);  // Adjust if your encryption function returns differently
+        const messageKey = await deriveMessageKey();
+        const { encrypted, iv } = await encryptRaw(messageKey, content);
         socket.send(JSON.stringify({
           type: 'relay-message',
           code,
@@ -2265,6 +2266,75 @@ async function sendMessage(content) {
   messageInput.value = '';
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
+}
+
+async function sendMedia(file, type) {
+  if (!file) return;
+  try {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const data = e.target.result;  // base64 data URL
+      const content = data.split(',')[1];  // Extract base64 part for encryption/sending
+      if (useRelay) {
+        // Relay-only mode: send as relay-image or relay-file
+        const messageId = crypto.randomUUID();
+        const timestamp = Date.now();
+        const nonce = crypto.randomUUID();
+        const toSign = content + timestamp;  // Sign base64 content + timestamp
+        const signature = await signMessage(signingKey, toSign);
+        const messageKey = await deriveMessageKey();
+        const { encrypted, iv } = await encryptRaw(messageKey, content);
+        socket.send(JSON.stringify({
+          type: type === 'image' ? 'relay-image' : 'relay-file',
+          code,
+          clientId,
+          token,
+          encryptedData: encrypted,
+          iv,
+          signature,
+          messageId,
+          timestamp,
+          nonce,
+          filename: file.name  // For files
+        }));
+        // Display locally
+        const messages = document.getElementById('messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message-bubble self';
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'timestamp';
+        timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
+        messageDiv.appendChild(timeSpan);
+        messageDiv.appendChild(document.createTextNode(`${username}: `));
+        if (type === 'image') {
+          const img = document.createElement('img');
+          img.src = data;
+          img.style.maxWidth = '100%';
+          img.style.borderRadius = '0.5rem';
+          img.style.cursor = 'pointer';
+          img.setAttribute('alt', 'Sent image');
+          img.addEventListener('click', () => createImageModal(data, 'messageInput'));
+          messageDiv.appendChild(img);
+        } else {  // file
+          const link = document.createElement('a');
+          link.href = data;
+          link.download = file.name || 'file';
+          link.textContent = `Download ${file.name || 'file'}`;
+          link.setAttribute('alt', 'Sent file');
+          messageDiv.appendChild(link);
+        }
+        messages.prepend(messageDiv);
+        messages.scrollTop = 0;
+      } else {
+        // Existing P2P logic (assume prepareAndSendMessage or similar handles it)
+        await prepareAndSendMessage({ data: content, type });  // Adjust if your P2P send is different
+      }
+    };
+    reader.readAsDataURL(file);  // Read as base64 URL
+  } catch (error) {
+    console.error('Error sending media:', error);
+    showStatusMessage('Failed to send media.');
+  }
 }
 async function sendOfflineMessage(toUsername, messageText) {
   // Assuming implementation elsewhere

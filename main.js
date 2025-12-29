@@ -22,6 +22,7 @@ const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
+let messageQueue = new Map();  // New: Per-target message queue for retries
 
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
  if (!username || (dataChannels.size === 0 && !useRelay)) {
@@ -146,27 +147,29 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
  if (useRelay) {
  sendRelayMessage(`relay-${type}`, payload);
  } else if (dataChannels.size > 0) {
+ let sent = false;
+ dataChannels.forEach((dataChannel, id) => {
+ if (dataChannel.readyState === 'open') {
  if (jsonString.length > CHUNK_SIZE) {
  const chunkId = generateMessageId();
  const chunks = [];
  for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
  chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
  }
- for (const dataChannel of dataChannels.values()) {
- if (dataChannel.readyState === 'open') {
  for (let index = 0; index < chunks.length; index++) {
  const chunk = chunks[index];
  dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
- await new Promise(resolve => setTimeout(resolve, 1)); // Small delay to prevent burst
- }
- }
  }
  } else {
- for (const dataChannel of dataChannels.values()) {
- if (dataChannel.readyState === 'open') {
  dataChannel.send(jsonString);
  }
+ sent = true;
  }
+ });
+ if (!sent) {
+ console.log('No open data channels, queuing message for retry');
+ if (!messageQueue.has('global')) messageQueue.set('global', []);
+ messageQueue.get('global').push({ type, payload });
  }
  } else {
  showStatusMessage('Error: No connections.');
@@ -279,7 +282,7 @@ async function startPeerConnection(targetId, isOfferer) {
  }
  const peerConnection = new RTCPeerConnection({
  iceServers: [
- { urls: "stun:stun.l.google.com:19302" },  // Added Google STUN for fallback
+ { urls: "stun:stun.l.google.com:19302" },  // Public fallback
  { urls: "stun:stun.relay.metered.ca:80" },
  {
  urls: "turn:global.relay.metered.ca:80",
@@ -346,6 +349,8 @@ async function startPeerConnection(targetId, isOfferer) {
  retryCounts.set(targetId, retryCount + 1);
  console.log(`Retrying connection attempt ${retryCount + 1} with ${targetId}`);
  startPeerConnection(targetId, isOfferer);
+ // New: Re-send queued messages after retry
+ setTimeout(() => processMessageQueue(targetId), 2000); // Delay for reconnection
  }
  } else if (peerConnection.connectionState === 'connected') {
  console.log(`WebRTC connection established with ${targetId} for code: ${code}`);
@@ -358,6 +363,8 @@ async function startPeerConnection(targetId, isOfferer) {
  privacyStatus.textContent = 'E2E Encrypted (P2P)';
  privacyStatus.classList.remove('hidden');
  }
+ // New: Process any queued messages on connect
+ processMessageQueue(targetId);
  }
  };
  peerConnection.ontrack = (event) => {
@@ -443,6 +450,8 @@ function setupDataChannel(dataChannel, targetId) {
  } else {
  document.getElementById('audioOutputButton').classList.add('hidden');
  }
+ // New: Process queued messages on open
+ processMessageQueue(targetId);
  };
  dataChannel.onmessage = async (event) => {
  const now = performance.now();
@@ -517,6 +526,21 @@ function setupDataChannel(dataChannel, targetId) {
  document.getElementById('audioOutputButton').classList.add('hidden');
  }
  };
+}
+
+// New: Process queued messages for a target
+function processMessageQueue(targetId) {
+  if (messageQueue.has(targetId)) {
+    const queue = messageQueue.get(targetId);
+    while (queue.length > 0) {
+      const msg = queue.shift();
+      const dataChannel = dataChannels.get(targetId);
+      if (dataChannel && dataChannel.readyState === 'open') {
+        dataChannel.send(msg);
+      }
+    }
+    if (queue.length === 0) messageQueue.delete(targetId);
+  }
 }
 
 async function processReceivedMessage(data, targetId) {

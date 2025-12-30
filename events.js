@@ -2273,12 +2273,13 @@ async function sendMedia(file, type) {
   try {
     const reader = new FileReader();
     reader.onload = async (e) => {
-      const data = e.target.result;  // base64 data URL
-      const content = data.split(',')[1];  // Extract base64 part for encryption/sending
+      const data = e.target.result;  // full data URL
+      const mime = data.split(';')[0].split(':')[1];  // e.g., 'image/png'
+      const content = data.split(',')[1];  // base64 part
       if (useRelay) {
         // Relay-only mode: send as relay-image or relay-file
         const messageId = crypto.randomUUID();
-        const timestamp = Date.now() - 5000;  // Subtract 5 seconds after file read to account for clock skew and read time
+        const timestamp = Date.now() - 5000;  // Subtract 5 seconds to account for clock skew
         const nonce = crypto.randomUUID();
         const toSign = content + timestamp;  // Sign base64 content + timestamp
         const signature = await signMessage(signingKey, toSign);
@@ -2295,7 +2296,8 @@ async function sendMedia(file, type) {
           messageId,
           timestamp,
           nonce,
-          filename: file.name  // For files
+          filename: file.name,  // For extension/mime guess
+          mime  // Send mime type for accurate data URL on receive
         }));
         // Display locally
         const messages = document.getElementById('messages');

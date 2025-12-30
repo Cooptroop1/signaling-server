@@ -2278,7 +2278,7 @@ async function sendMedia(file, type) {
       if (useRelay) {
         // Relay-only mode: send as relay-image or relay-file
         const messageId = crypto.randomUUID();
-        const timestamp = Date.now() - 5000;  // Subtract 5 seconds to account for clock skew
+        const timestamp = Date.now() - 5000;  // Subtract 5 seconds after file read to account for clock skew and read time
         const nonce = crypto.randomUUID();
         const toSign = content + timestamp;  // Sign base64 content + timestamp
         const signature = await signMessage(signingKey, toSign);

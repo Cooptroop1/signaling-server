@@ -602,7 +602,7 @@ wss.on('connection', (ws, req) => {
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'mime'
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'mime',
         data.type === 'send-offline-message' && 'encrypted',
         data.type === 'send-offline-message' && 'iv',
         data.type === 'send-offline-message' && 'ephemeral_public'
@@ -1631,5 +1631,6 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+
 
 

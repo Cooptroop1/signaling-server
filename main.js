@@ -1,3 +1,4 @@
+
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
@@ -430,342 +431,102 @@ async function startPeerConnection(targetId, isOfferer) {
 }
 
 function setupDataChannel(dataChannel, targetId) {
-  console.log('setupDataChannel initialized for targetId:', targetId);
-  dataChannel.onopen = () => {
-    console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
-    isConnected = true;
-    initialContainer.classList.add('hidden');
-    usernameContainer.classList.add('hidden');
-    connectContainer.classList.add('hidden');
-    chatContainer.classList.remove('hidden');
-    newSessionButton.classList.remove('hidden');
-    inputContainer.classList.remove('hidden');
-    messages.classList.remove('waiting');
-    clearTimeout(connectionTimeouts.get(targetId));
-    retryCounts.delete(targetId);
-    updateMaxClientsUI();
-    document.getElementById('messageInput')?.focus();
-    if (features.enableVoiceCalls && features.enableAudioToggle) {
-      document.getElementById('audioOutputButton').classList.remove('hidden');
-    } else {
-      document.getElementById('audioOutputButton').classList.add('hidden');
-    }
-    // New: Process any queued messages on open
-    processMessageQueue(targetId);
-  };
-  dataChannel.onmessage = async (event) => {
-    const now = performance.now();  // Rate limit timestamp
-    const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
-    if (now - rateLimit.startTime >= 1000) {
-      rateLimit.count = 0;
-      rateLimit.startTime = now;
-    }
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch (e) {
-      console.error(`Invalid message from ${targetId}:`, e);
-      showStatusMessage('Invalid message received.');
-      return;
-    }
-    if (data.chunk) {
-      // Don't count chunks toward rate limit
-      const { chunkId, index, total, data: chunkData } = data;
-      if (!chunkBuffers.has(chunkId)) {
-        chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
-      }
-      const buffer = chunkBuffers.get(chunkId);
-      buffer.chunks[index] = chunkData;
-      buffer.received++;
-      if (buffer.received === total) {
-        const fullMessage = buffer.chunks.join('');
-        chunkBuffers.delete(chunkId);
-        // Process the reassembled message
-        try {
-          data = JSON.parse(fullMessage);
-        } catch (e) {
-          console.error(`Invalid reassembled message from ${targetId}:`, e);
-          return;
-        }
-        // Inline processReceivedMessage logic here
-        if (data.type === 'voice-call-start') {
-          if (!voiceCallActive) {
-            startVoiceCall();
-          }
-          return;
-        }
-        if (data.type === 'voice-call-end') {
-          if (voiceCallActive) {
-            stopVoiceCall();
-          }
-          return;
-        }
-        if (data.type === 'kick' || data.type === 'ban') {
-          if (data.targetId === clientId) {
-            showStatusMessage(`You have been ${data.type}ed from the room.`);
-            socket.close();
-            window.location.reload();
-          }
-          return;
-        }
-        if (!data.messageId || (!data.encryptedBlob)) { // New: Check for encryptedBlob
-          console.log(`Invalid message format from ${targetId}:`, data);
-          return;
-        }
-        if (processedMessageIds.has(data.messageId)) {
-          console.log(`Duplicate message ${data.messageId} from ${targetId}`);
-          return;
-        }
-        if (processedNonces.has(data.nonce)) { // New: Check nonce
-          console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
-          return;
-        }
-        const currentTime = Date.now();  // Renamed to avoid duplicate 'now'
-        if (Math.abs(currentTime - data.timestamp) > 300000) { // New: Anti-replay window ±5min
-          console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${currentTime}), outside window`);
-          return;
-        }
-        processedMessageIds.add(data.messageId);
-        processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
-        let senderUsername, timestamp, contentType, contentOrData;
-        try {
-          const messageKey = await deriveMessageKey();
-          const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
-          const toVerify = rawData + data.nonce; // New: Verify on rawData + nonce
-          const valid = await verifyMessage(signingKey, data.signature, toVerify);
-          if (!valid) {
-            console.warn(`Invalid signature for message from ${targetId}`);
-            showStatusMessage('Invalid message signature detected.');
-            return;
-          }
-          // New: Parse metadata from rawData
-          let metadataStr = '';
-          let braceCount = 0;
-          for (let i = 0; i < rawData.length; i++) {
-            metadataStr += rawData[i];
-            if (rawData[i] === '{') braceCount++;
-            if (rawData[i] === '}') braceCount--;
-            if (braceCount === 0 && metadataStr.startsWith('{')) break;
-          }
-          const metadata = JSON.parse(metadataStr);
-          senderUsername = metadata.username;
-          timestamp = metadata.timestamp;
-          contentType = metadata.type;
-          contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
-        } catch (error) {
-          console.error(`Decryption/verification failed for message from ${targetId}:`, error);
-          showStatusMessage('Failed to decrypt/verify message.');
-          return;
-        }
-        const messages = document.getElementById('messages');
-        const isSelf = senderUsername === username;
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'timestamp';
-        timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
-        messageDiv.appendChild(timeSpan);
-        messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-        if (contentType === 'image') {
-          let imgSrc = contentOrData;
-          if (!imgSrc.startsWith('data:')) {
-            imgSrc = `data:image/jpeg;base64,${imgSrc}`;
-          }
-          const img = document.createElement('img');
-          img.src = imgSrc;  // Use full data URL
-          img.style.maxWidth = '100%';
-          img.style.borderRadius = '0.5rem';
-          img.style.cursor = 'pointer';
-          img.setAttribute('alt', 'Received image');
-          img.addEventListener('click', () => createImageModal(img.src, 'messageInput'));
-          messageDiv.appendChild(img);
-        } else if (contentType === 'voice') {
-          const audio = document.createElement('audio');
-          audio.src = `data:audio/webm;base64,${contentOrData}`;  // Assume webm; adjust if different
-          audio.controls = true;
-          audio.setAttribute('alt', 'Received voice message');
-          audio.addEventListener('click', () => createAudioModal(audio.src, 'messageInput'));
-          messageDiv.appendChild(audio);
-        } else if (contentType === 'file') {
-          const ext = data.filename.split('.').pop().toLowerCase();
-          const mimeMap = { jpg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain' };  // Add more
-          const mime = mimeMap[ext] || 'application/octet-stream';
-          const link = document.createElement('a');
-          link.href = `data:${mime};base64,${contentOrData}`;
-          link.download = data.filename || 'file';
-          link.textContent = `Download ${data.filename || 'file'}`;
-          link.setAttribute('alt', 'Received file');
-          messageDiv.appendChild(link);
-        } else {
-          messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
-        }
-        messages.prepend(messageDiv);
-        messages.scrollTop = 0;
-        if (isInitiator) {
-          dataChannels.forEach((dc, id) => {
-            if (id !== targetId && dc.readyState === 'open') {
-              dc.send(event.data);
-            }
-          });
-        }
-      }
-      return;
-    }
-    // Count non-chunk messages
-    rateLimit.count += 1;
-    messageRateLimits.set(targetId, rateLimit);
-    if (rateLimit.count > 10) {
-      console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
-      showStatusMessage('Message rate limit reached, please slow down.');
-      return;
-    }
-    // Inline processReceivedMessage logic here
-    if (data.type === 'voice-call-start') {
-      if (!voiceCallActive) {
-        startVoiceCall();
-      }
-      return;
-    }
-    if (data.type === 'voice-call-end') {
-      if (voiceCallActive) {
-        stopVoiceCall();
-      }
-      return;
-    }
-    if (data.type === 'kick' || data.type === 'ban') {
-      if (data.targetId === clientId) {
-        showStatusMessage(`You have been ${data.type}ed from the room.`);
-        socket.close();
-        window.location.reload();
-      }
-      return;
-    }
-    if (!data.messageId || (!data.encryptedBlob)) { // New: Check for encryptedBlob
-      console.log(`Invalid message format from ${targetId}:`, data);
-      return;
-    }
-    if (processedMessageIds.has(data.messageId)) {
-      console.log(`Duplicate message ${data.messageId} from ${targetId}`);
-      return;
-    }
-    if (processedNonces.has(data.nonce)) { // New: Check nonce
-      console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
-      return;
-    }
-    const currentTime = Date.now();  // Renamed to avoid duplicate 'now'
-    if (Math.abs(currentTime - data.timestamp) > 300000) { // New: Anti-replay window ±5min
-      console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${currentTime}), outside window`);
-      return;
-    }
-    processedMessageIds.add(data.messageId);
-    processedNonces.set(data.nonce, Date.now()); // Changed to Map: nonce -> timestamp
-    let senderUsername, timestamp, contentType, contentOrData;
-    try {
-      const messageKey = await deriveMessageKey();
-      const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
-      const toVerify = rawData + data.nonce; // New: Verify on rawData + nonce
-      const valid = await verifyMessage(signingKey, data.signature, toVerify);
-      if (!valid) {
-        console.warn(`Invalid signature for message from ${targetId}`);
-        showStatusMessage('Invalid message signature detected.');
-        return;
-      }
-      // New: Parse metadata from rawData
-      let metadataStr = '';
-      let braceCount = 0;
-      for (let i = 0; i < rawData.length; i++) {
-        metadataStr += rawData[i];
-        if (rawData[i] === '{') braceCount++;
-        if (rawData[i] === '}') braceCount--;
-        if (braceCount === 0 && metadataStr.startsWith('{')) break;
-      }
-      const metadata = JSON.parse(metadataStr);
-      senderUsername = metadata.username;
-      timestamp = metadata.timestamp;
-      contentType = metadata.type;
-      contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Content after metadata, trim padding
-    } catch (error) {
-      console.error(`Decryption/verification failed for message from ${targetId}:`, error);
-      showStatusMessage('Failed to decrypt/verify message.');
-      return;
-    }
-    const messages = document.getElementById('messages');
-    const isSelf = senderUsername === username;
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
-    const timeSpan = document.createElement('span');
-    timeSpan.className = 'timestamp';
-    timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
-    messageDiv.appendChild(timeSpan);
-    messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-    if (contentType === 'image') {
-      let imgSrc = contentOrData;
-      if (!imgSrc.startsWith('data:')) {
-        imgSrc = `data:image/jpeg;base64,${imgSrc}`;
-      }
-      const img = document.createElement('img');
-      img.src = imgSrc;  // Use full data URL
-      img.style.maxWidth = '100%';
-      img.style.borderRadius = '0.5rem';
-      img.style.cursor = 'pointer';
-      img.setAttribute('alt', 'Received image');
-      img.addEventListener('click', () => createImageModal(img.src, 'messageInput'));
-      messageDiv.appendChild(img);
-    } else if (contentType === 'voice') {
-      const audio = document.createElement('audio');
-      audio.src = `data:audio/webm;base64,${contentOrData}`;  // Assume webm; adjust if different
-      audio.controls = true;
-      audio.setAttribute('alt', 'Received voice message');
-      audio.addEventListener('click', () => createAudioModal(audio.src, 'messageInput'));
-      messageDiv.appendChild(audio);
-    } else if (contentType === 'file') {
-      const ext = data.filename.split('.').pop().toLowerCase();
-      const mimeMap = { jpg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain' };  // Add more
-      const mime = mimeMap[ext] || 'application/octet-stream';
-      const link = document.createElement('a');
-      link.href = `data:${mime};base64,${contentOrData}`;
-      link.download = data.filename || 'file';
-      link.textContent = `Download ${data.filename || 'file'}`;
-      link.setAttribute('alt', 'Received file');
-      messageDiv.appendChild(link);
-    } else {
-      messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
-    }
-    messages.prepend(messageDiv);
-    messages.scrollTop = 0;
-    if (isInitiator) {
-      dataChannels.forEach((dc, id) => {
-        if (id !== targetId && dc.readyState === 'open') {
-          dc.send(event.data);
-        }
-      });
-    }
-  };
-  dataChannel.onerror = (error) => {
-    console.error(`Data channel error with ${targetId}:`, error);
-    // Removed showStatusMessage to suppress transient error
-  };
-  dataChannel.onclose = () => {
-    console.log(`Data channel closed with ${targetId}`);
-    // Removed showStatusMessage to suppress transient error
-    cleanupPeerConnection(targetId);
-    messageRateLimits.delete(targetId);
-    imageRateLimits.delete(targetId);
-    voiceRateLimits.delete(targetId);
-    if (remoteAudios.has(targetId)) {
-      const audio = remoteAudios.get(targetId);
-      audio.remove();
-      remoteAudios.delete(targetId);
-      if (remoteAudios.size === 0) {
-        document.getElementById('remoteAudioContainer').classList.add('hidden');
-      }
-    }
-    if (dataChannels.size === 0) {
-      inputContainer.classList.add('hidden');
-      messages.classList.add('waiting');
-      document.getElementById('audioOutputButton').classList.add('hidden');
-    }
-  };
+ console.log('setupDataChannel initialized for targetId:', targetId);
+ dataChannel.onopen = () => {
+ console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
+ isConnected = true;
+ initialContainer.classList.add('hidden');
+ usernameContainer.classList.add('hidden');
+ connectContainer.classList.add('hidden');
+ chatContainer.classList.remove('hidden');
+ newSessionButton.classList.remove('hidden');
+ inputContainer.classList.remove('hidden');
+ messages.classList.remove('waiting');
+ clearTimeout(connectionTimeouts.get(targetId));
+ retryCounts.delete(targetId);
+ updateMaxClientsUI();
+ document.getElementById('messageInput')?.focus();
+ if (features.enableVoiceCalls && features.enableAudioToggle) {
+ document.getElementById('audioOutputButton').classList.remove('hidden');
+ } else {
+ document.getElementById('audioOutputButton').classList.add('hidden');
+ }
+ // New: Process queued messages on open
+ processMessageQueue(targetId);
+ };
+ dataChannel.onmessage = async (event) => {
+ const now = performance.now();
+ const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
+ if (now - rateLimit.startTime >= 1000) {
+ rateLimit.count = 0;
+ rateLimit.startTime = now;
+ }
+ let data;
+ try {
+ data = JSON.parse(event.data);
+ } catch (e) {
+ console.error(`Invalid message from ${targetId}:`, e);
+ showStatusMessage('Invalid message received.');
+ return;
+ }
+ if (data.chunk) {
+ // Don't count chunks toward rate limit
+ const { chunkId, index, total, data: chunkData } = data;
+ if (!chunkBuffers.has(chunkId)) {
+ chunkBuffers.set(chunkId, { chunks: new Array(total), received: 0 });
+ }
+ const buffer = chunkBuffers.get(chunkId);
+ buffer.chunks[index] = chunkData;
+ buffer.received++;
+ if (buffer.received === total) {
+ const fullMessage = buffer.chunks.join('');
+ chunkBuffers.delete(chunkId);
+ // Process the reassembled message
+ try {
+ data = JSON.parse(fullMessage);
+ } catch (e) {
+ console.error(`Invalid reassembled message from ${targetId}:`, e);
+ return;
+ }
+ await processReceivedMessage(data, targetId);
+ }
+ return;
+ }
+ // Count non-chunk messages
+ rateLimit.count += 1;
+ messageRateLimits.set(targetId, rateLimit);
+ if (rateLimit.count > 10) {
+ console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
+ showStatusMessage('Message rate limit reached, please slow down.');
+ return;
+ }
+ await processReceivedMessage(data, targetId);
+ };
+ dataChannel.onerror = (error) => {
+ console.error(`Data channel error with ${targetId}:`, error);
+ // Removed showStatusMessage to suppress transient error
+ };
+ dataChannel.onclose = () => {
+ console.log(`Data channel closed with ${targetId}`);
+ // Removed showStatusMessage to suppress transient error
+ cleanupPeerConnection(targetId);
+ messageRateLimits.delete(targetId);
+ imageRateLimits.delete(targetId);
+ voiceRateLimits.delete(targetId);
+ if (remoteAudios.has(targetId)) {
+ const audio = remoteAudios.get(targetId);
+ audio.remove();
+ remoteAudios.delete(targetId);
+ if (remoteAudios.size === 0) {
+ document.getElementById('remoteAudioContainer').classList.add('hidden');
+ }
+ }
+ if (dataChannels.size === 0) {
+ inputContainer.classList.add('hidden');
+ messages.classList.add('waiting');
+ document.getElementById('audioOutputButton').classList.add('hidden');
+ }
+ };
 }
 
 // New: Process queued messages for a target

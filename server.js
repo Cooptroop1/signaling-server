@@ -151,7 +151,7 @@ let features = {
   enableVoice: true,
   enableVoiceCalls: true,
   enableAudioToggle: true,
-  enableGrokBot: true,
+  enableGrokBot: false,
   enableP2P: true,
   enableRelay: true
 };
@@ -418,6 +418,9 @@ function validateMessage(data) {
       if (!data.code) {
         return { valid: false, error: data.type + ': code required' };
       }
+      if (data.mime && typeof data.mime !== 'string') {
+        return { valid: false, error: data.type + ': mime must be string if provided' };
+      }
       break;
     case 'get-stats':
     case 'get-features':
@@ -599,6 +602,7 @@ wss.on('connection', (ws, req) => {
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'mime'
         data.type === 'send-offline-message' && 'encrypted',
         data.type === 'send-offline-message' && 'iv',
         data.type === 'send-offline-message' && 'ephemeral_public'
@@ -960,6 +964,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         messageSet.set(data.nonce, data.timestamp);
+        const mime = data.mime ? validator.escape(validator.trim(data.mime)) : undefined;
         room.clients.forEach((client, clientId) => {
           if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
             client.ws.send(JSON.stringify({
@@ -975,6 +980,7 @@ wss.on('connection', (ws, req) => {
               iv: data.iv,
               signature: data.signature,
               nonce: data.nonce
+              mime: mime
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
           }
@@ -1625,4 +1631,5 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+
 

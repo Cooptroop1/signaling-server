@@ -1,4 +1,5 @@
 
+
 // generateUserKeypair moved to top to ensure it's defined before onclick handlers
 async function generateUserKeypair() {
   try {
@@ -683,14 +684,14 @@ socket.onmessage = async (event) => {
         }
       }
       if (message.type === 'image') {
-  const img = document.createElement('img');
-  img.src = contentOrData;  // full data URL after decryption
-  img.style.maxWidth = '100%';
-  img.style.borderRadius = '0.5rem';
-  img.style.cursor = 'pointer';
-  img.setAttribute('alt', 'Received image');
-  img.addEventListener('click', () => createImageModal(img.src, 'messageInput'));
-  messageDiv.appendChild(img);
+        const img = document.createElement('img');
+        img.src = contentOrData;
+        img.style.maxWidth = '100%';
+        img.style.borderRadius = '0.5rem';
+        img.style.cursor = 'pointer';
+        img.setAttribute('alt', 'Received image');
+        img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
+        messageDiv.appendChild(img);
       } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
         audio.src = contentOrData;
@@ -699,15 +700,12 @@ socket.onmessage = async (event) => {
         audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(audio);
       } else if (message.type === 'file') {
-  const ext = payload.filename.split('.').pop().toLowerCase();
-  const mimeMap = { jpg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain' };  // Add more as needed
-  const mime = mimeMap[ext] || 'application/octet-stream';
-  const link = document.createElement('a');
-  link.href = `data:${mime};base64,${contentOrData}`;
-  link.download = payload.filename || 'file';
-  link.textContent = `Download ${payload.filename || 'file'}`;
-  link.setAttribute('alt', 'Received file');
-  messageDiv.appendChild(link);
+        const link = document.createElement('a');
+        link.href = contentOrData;
+        link.download = payload.filename || 'file';
+        link.textContent = `Download ${payload.filename || 'file'}`;
+        link.setAttribute('alt', 'Received file');
+        messageDiv.appendChild(link);
       } else {
         messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
       }
@@ -2276,35 +2274,8 @@ async function sendMedia(file, type) {
   try {
     const reader = new FileReader();
     reader.onload = async (e) => {
-      let data = e.target.result;  // full data URL
-      let content = data.split(',')[1];  // base64 part
-      if (type === 'image') {
-        // Compress image to reduce size
-        const img = new Image();
-        img.src = data;
-        await new Promise(resolve => img.onload = resolve);
-        const canvas = document.createElement('canvas');
-        const maxSize = 1024;  // Max width/height
-        let width = img.width;
-        let height = img.height;
-        if (width > height) {
-          if (width > maxSize) {
-            height *= maxSize / width;
-            width = maxSize;
-          }
-        } else {
-          if (height > maxSize) {
-            width *= maxSize / height;
-            height = maxSize;
-          }
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        data = canvas.toDataURL('image/jpeg', 0.7);  // Compress to JPEG 70% quality
-        content = data.split(',')[1];
-      }
+      const data = e.target.result;  // base64 data URL
+      const content = data.split(',')[1];  // Extract base64 part for encryption/sending
       if (useRelay) {
         // Relay-only mode: send as relay-image or relay-file
         const messageId = crypto.randomUUID();
@@ -2325,7 +2296,7 @@ async function sendMedia(file, type) {
           messageId,
           timestamp,
           nonce,
-          filename: file.name  // For files/images to guess extension on receive
+          filename: file.name  // For files
         }));
         // Display locally
         const messages = document.getElementById('messages');

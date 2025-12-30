@@ -684,14 +684,15 @@ socket.onmessage = async (event) => {
         }
       }
       if (message.type === 'image') {
-        const img = document.createElement('img');
-        img.src = contentOrData;
-        img.style.maxWidth = '100%';
-        img.style.borderRadius = '0.5rem';
-        img.style.cursor = 'pointer';
-        img.setAttribute('alt', 'Received image');
-        img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
-        messageDiv.appendChild(img);
+  const img = document.createElement('img');
+  img.src = `data:image/jpeg;base64,${contentOrData}`;
+  img.style.maxWidth = '100%';
+  img.style.borderRadius = '0.5rem';
+  img.style.cursor = 'pointer';
+  img.setAttribute('alt', 'Received image');
+  img.addEventListener('click', () => createImageModal(img.src, 'messageInput'));
+  messageDiv.appendChild(img);
+}
       } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
         audio.src = contentOrData;
@@ -700,12 +701,15 @@ socket.onmessage = async (event) => {
         audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
         messageDiv.appendChild(audio);
       } else if (message.type === 'file') {
-        const link = document.createElement('a');
-        link.href = contentOrData;
-        link.download = payload.filename || 'file';
-        link.textContent = `Download ${payload.filename || 'file'}`;
-        link.setAttribute('alt', 'Received file');
-        messageDiv.appendChild(link);
+  const ext = payload.filename.split('.').pop().toLowerCase();
+  const mimeMap = { jpg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain' };  // Add more as needed
+  const mime = mimeMap[ext] || 'application/octet-stream';
+  const link = document.createElement('a');
+  link.href = `data:${mime};base64,${contentOrData}`;
+  link.download = payload.filename || 'file';
+  link.textContent = `Download ${payload.filename || 'file'}`;
+  link.setAttribute('alt', 'Received file');
+  messageDiv.appendChild(link);
       } else {
         messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
       }

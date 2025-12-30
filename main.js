@@ -454,7 +454,7 @@ function setupDataChannel(dataChannel, targetId) {
     processMessageQueue(targetId);
   };
   dataChannel.onmessage = async (event) => {
-    const now = performance.now();
+    const now = performance.now();  // Rate limit timestamp
     const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
     if (now - rateLimit.startTime >= 1000) {
       rateLimit.count = 0;
@@ -520,9 +520,9 @@ function setupDataChannel(dataChannel, targetId) {
           console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
           return;
         }
-        const now = Date.now();
-        if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
-          console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
+        const currentTime = Date.now();  // Renamed to avoid duplicate 'now'
+        if (Math.abs(currentTime - data.timestamp) > 300000) { // New: Anti-replay window ±5min
+          console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${currentTime}), outside window`);
           return;
         }
         processedMessageIds.add(data.messageId);
@@ -648,9 +648,9 @@ function setupDataChannel(dataChannel, targetId) {
       console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
       return;
     }
-    const now = Date.now();
-    if (Math.abs(now - data.timestamp) > 300000) { // New: Anti-replay window ±5min
-      console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
+    const currentTime = Date.now();  // Renamed to avoid duplicate 'now'
+    if (Math.abs(currentTime - data.timestamp) > 300000) { // New: Anti-replay window ±5min
+      console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${currentTime}), outside window`);
       return;
     }
     processedMessageIds.add(data.messageId);

@@ -567,10 +567,15 @@ function setupDataChannel(dataChannel, targetId) {
         messageDiv.appendChild(timeSpan);
         messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
         if (contentType === 'image') {
-          let imgSrc = contentOrData;
-          if (!imgSrc.startsWith('data:')) {
-            imgSrc = `data:image/jpeg;base64,${imgSrc}`;
-          }
+  const img = document.createElement('img');
+  img.src = contentOrData;  // full data URL
+  img.style.maxWidth = '100%';
+  img.style.borderRadius = '0.5rem';
+  img.style.cursor = 'pointer';
+  img.setAttribute('alt', 'Received image');
+  img.addEventListener('click', () => createImageModal(img.src, 'messageInput'));
+  messageDiv.appendChild(img);
+}
           const img = document.createElement('img');
           img.src = imgSrc;  // Use full data URL
           img.style.maxWidth = '100%';

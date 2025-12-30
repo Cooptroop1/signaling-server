@@ -979,7 +979,7 @@ wss.on('connection', (ws, req) => {
               timestamp: data.timestamp,
               iv: data.iv,
               signature: data.signature,
-              nonce: data.nonce
+              nonce: data.nonce,
               mime: mime
             }));
             console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
@@ -1631,6 +1631,7 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+
 
 
 

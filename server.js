@@ -12,18 +12,22 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
+
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
+
 // Validate password
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
+
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: true } // For Render Postgres
 });
+
 // Test DB connection on startup
 dbPool.connect(async (err) => {
   if (err) {
@@ -34,6 +38,7 @@ dbPool.connect(async (err) => {
     await loadAggregatedStats();
   }
 });
+
 // Clean up old offline messages (TTL: 24 hours)
 setInterval(async () => {
   try {
@@ -43,8 +48,10 @@ setInterval(async () => {
     console.error('Error cleaning up offline messages:', err.message, err.stack);
   }
 }, 24 * 60 * 60 * 1000); // Run daily
+
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
+
 let server;
 if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
   server = http.createServer();
@@ -56,6 +63,7 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   });
   console.log('Using HTTPS server for local development');
 }
+
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
   if (proto && proto !== 'https') {
@@ -107,6 +115,7 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
+
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
@@ -156,6 +165,7 @@ let features = {
   enableRelay: true
 };
 let aggregatedStats = { daily: {} };
+
 async function loadFeatures() {
   try {
     const res = await dbPool.query('SELECT * FROM features LIMIT 1');
@@ -181,6 +191,7 @@ async function loadFeatures() {
     console.error('Error loading features from DB:', err.message, err.stack);
   }
 }
+
 async function saveFeatures() {
   try {
     await dbPool.query(
@@ -201,6 +212,7 @@ async function saveFeatures() {
     console.error('Error saving features to DB:', err.message, err.stack);
   }
 }
+
 async function loadAggregatedStats() {
   try {
     const res = await dbPool.query('SELECT data FROM aggregated_stats LIMIT 1');
@@ -215,6 +227,7 @@ async function loadAggregatedStats() {
     console.error('Error loading aggregatedStats from DB:', err.message, err.stack);
   }
 }
+
 async function saveAggregatedStats() {
   try {
     await dbPool.query('UPDATE aggregated_stats SET data = $1', [JSON.stringify(aggregatedStats)]);
@@ -223,9 +236,11 @@ async function saveAggregatedStats() {
     console.error('Error saving aggregatedStats to DB:', err.message, err.stack);
   }
 }
+
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
+
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -236,6 +251,7 @@ function isValidBase64(str) {
   if (!isValid) console.warn('Invalid base64 detected:', str);
   return isValid;
 }
+
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -502,6 +518,7 @@ function validateMessage(data) {
   }
   return { valid: true };
 }
+
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -511,6 +528,7 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
+
 setInterval(() => {
   randomCodes.forEach(code => {
     if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
@@ -520,6 +538,7 @@ setInterval(() => {
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
+
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
@@ -527,6 +546,7 @@ const pingInterval = setInterval(() => {
     ws.ping();
   });
 }, 50000);
+
 setInterval(() => {
   const now = Date.now();
   revokedTokens.forEach((expiry, token) => {
@@ -547,6 +567,74 @@ setInterval(() => {
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 600000);
+
+function checkAdminSecret(data, ws) {
+  if (data.secret === ADMIN_SECRET) {
+    return true;
+  } else {
+    ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+    return false;
+  }
+}
+
+function revokeTokens(clientId) {
+  const tokens = clientTokens.get(clientId);
+  if (tokens) {
+    try {
+      const decoded = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
+      revokedTokens.set(tokens.accessToken, decoded.exp * 1000);
+      if (tokens.refreshToken) {
+        const decodedRefresh = jwt.verify(tokens.refreshToken, JWT_SECRET, { ignoreExpiration: true });
+        revokedTokens.set(tokens.refreshToken, decodedRefresh.exp * 1000);
+      }
+      clientTokens.delete(clientId);
+      console.log(`Revoked tokens for client ${clientId}`);
+    } catch (err) {
+      console.warn(`Failed to revoke tokens for client ${clientId}: ${err.message}`);
+    }
+  }
+}
+
+async function safeQuery(query, params, ws, errorMsg) {
+  try {
+    return await dbPool.query(query, params);
+  } catch (err) {
+    console.error('DB error:', err.message, err.stack);
+    if (ws) ws.send(JSON.stringify({ type: 'error', message: errorMsg || 'Database error occurred.' }));
+    throw err;
+  }
+}
+
+function forwardMessage(code, targetId, message, ws, fromId, isInitiator = false) {
+  if (rooms.has(code)) {
+    const room = rooms.get(code);
+    const targetWs = isInitiator ? room.clients.get(room.initiator)?.ws : room.clients.get(targetId)?.ws;
+    if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+      targetWs.send(JSON.stringify(message));
+      console.log(`Forwarded ${message.type} from ${fromId} to ${targetId || room.initiator} for code: ${code}`);
+    } else {
+      ws.send(JSON.stringify({ type: 'error', message: 'Target client not found or offline', code }));
+    }
+  }
+}
+
+function restrictLimit(map, key, increment, threshold, windowMs = 60000, logMsgPrefix) {
+  const now = Date.now();
+  const limit = map.get(key) || { value: 0, startTime: now };
+  if (now - limit.startTime >= windowMs) {
+    limit.value = 0;
+    limit.startTime = now;
+  }
+  limit.value += increment;
+  map.set(key, limit);
+  if (limit.value > threshold) {
+    console.warn(`${logMsgPrefix} exceeded for ${key}: ${limit.value} in ${windowMs / 1000}s`);
+    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - ${logMsgPrefix} exceeded for ${key}: ${limit.value}\n`);
+    return false;
+  }
+  return true;
+}
+
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -569,9 +657,8 @@ wss.on('connection', (ws, req) => {
     return;
   }
   let clientId, code, username;
-  let isAdmin = false;
   ws.on('message', async (message) => {
-    if (!restrictRate(ws)) {
+    if (!restrictLimit(rateLimits, ws.clientId, 1, 50, 60000, 'Rate limit')) {
       ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
       return;
     }
@@ -619,15 +706,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
       }
-      if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature') {
-        if (data.secret === ADMIN_SECRET) {
-          isAdmin = true;
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-          return;
-        }
-      }
-      if (!features.enableService && !isAdmin && data.type !== 'connect') {
+      if (!features.enableService && data.type !== 'connect') {
         ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
         ws.close();
         return;
@@ -693,42 +772,15 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'public-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const initiatorWs = room.clients.get(room.initiator)?.ws;
-          if (initiatorWs && initiatorWs.readyState === WebSocket.OPEN) {
-            initiatorWs.send(JSON.stringify({ type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
-            console.log(`Forwarded public-key from ${data.clientId} to initiator ${room.initiator} for code: ${data.code}`);
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Initiator offline, cannot exchange keys', code: data.code }));
-          }
-        }
+        forwardMessage(data.code, null, { type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code }, ws, data.clientId, true);
         return;
       }
       if (data.type === 'encrypted-room-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const targetWs = room.clients.get(data.targetId)?.ws;
-          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, clientId: data.clientId, code: data.code }));
-            console.log(`Forwarded encrypted-room-key from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Target client not found or offline', code: data.code }));
-          }
-        }
+        forwardMessage(data.code, data.targetId, { type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, clientId: data.clientId, code: data.code }, ws, data.clientId);
         return;
       }
       if (data.type === 'new-room-key') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const targetWs = room.clients.get(data.targetId)?.ws;
-          if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-            targetWs.send(JSON.stringify({ type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code }));
-            console.log(`Forwarded new-room-key from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Target client not found or offline', code: data.code }));
-          }
-        }
+        forwardMessage(data.code, data.targetId, { type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code }, ws, data.clientId);
         return;
       }
       if (data.type === 'join') {
@@ -736,12 +788,12 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.', code: data.code }));
           return;
         }
-        if (!restrictIpRate(clientIp, 'join')) {
+        if (!restrictLimit(ipRateLimits, `${hashedIp}:join`, 1, 5, 60000, 'IP rate limit')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Join rate limit exceeded (5/min). Please wait.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
-        if (!restrictIpDaily(clientIp, 'join')) {
+        if (!restrictLimit(ipDailyLimits, `${hashedIp}:join:${new Date().toISOString().slice(0, 10)}`, 1, 100, 86400000, 'Daily IP limit')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Daily join limit exceeded (100/day). Please try again tomorrow.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           return;
@@ -861,21 +913,11 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
-        if (rooms.has(data.code)) {
-          const room = rooms.get(data.code);
-          const target = room.clients.get(data.targetId);
-          if (target && target.ws.readyState === WebSocket.OPEN) {
-            console.log(`Forwarding ${data.type} from ${data.clientId} to ${data.targetId} for code: ${data.code}`);
-            target.ws.send(JSON.stringify({ ...data, clientId }));
-          } else {
-            console.warn(`Target ${data.targetId} not found or not open in room ${data.code}`);
-            ws.send(JSON.stringify({ type: 'error', message: `Target ${data.targetId} not found or offline`, code: data.code }));
-          }
-        }
+        forwardMessage(data.code, data.targetId, { ...data, clientId: data.clientId }, ws, data.clientId);
         return;
       }
       if (data.type === 'submit-random') {
-        if (!restrictIpRate(clientIp, 'submit-random')) {
+        if (!restrictLimit(ipRateLimits, `${hashedIp}:submit-random`, 1, 5, 60000, 'Submit rate limit')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           return;
@@ -922,7 +964,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0;
-        if (!restrictClientSize(data.clientId, payloadSize)) {
+        if (!restrictLimit(clientSizeLimits, data.clientId, payloadSize, 1048576, 60000, 'Size limit')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           return;
@@ -989,99 +1031,84 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'get-stats') {
-        if (data.secret === ADMIN_SECRET) {
-          const now = new Date();
-          const day = now.toISOString().slice(0, 10);
-          let totalClients = 0;
-          rooms.forEach(room => {
-            totalClients += room.clients.size;
-          });
-          let weekly = computeAggregate(7);
-          let monthly = computeAggregate(30);
-          let yearly = computeAggregate(365);
-          ws.send(JSON.stringify({
-            type: 'stats',
-            dailyUsers: dailyUsers.get(day)?.size || 0,
-            dailyConnections: dailyConnections.get(day)?.size || 0,
-            weeklyUsers: weekly.users,
-            weeklyConnections: weekly.connections,
-            monthlyUsers: monthly.users,
-            monthlyConnections: monthly.connections,
-            yearlyUsers: yearly.users,
-            yearlyConnections: yearly.connections,
-            allTimeUsers: allTimeUsers.size,
-            activeRooms: rooms.size,
-            totalClients: totalClients
-          }));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
+        if (!checkAdminSecret(data, ws)) return;
+        const now = new Date();
+        const day = now.toISOString().slice(0, 10);
+        let totalClients = 0;
+        rooms.forEach(room => {
+          totalClients += room.clients.size;
+        });
+        let weekly = computeAggregate(7);
+        let monthly = computeAggregate(30);
+        let yearly = computeAggregate(365);
+        ws.send(JSON.stringify({
+          type: 'stats',
+          dailyUsers: dailyUsers.get(day)?.size || 0,
+          dailyConnections: dailyConnections.get(day)?.size || 0,
+          weeklyUsers: weekly.users,
+          weeklyConnections: weekly.connections,
+          monthlyUsers: monthly.users,
+          monthlyConnections: monthly.connections,
+          yearlyUsers: yearly.users,
+          yearlyConnections: yearly.connections,
+          allTimeUsers: allTimeUsers.size,
+          activeRooms: rooms.size,
+          totalClients: totalClients
+        }));
         return;
       }
       if (data.type === 'get-features') {
-        if (data.secret === ADMIN_SECRET) {
-          ws.send(JSON.stringify({ type: 'features', ...features }));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
+        if (!checkAdminSecret(data, ws)) return;
+        ws.send(JSON.stringify({ type: 'features', ...features }));
         return;
       }
       if (data.type === 'toggle-feature') {
-        if (data.secret === ADMIN_SECRET) {
-          const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
-          if (features.hasOwnProperty(featureKey)) {
-            features[featureKey] = !features[featureKey];
-            await saveFeatures();
-            const timestamp = new Date().toISOString();
-            fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
-            ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
-            wss.clients.forEach(client => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ type: 'features-update', ...features }));
-                if (data.feature === 'service' && !features.enableService && !client.isAdmin) {
-                  client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
-                  client.close();
-                }
+        if (!checkAdminSecret(data, ws)) return;
+        const featureKey = `enable${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`;
+        if (features.hasOwnProperty(featureKey)) {
+          features[featureKey] = !features[featureKey];
+          await saveFeatures();
+          const timestamp = new Date().toISOString();
+          fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
+          ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
+          wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'features-update', ...features }));
+              if (data.feature === 'service' && !features.enableService && !client.isAdmin) {
+                client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+                client.close();
+              }
+            }
+          });
+          if (data.feature === 'service' && !features.enableService) {
+            clientTokens.forEach((tokens, clientId) => {
+              revokedTokens.set(tokens.accessToken, Date.now() + 1000);
+              if (tokens.refreshToken) {
+                revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
               }
             });
-            if (data.feature === 'service' && !features.enableService) {
-              clientTokens.forEach((tokens, clientId) => {
-                revokedTokens.set(tokens.accessToken, Date.now() + 1000);
-                if (tokens.refreshToken) {
-                  revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
-                }
-              });
-              clientTokens.clear();
-              console.log('All tokens invalidated due to service disable');
-              rooms.clear();
-              randomCodes.clear();
-              totpSecrets.clear();
-              processedMessageIds.clear();
-            }
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
+            clientTokens.clear();
+            console.log('All tokens invalidated due to service disable');
+            rooms.clear();
+            randomCodes.clear();
+            totpSecrets.clear();
+            processedMessageIds.clear();
           }
         } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid feature' }));
         }
         return;
       }
       if (data.type === 'export-stats-csv') {
-        if (data.secret === ADMIN_SECRET) {
-          const csv = generateStatsCSV();
-          ws.send(JSON.stringify({ type: 'export-stats-csv', csv }));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
+        if (!checkAdminSecret(data, ws)) return;
+        const csv = generateStatsCSV();
+        ws.send(JSON.stringify({ type: 'export-stats-csv', csv }));
         return;
       }
       if (data.type === 'export-logs-csv') {
-        if (data.secret === ADMIN_SECRET) {
-          const csv = generateLogsCSV();
-          ws.send(JSON.stringify({ type: 'export-logs-csv', csv }));
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
-        }
+        if (!checkAdminSecret(data, ws)) return;
+        const csv = generateLogsCSV();
+        ws.send(JSON.stringify({ type: 'export-logs-csv', csv }));
         return;
       }
       if (data.type === 'ping') {
@@ -1092,35 +1119,23 @@ wss.on('connection', (ws, req) => {
         console.log('Received pong from client');
         return;
       }
-      if (data.type === 'set-totp') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          totpSecrets.set(data.code, data.secret);
-          broadcast(data.code, { type: 'totp-enabled', code: data.code });
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
-        }
-        return;
-      }
       if (data.type === 'register-username') {
         const { username, password, public_key } = data;
         if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
-          try {
-            const checkRes = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
-            if (checkRes.rows.length > 0) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Username taken.' }));
-              return;
-            }
-            const passwordHash = await hashPassword(password);
-            await dbPool.query(
-              'INSERT INTO users (username, password_hash, client_id, public_key) VALUES ($1, $2, $3, $4)',
-              [username, passwordHash, data.clientId, public_key || null]
-            );
-            ws.send(JSON.stringify({ type: 'username-registered', username }));
-            console.log(`Registered username ${username} for clientId ${data.clientId}`);
-          } catch (err) {
-            console.error('DB error registering username:', err.message, err.stack);
-            ws.send(JSON.stringify({ type: 'error', message: 'Failed to register username. Check server logs for details.' }));
+          const checkRes = await safeQuery('SELECT * FROM users WHERE username = $1', [username], ws, 'Failed to register username.');
+          if (checkRes.rows.length > 0) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Username taken.' }));
+            return;
           }
+          const passwordHash = await hashPassword(password);
+          await safeQuery(
+            'INSERT INTO users (username, password_hash, client_id, public_key) VALUES ($1, $2, $3, $4)',
+            [username, passwordHash, data.clientId, public_key || null],
+            ws,
+            'Failed to register username.'
+          );
+          ws.send(JSON.stringify({ type: 'username-registered', username }));
+          console.log(`Registered username ${username} for clientId ${data.clientId}`);
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
         }
@@ -1129,49 +1144,44 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'login-username') {
         const { username, password } = data;
         if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
-          try {
-            const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
-            if (res.rows.length === 0) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
-              return;
-            }
-            const user = res.rows[0];
-            const valid = await validatePassword(password, user.password_hash);
-            if (!valid) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
-              return;
-            }
-            await dbPool.query('UPDATE users SET client_id = $1, last_active = CURRENT_TIMESTAMP WHERE id = $2', [data.clientId, user.id]);
-            const msgRes = await dbPool.query(`
-              SELECT om.id, om.message, u.username AS from_username
-              FROM offline_messages om
-              JOIN users u ON om.from_user_id = u.id
-              WHERE om.to_user_id = $1
-            `, [user.id]);
-            const offlineMessages = msgRes.rows.map(msg => {
-              try {
-                const parsedMessage = JSON.parse(msg.message);
-                return {
-                  id: msg.id, // Include message ID for confirmation
-                  from: msg.from_username,
-                  code: parsedMessage.code || null,
-                  type: parsedMessage.type || 'connection-request',
-                  encrypted: parsedMessage.encrypted || null,
-                  iv: parsedMessage.iv || null,
-                  ephemeral_public: parsedMessage.ephemeral_public || null
-                };
-              } catch (err) {
-                console.error(`Failed to parse offline message for user ${user.id}:`, err.message);
-                return null;
-              }
-            }).filter(msg => msg !== null);
-            console.log(`Fetched ${offlineMessages.length} offline messages for user ${username} (id: ${user.id})`);
-            ws.send(JSON.stringify({ type: 'login-success', username, offlineMessages }));
-            console.log(`User ${username} logged in with clientId ${data.clientId}`);
-          } catch (err) {
-            console.error('DB error during login:', err.message, err.stack);
-            ws.send(JSON.stringify({ type: 'error', message: 'Failed to login. Check server logs.' }));
+          const res = await safeQuery('SELECT * FROM users WHERE username = $1', [username], ws, 'Failed to login.');
+          if (res.rows.length === 0) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
+            return;
           }
+          const user = res.rows[0];
+          const valid = await validatePassword(password, user.password_hash);
+          if (!valid) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
+            return;
+          }
+          await safeQuery('UPDATE users SET client_id = $1, last_active = CURRENT_TIMESTAMP WHERE id = $2', [data.clientId, user.id], ws, 'Failed to login.');
+          const msgRes = await safeQuery(`
+            SELECT om.id, om.message, u.username AS from_username
+            FROM offline_messages om
+            JOIN users u ON om.from_user_id = u.id
+            WHERE om.to_user_id = $1
+          `, [user.id], ws, 'Failed to fetch offline messages.');
+          const offlineMessages = msgRes.rows.map(msg => {
+            try {
+              const parsedMessage = JSON.parse(msg.message);
+              return {
+                id: msg.id, // Include message ID for confirmation
+                from: msg.from_username,
+                code: parsedMessage.code || null,
+                type: parsedMessage.type || 'connection-request',
+                encrypted: parsedMessage.encrypted || null,
+                iv: parsedMessage.iv || null,
+                ephemeral_public: parsedMessage.ephemeral_public || null
+              };
+            } catch (err) {
+              console.error(`Failed to parse offline message for user ${user.id}:`, err.message);
+              return null;
+            }
+          }).filter(msg => msg !== null);
+          console.log(`Fetched ${offlineMessages.length} offline messages for user ${username} (id: ${user.id})`);
+          ws.send(JSON.stringify({ type: 'login-success', username, offlineMessages }));
+          console.log(`User ${username} logged in with clientId ${data.clientId}`);
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
         }
@@ -1179,90 +1189,71 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'find-user') {
         const { username, from_username } = data;
-        try {
-          const from_res = await dbPool.query('SELECT id, username FROM users WHERE client_id = $1', [data.clientId]);
-          if (from_res.rows.length === 0) {
-            console.warn(`Find-user failed: No user found for clientId ${data.clientId}`);
-            ws.send(JSON.stringify({ type: 'error', message: 'Must be logged in to search users.' }));
-            return;
-          }
-          const from_user_id = from_res.rows[0].id;
-          const from_username = from_res.rows[0].username;
-          const res = await dbPool.query('SELECT * FROM users WHERE username = $1', [username]);
-          if (res.rows.length === 0) {
-            ws.send(JSON.stringify({ type: 'user-not-found' }));
-            return;
-          }
-          const user = res.rows[0];
-          const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 16).match(/.{1,4}/g).join('-');
-          const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
-          if (ownerWs) {
-            ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: from_username, code: dynamicCode }));
-          } else {
-            await dbPool.query(
-              'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-              [from_user_id, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })]
-            );
-          }
-          const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
-          const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000);
-          ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
-          console.log(`User ${username} found for clientId ${data.clientId}, status: ${isOnline ? 'online' : 'offline'}, code: ${dynamicCode}`);
-        } catch (err) {
-          console.error('DB error finding user:', err.message, err.stack);
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to find user. Check server logs for details.' }));
+        const from_res = await safeQuery('SELECT id, username FROM users WHERE client_id = $1', [data.clientId], ws, 'Must be logged in to search users.');
+        if (from_res.rows.length === 0) {
+          console.warn(`Find-user failed: No user found for clientId ${data.clientId}`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Must be logged in to search users.' }));
+          return;
         }
+        const from_user_id = from_res.rows[0].id;
+        const from_username_actual = from_res.rows[0].username;
+        const res = await safeQuery('SELECT * FROM users WHERE username = $1', [username], ws, 'Failed to find user.');
+        if (res.rows.length === 0) {
+          ws.send(JSON.stringify({ type: 'user-not-found' }));
+          return;
+        }
+        const user = res.rows[0];
+        const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 16).match(/.{1,4}/g).join('-');
+        const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
+        if (ownerWs) {
+          ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: from_username_actual, code: dynamicCode }));
+        } else {
+          await safeQuery(
+            'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
+            [from_user_id, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })],
+            ws,
+            'Failed to send offline message.'
+          );
+        }
+        const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
+        const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000);
+        ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
+        console.log(`User ${username} found for clientId ${data.clientId}, status: ${isOnline ? 'online' : 'offline'}, code: ${dynamicCode}`);
         return;
       }
       if (data.type === 'send-offline-message') {
         const { to_username, encrypted, iv, ephemeral_public, messageId } = data;
-        try {
-          const res = await dbPool.query('SELECT id FROM users WHERE username = $1', [to_username]);
-          if (res.rows.length === 0) {
-            ws.send(JSON.stringify({ type: 'error', message: 'Recipient not found.' }));
-            return;
-          }
-          const to_user_id = res.rows[0].id;
-          const from_res = await dbPool.query('SELECT id FROM users WHERE client_id = $1', [data.clientId]);
-          if (from_res.rows.length === 0) {
-            console.warn(`Send-offline-message failed: No user found for clientId ${data.clientId}`);
-            ws.send(JSON.stringify({ type: 'error', message: 'Sender not logged in with a username.' }));
-            return;
-          }
-          const from_user_id = from_res.rows[0].id;
-          await dbPool.query(
-            'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-            [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, messageId })]
-          );
-          ws.send(JSON.stringify({ type: 'offline-message-sent', messageId }));
-          console.log(`Offline message ${messageId} sent from clientId ${data.clientId} (user_id: ${from_user_id}) to ${to_username} (user_id: ${to_user_id})`);
-        } catch (err) {
-          console.error('DB error sending offline message:', err.message, err.stack);
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to send offline message.' }));
+        const res = await safeQuery('SELECT id FROM users WHERE username = $1', [to_username], ws, 'Recipient not found.');
+        if (res.rows.length === 0) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Recipient not found.' }));
+          return;
         }
+        const to_user_id = res.rows[0].id;
+        const from_res = await safeQuery('SELECT id FROM users WHERE client_id = $1', [data.clientId], ws, 'Sender not logged in with a username.');
+        if (from_res.rows.length === 0) {
+          console.warn(`Send-offline-message failed: No user found for clientId ${data.clientId}`);
+          ws.send(JSON.stringify({ type: 'error', message: 'Sender not logged in with a username.' }));
+          return;
+        }
+        const from_user_id = from_res.rows[0].id;
+        await safeQuery(
+          'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
+          [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, messageId })],
+          ws,
+          'Failed to send offline message.'
+        );
+        ws.send(JSON.stringify({ type: 'offline-message-sent', messageId }));
+        console.log(`Offline message ${messageId} sent from clientId ${data.clientId} (user_id: ${from_user_id}) to ${to_username} (user_id: ${to_user_id})`);
         return;
       }
       if (data.type === 'confirm-offline-message') {
-        try {
-          await dbPool.query('DELETE FROM offline_messages WHERE id = $1', [data.messageId]);
-          console.log(`Confirmed and deleted offline message ${data.messageId} for clientId ${data.clientId}`);
-          ws.send(JSON.stringify({ type: 'confirm-offline-message-ack', messageId: data.messageId }));
-        } catch (err) {
-          console.error('DB error confirming offline message:', err.message, err.stack);
-          ws.send(JSON.stringify({ type: 'error', message: 'Failed to confirm offline message.' }));
-        }
+        await safeQuery('DELETE FROM offline_messages WHERE id = $1', [data.messageId], ws, 'Failed to confirm offline message.');
+        console.log(`Confirmed and deleted offline message ${data.messageId} for clientId ${data.clientId}`);
+        ws.send(JSON.stringify({ type: 'confirm-offline-message-ack', messageId: data.messageId }));
         return;
       }
       if (data.type === 'logout') {
-        if (clientTokens.has(data.clientId)) {
-          const tokens = clientTokens.get(data.clientId);
-          revokedTokens.set(tokens.accessToken, Date.now() + 1000);
-          if (tokens.refreshToken) {
-            revokedTokens.set(tokens.refreshToken, Date.now() + 1000);
-          }
-          clientTokens.delete(data.clientId);
-          console.log(`Client ${data.clientId} logged out, tokens revoked`);
-        }
+        revokeTokens(data.clientId);
         if (ws.code && rooms.has(ws.code)) {
           const room = rooms.get(ws.code);
           const isInitiator = ws.clientId === room.initiator;
@@ -1309,23 +1300,7 @@ wss.on('connection', (ws, req) => {
     }
   });
   ws.on('close', () => {
-    if (ws.clientId) {
-      const tokens = clientTokens.get(ws.clientId);
-      if (tokens) {
-        try {
-          const decoded = jwt.verify(tokens.accessToken, JWT_SECRET, { ignoreExpiration: true });
-          revokedTokens.set(tokens.accessToken, decoded.exp * 1000);
-          if (tokens.refreshToken) {
-            const decodedRefresh = jwt.verify(tokens.refreshToken, JWT_SECRET, { ignoreExpiration: true });
-            revokedTokens.set(tokens.refreshToken, decodedRefresh.exp * 1000);
-          }
-          clientTokens.delete(ws.clientId);
-          console.log(`Revoked tokens for client ${ws.clientId} on disconnect`);
-        } catch (err) {
-          console.warn(`Failed to revoke tokens for client ${ws.clientId}: ${err.message}`);
-        }
-      }
-    }
+    revokeTokens(ws.clientId);
     if (ws.code && rooms.has(ws.code)) {
       const room = rooms.get(ws.code);
       const isInitiator = ws.clientId === room.initiator;
@@ -1370,70 +1345,7 @@ wss.on('connection', (ws, req) => {
     }
   });
 });
-function restrictRate(ws) {
-  const now = Date.now();
-  const rateLimit = rateLimits.get(ws.clientId) || { count: 0, startTime: now };
-  if (now - rateLimit.startTime >= 60000) {
-    rateLimit.count = 0;
-    rateLimit.startTime = now;
-  }
-  rateLimit.count += 1;
-  rateLimits.set(ws.clientId, rateLimit);
-  if (rateLimit.count > 50) {
-    console.warn(`Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages in 60s`);
-    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Rate limit exceeded for client ${ws.clientId}: ${rateLimit.count} messages\n`);
-    return false;
-  }
-  return true;
-}
-function restrictClientSize(clientId, size) {
-  const now = Date.now();
-  const sizeLimit = clientSizeLimits.get(clientId) || { totalSize: 0, startTime: now };
-  if (now - sizeLimit.startTime >= 60000) {
-    sizeLimit.totalSize = 0;
-    sizeLimit.startTime = now;
-  }
-  sizeLimit.totalSize += size;
-  clientSizeLimits.set(clientId, sizeLimit);
-  if (sizeLimit.totalSize > 1048576) {
-    console.warn(`Size limit exceeded for client ${clientId}: ${sizeLimit.totalSize} bytes in 60s`);
-    fs.appendFileSync(AUDIT_FILE_BASE + '.log', `${new Date().toISOString()} - Size limit anomaly for client ${clientId}: ${sizeLimit.totalSize} bytes\n`);
-    return false;
-  }
-  return true;
-}
-function restrictIpRate(ip, action) {
-  const hashedIp = hashIp(ip);
-  const now = Date.now();
-  const key = `${hashedIp}:${action}`;
-  const rateLimit = ipRateLimits.get(key) || { count: 0, startTime: now };
-  if (now - rateLimit.startTime >= 60000) {
-    rateLimit.count = 0;
-    rateLimit.startTime = now;
-  }
-  rateLimit.count += 1;
-  ipRateLimits.set(key, rateLimit);
-  if (rateLimit.count > 5) {
-    console.warn(`IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count} in 60s`);
-    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - IP rate limit exceeded for ${action} from hashed IP ${hashedIp}: ${rateLimit.count}\n`);
-    return false;
-  }
-  return true;
-}
-function restrictIpDaily(ip, action) {
-  const hashedIp = hashIp(ip);
-  const day = new Date().toISOString().slice(0, 10);
-  const key = `${hashedIp}:${action}:${day}`;
-  const dailyLimit = ipDailyLimits.get(key) || { count: 0 };
-  dailyLimit.count += 1;
-  ipDailyLimits.set(key, dailyLimit);
-  if (dailyLimit.count > 100) {
-    console.warn(`Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count} in day ${day}`);
-    fs.appendFileSync(LOG_FILE, `${new Date().toISOString()} - Daily IP limit exceeded for ${action} from hashed IP ${hashedIp}: ${dailyLimit.count}\n`);
-    return false;
-  }
-  return true;
-}
+
 function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
   const hashedUa = hashUa(ua);
@@ -1463,14 +1375,17 @@ function incrementFailure(ip, ua) {
     ipFailureCounts.delete(key);
   }
 }
+
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
+
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
+
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
@@ -1508,6 +1423,7 @@ function logStats(data) {
     }
   });
 }
+
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -1528,8 +1444,10 @@ function rotateAuditLog() {
   });
   fs.writeFileSync(currentFile, '');
 }
+
 rotateAuditLog();
 setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
+
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -1548,6 +1466,7 @@ function updateLogFile() {
   aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
   saveAggregatedStats();
 }
+
 fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
@@ -1555,6 +1474,7 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
+
 function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;
@@ -1569,6 +1489,7 @@ function computeAggregate(days) {
   }
   return { users, connections };
 }
+
 // New: Generate CSV for stats
 function generateStatsCSV() {
   let csv = 'Period,Users,Connections\n';
@@ -1584,6 +1505,7 @@ function generateStatsCSV() {
   csv += `All-Time,${allTimeUsers.size},N/A\n`;
   return csv;
 }
+
 // New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
 function generateLogsCSV() {
   let csv = 'Timestamp,Event\n';
@@ -1597,6 +1519,7 @@ function generateLogsCSV() {
   });
   return csv;
 }
+
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -1610,6 +1533,7 @@ function broadcast(code, message) {
     console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
+
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -1618,9 +1542,11 @@ function broadcastRandomCodes() {
   });
   console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
 }
+
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
+
 function hashUa(ua) {
   if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
   const parser = new UAParser(ua);
@@ -1628,10 +1554,7 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
+
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-
-
-
-

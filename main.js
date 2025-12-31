@@ -252,11 +252,11 @@ async function startPeerConnection(targetId, isOfferer) {
   if (!features.enableP2P) {
     console.log('P2P disabled by admin, forcing relay mode');
     useRelay = true;
-    toggleElementVisibility('privacyStatus', true);
+    toggleElementVisibility('privacyStatus', true, 'hidden');
     document.getElementById('privacyStatus').textContent = 'Relay Mode (E2EE)';
     isConnected = true;
     toggleElementVisibility('inputContainer', true, 'hidden');
-    toggleElementVisibility('messages', false, 'waiting');
+    toggleElementVisibility('messages', true, 'waiting');
     updateMaxClientsUI();
     return;
   }
@@ -342,7 +342,7 @@ async function startPeerConnection(targetId, isOfferer) {
       retryCounts.delete(targetId);
       clearTimeout(connectionTimeouts.get(targetId));
       updateMaxClientsUI();
-      toggleElementVisibility('privacyStatus', true);
+      toggleElementVisibility('privacyStatus', true, 'hidden');
       document.getElementById('privacyStatus').textContent = 'E2E Encrypted (P2P)';
       // New: Process any queued messages on connect
       processQueue(messageQueue, targetId, (dataChannel, msg) => dataChannel.send(msg));
@@ -357,7 +357,7 @@ async function startPeerConnection(targetId, isOfferer) {
       audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
       audio.play().catch(error => console.error('Error playing remote audio:', error));
       remoteAudios.set(targetId, audio);
-      toggleElementVisibility('remoteAudioContainer', true, 'hidden', false);
+      toggleElementVisibility('remoteAudioContainer', true, 'hidden');
       document.getElementById('remoteAudioContainer').appendChild(audio);
       setAudioOutput(audio, targetId);
     }
@@ -393,11 +393,11 @@ async function startPeerConnection(targetId, isOfferer) {
       if (features.enableRelay) {
         useRelay = true;
         // Removed showStatusMessage to suppress transient error; user sees final connection status
-        toggleElementVisibility('privacyStatus', true);
+        toggleElementVisibility('privacyStatus', true, 'hidden');
         document.getElementById('privacyStatus').textContent = 'Relay Mode (E2EE)';
         isConnected = true;
         toggleElementVisibility('inputContainer', true, 'hidden');
-        toggleElementVisibility('messages', false, 'waiting');
+        toggleElementVisibility('messages', true, 'waiting');
       } else {
         showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
         cleanupPeerConnection(targetId);
@@ -418,7 +418,7 @@ function setupDataChannel(dataChannel, targetId) {
     toggleElementVisibility('chatContainer', true, 'hidden');
     toggleElementVisibility('newSessionButton', true, 'hidden');
     toggleElementVisibility('inputContainer', true, 'hidden');
-    toggleElementVisibility('messages', false, 'waiting');
+    toggleElementVisibility('messages', true, 'waiting');
     clearTimeout(connectionTimeouts.get(targetId));
     retryCounts.delete(targetId);
     updateMaxClientsUI();
@@ -491,7 +491,7 @@ function setupDataChannel(dataChannel, targetId) {
     }
     if (dataChannels.size === 0) {
       toggleElementVisibility('inputContainer', false, 'hidden');
-      toggleElementVisibility('messages', true, 'waiting');
+      toggleElementVisibility('messages', false, 'waiting');
       toggleElementVisibility('audioOutputButton', false, 'hidden');
     }
   };
@@ -723,7 +723,7 @@ async function handleCandidate(candidate, targetId) {
   }
 }
 
-function toggleElementVisibility(elementId, show, className = 'hidden', add = true) {
+function toggleElementVisibility(elementId, show, className = 'hidden') {
   const element = document.getElementById(elementId);
   if (element) {
     if (show) {
@@ -762,7 +762,7 @@ async function startVoiceCall() {
       renegotiate(targetId);
     });
     voiceCallActive = true;
-    toggleElementVisibility('voiceCallButton', true, 'active', true);
+    toggleElementVisibility('voiceCallButton', true, 'active');
     document.getElementById('voiceCallButton').title = 'End Voice Call';
     toggleElementVisibility('audioOutputButton', true, 'hidden');
     showStatusMessage('Voice call started.');
@@ -888,7 +888,7 @@ async function autoConnect(codeParam) {
       codeDisplayElement.textContent = `Using code: ${code}`;
       toggleElementVisibility('codeDisplayElement', true, 'hidden');
       toggleElementVisibility('copyCodeButton', true, 'hidden');
-      toggleElementVisibility('messages', true, 'waiting');
+      toggleElementVisibility('messages', false, 'waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN) {
         console.log('Sending check-totp');
@@ -923,7 +923,7 @@ async function autoConnect(codeParam) {
         codeDisplayElement.textContent = `Using code: ${code}`;
         toggleElementVisibility('codeDisplayElement', true, 'hidden');
         toggleElementVisibility('copyCodeButton', true, 'hidden');
-        toggleElementVisibility('messages', true, 'waiting');
+        toggleElementVisibility('messages', false, 'waiting');
         statusElement.textContent = 'Waiting for connection...';
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
         document.getElementById('messageInput')?.focus();
@@ -983,7 +983,7 @@ function updateFeaturesUI() {
     toggleElementVisibility('inputContainer', false, 'hidden');
   } else if (!features.enableP2P && features.enableRelay && isConnected) {
     toggleElementVisibility('inputContainer', true, 'hidden');
-    toggleElementVisibility('messages', false, 'waiting');
+    toggleElementVisibility('messages', true, 'waiting');
   }
 }
 
@@ -1026,8 +1026,8 @@ function toggleGrokBot() {
   grokBotActive = !grokBotActive;
   const grokButton = document.getElementById('grokButton');
   const grokKeyContainer = document.getElementById('grokKeyContainer');
-  toggleElementVisibility('grokButton', grokBotActive, 'active', true);
-  toggleElementVisibility('grokKeyContainer', grokBotActive && !grokApiKey, 'active', true);
+  toggleElementVisibility('grokButton', grokBotActive, 'active');
+  toggleElementVisibility('grokKeyContainer', grokBotActive && !grokApiKey, 'active');
   if (grokBotActive) {
     if (!grokApiKey) {
       showStatusMessage('Grok bot enabled. Enter your xAI API key below. For details, visit https://x.ai/api.');
@@ -1130,7 +1130,7 @@ async function startTotpRoom(serverGenerated) {
   toggleElementVisibility('connectContainer', false, 'hidden');
   toggleElementVisibility('initialContainer', false, 'hidden');
   toggleElementVisibility('chatContainer', true, 'hidden');
-  toggleElementVisibility('messages', true, 'waiting');
+  toggleElementVisibility('messages', false, 'waiting');
   statusElement.textContent = 'Waiting for connection...';
   document.getElementById('messageInput')?.focus();
 }
@@ -1194,13 +1194,13 @@ function startVoiceRecording() {
       mediaRecorder = null;
       voiceChunks = [];
       toggleElementVisibility('voiceButton', false, 'recording');
-      toggleElementVisibility('voiceTimer', false, 'display', 'none');
+      document.getElementById('voiceTimer').style.display = 'none';
       document.getElementById('voiceTimer').textContent = '';
       clearInterval(voiceTimerInterval);
     });
     mediaRecorder.start(1000);
-    toggleElementVisibility('voiceButton', true, 'recording', true);
-    toggleElementVisibility('voiceTimer', true, 'display', 'flex');
+    toggleElementVisibility('voiceButton', true, 'recording');
+    document.getElementById('voiceTimer').style.display = 'flex';
     let time = 0;
     voiceTimerInterval = setInterval(() => {
       time++;

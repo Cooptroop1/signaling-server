@@ -73,6 +73,7 @@ let retryCounts = new Map();
 const maxRetries = 2;
 let candidatesQueues = new Map();
 let processedMessageIds = new Set();
+let processedNonces = new Map();
 let usernames = new Map();
 let messageRateLimits = new Map();
 let codeSentToRandom = false;
@@ -631,86 +632,102 @@ socket.onmessage = async (event) => {
       return;
     }
     if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
-      if (processedMessageIds.has(message.messageId)) return;
-      processedMessageIds.add(message.messageId);
-      console.log('Received relay message:', message);
-      const payload = {
-        messageId: message.messageId,
-        username: message.username,
-        content: message.content,
-        encryptedContent: message.encryptedContent,
-        data: message.data,
-        encryptedData: message.encryptedData,
-        filename: message.filename,
-        timestamp: Number(message.timestamp) || Date.now(),
-        iv: message.iv,
-        signature: message.signature
-      };
-      if (!payload.username || ((!payload.content && !payload.encryptedContent) && (!payload.data && !payload.encryptedData)) || isNaN(payload.timestamp)) {
-        console.error('Invalid payload in relay message:', payload);
-        showStatusMessage('Invalid message received.');
-        return;
-      }
-      const senderUsername = payload.username;
-      const messages = document.getElementById('messages');
-      const isSelf = senderUsername === username;
-      const messageDiv = document.createElement('div');
-      messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
-      const timeSpan = document.createElement('span');
-      timeSpan.className = 'timestamp';
-      timeSpan.textContent = new Date(payload.timestamp).toLocaleTimeString();
-      messageDiv.appendChild(timeSpan);
-      messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
-      let contentOrData = payload.content || payload.data;
-      if (payload.encryptedContent || payload.encryptedData) {
-        try {
-          const messageKey = await deriveMessageKey();
-          const encrypted = payload.encryptedContent || payload.encryptedData;
-          const iv = payload.iv;
-          contentOrData = await decryptRaw(messageKey, encrypted, iv);
-          const toVerify = contentOrData + payload.timestamp;
-          const valid = await verifyMessage(signingKey, payload.signature, toVerify);
-          if (!valid) {
-            console.warn(`Invalid signature for relay message`);
-            showStatusMessage('Invalid message signature detected.');
-            return;
-          }
-        } catch (error) {
-          console.error(`Decryption/verification failed for relay message:`, error);
-          showStatusMessage('Failed to decrypt/verify message.');
-          return;
-        }
-      }
-      if (message.type === 'image') {
-        const img = document.createElement('img');
-        img.src = contentOrData;
-        img.style.maxWidth = '100%';
-        img.style.borderRadius = '0.5rem';
-        img.style.cursor = 'pointer';
-        img.setAttribute('alt', 'Received image');
-        img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
-        messageDiv.appendChild(img);
-      } else if (message.type === 'voice') {
-        const audio = document.createElement('audio');
-        audio.src = contentOrData;
-        audio.controls = true;
-        audio.setAttribute('alt', 'Received voice message');
-        audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
-        messageDiv.appendChild(audio);
-      } else if (message.type === 'file') {
-        const link = document.createElement('a');
-        link.href = contentOrData;
-        link.download = payload.filename || 'file';
-        link.textContent = `Download ${payload.filename || 'file'}`;
-        link.setAttribute('alt', 'Received file');
-        messageDiv.appendChild(link);
-      } else {
-        messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
-      }
-      messages.prepend(messageDiv);
-      messages.scrollTop = 0;
+  if (processedMessageIds.has(message.messageId)) return;
+  processedMessageIds.add(message.messageId);
+  console.log('Received relay message:', message);
+  const encrypted = message.encryptedContent || message.encryptedData; // Handle conditional
+  if (!message.messageId || !message.timestamp || !message.nonce || !message.iv || !message.signature || !encrypted) {
+    console.error('Invalid payload in relay message:', message);
+    showStatusMessage('Invalid message received.');
+    return;
+  }
+  const now = Date.now();
+  if (Math.abs(now - message.timestamp) > 300000) {
+    console.warn(`Rejecting relay message with timestamp ${message.timestamp} (now: ${now})`);
+    return;
+  }
+  try {
+    const messageKey = await deriveMessageKey();
+    let rawData = await decryptRaw(messageKey, encrypted, message.iv);
+    const toVerify = rawData + message.nonce + message.timestamp;
+    const valid = await verifyMessage(signingKey, message.signature, toVerify);
+    if (!valid) {
+      console.warn(`Invalid signature for relay message`);
+      showStatusMessage('Invalid message signature detected.');
       return;
     }
+    // Parse metadata (same as P2P)
+    let metadataStr = '';
+    let braceCount = 0;
+    for (let i = 0; i < rawData.length; i++) {
+      metadataStr += rawData[i];
+      if (rawData[i] === '{') braceCount++;
+      if (rawData[i] === '}') braceCount--;
+      if (braceCount === 0 && metadataStr.startsWith('{')) break;
+    }
+    const metadata = JSON.parse(metadataStr);
+    const senderUsername = metadata.username;
+    const timestamp = metadata.timestamp;
+    const contentType = metadata.type;
+    let contentOrData = rawData.substring(metadataStr.length).trimEnd();
+    const messages = document.getElementById('messages');
+    const isSelf = senderUsername === username;
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'timestamp';
+    timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
+    messageDiv.appendChild(timeSpan);
+    messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+    let mime = message.mime;
+    let defaultMime = 'text/plain';
+    if (contentType === 'image') defaultMime = 'image/jpeg';
+    if (contentType === 'voice') defaultMime = 'audio/webm';
+    if (contentType === 'file' && !mime && message.filename) {
+      const ext = message.filename.split('.').pop().toLowerCase();
+      const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', webm: 'audio/webm' };
+      mime = mimeMap[ext] || 'application/octet-stream';
+    }
+    if (contentType !== 'message') {
+      contentOrData = `data:${mime || defaultMime};base64,${contentOrData}`;
+    }
+    if (contentType === 'image') {
+      const img = document.createElement('img');
+      img.dataset.src = contentOrData;
+      img.style.maxWidth = '100%';
+      img.style.borderRadius = '0.5rem';
+      img.style.cursor = 'pointer';
+      img.setAttribute('alt', 'Received image');
+      img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
+      lazyObserver.observe(img);
+      messageDiv.appendChild(img);
+    } else if (contentType === 'voice') {
+      const audio = document.createElement('audio');
+      audio.dataset.src = contentOrData;
+      audio.controls = true;
+      audio.setAttribute('alt', 'Received voice message');
+      audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
+      lazyObserver.observe(audio);
+      messageDiv.appendChild(audio);
+    } else if (contentType === 'file') {
+      const link = document.createElement('a');
+      link.href = contentOrData;
+      link.download = message.filename || 'file';
+      link.textContent = `Download ${message.filename || 'file'}`;
+      link.setAttribute('alt', 'Received file');
+      messageDiv.appendChild(link);
+    } else {
+      messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
+    }
+    messages.prepend(messageDiv);
+    messages.scrollTop = 0;
+  } catch (error) {
+    console.error('Decryption/verification failed for relay message:', error);
+    showStatusMessage('Failed to decrypt/verify message.');
+    return;
+  }
+  return;
+}
     if (message.type === 'features-update') {
       features = message;
       console.log('Received features update:', features);
@@ -2231,7 +2248,137 @@ async function sendMessage(content) {
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
 }
-async function sendOfflineMessage(toUsername, messageText) {
-  // Assuming implementation elsewhere
+async function processReceivedMessage(data, targetId) {
+  if (data.type === 'voice-call-start') {
+    if (!voiceCallActive) {
+      startVoiceCall();
+    }
+    return;
+  }
+  if (data.type === 'voice-call-end') {
+    if (voiceCallActive) {
+      stopVoiceCall();
+    }
+    return;
+  }
+  if (data.type === 'kick' || data.type === 'ban') {
+    if (data.targetId === clientId) {
+      showStatusMessage(`You have been ${data.type}ed from the room.`);
+      socket.close();
+      window.location.reload();
+    }
+    return;
+  }
+  if (!data.messageId || !data.timestamp || !data.nonce || !data.iv || !data.signature) {
+    console.log(`Invalid message format from ${targetId}: missing required fields`, data);
+    return;
+  }
+  const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData; // Handle both P2P/relay
+  if (!encrypted) {
+    console.log(`Invalid message format from ${targetId}: no encrypted data`, data);
+    return;
+  }
+  if (processedMessageIds.has(data.messageId)) {
+    console.log(`Duplicate message ${data.messageId} from ${targetId}`);
+    return;
+  }
+  if (processedNonces.has(data.nonce)) {
+    console.log(`Duplicate nonce ${data.nonce} from ${targetId}`);
+    return;
+  }
+  const now = Date.now();
+  if (Math.abs(now - data.timestamp) > 300000) {
+    console.warn(`Rejecting message with timestamp ${data.timestamp} (now: ${now}), outside window`);
+    return;
+  }
+  processedMessageIds.add(data.messageId);
+  processedNonces.set(data.nonce, now);
+  let senderUsername, timestamp, contentType, contentOrData;
+  try {
+    const messageKey = await deriveMessageKey();
+    let rawData = await decryptRaw(messageKey, encrypted, data.iv);
+    const toVerify = rawData + data.nonce + data.timestamp; // Match send's explicit timestamp
+    const valid = await verifyMessage(signingKey, data.signature, toVerify);
+    if (!valid) {
+      console.warn(`Invalid signature for message from ${targetId}`);
+      showStatusMessage('Invalid message signature detected.');
+      return;
+    }
+    // Parse metadata
+    let metadataStr = '';
+    let braceCount = 0;
+    for (let i = 0; i < rawData.length; i++) {
+      metadataStr += rawData[i];
+      if (rawData[i] === '{') braceCount++;
+      if (rawData[i] === '}') braceCount--;
+      if (braceCount === 0 && metadataStr.startsWith('{')) break;
+    }
+    const metadata = JSON.parse(metadataStr);
+    senderUsername = metadata.username;
+    timestamp = metadata.timestamp;
+    contentType = metadata.type;
+    contentOrData = rawData.substring(metadataStr.length).trimEnd(); // Trim padding
+  } catch (error) {
+    console.error(`Decryption/verification failed for message from ${targetId}:`, error);
+    showStatusMessage('Failed to decrypt/verify message.');
+    return;
+  }
+  const messages = document.getElementById('messages');
+  const isSelf = senderUsername === username;
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'timestamp';
+  timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
+  messageDiv.appendChild(timeSpan);
+  messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+  let mime = data.mime;
+  let defaultMime = 'text/plain';
+  if (contentType === 'image') defaultMime = 'image/jpeg';
+  if (contentType === 'voice') defaultMime = 'audio/webm';
+  if (contentType === 'file' && !mime && data.filename) {
+    const ext = data.filename.split('.').pop().toLowerCase();
+    const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', webm: 'audio/webm' };
+    mime = mimeMap[ext] || 'application/octet-stream';
+  }
+  if (contentType !== 'message') {
+    contentOrData = `data:${mime || defaultMime};base64,${contentOrData}`;
+  }
+  if (contentType === 'image') {
+    const img = document.createElement('img');
+    img.dataset.src = contentOrData;
+    img.style.maxWidth = '100%';
+    img.style.borderRadius = '0.5rem';
+    img.style.cursor = 'pointer';
+    img.setAttribute('alt', 'Received image');
+    img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
+    lazyObserver.observe(img);
+    messageDiv.appendChild(img);
+  } else if (contentType === 'voice') {
+    const audio = document.createElement('audio');
+    audio.dataset.src = contentOrData;
+    audio.controls = true;
+    audio.setAttribute('alt', 'Received voice message');
+    audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
+    lazyObserver.observe(audio);
+    messageDiv.appendChild(audio);
+  } else if (contentType === 'file') {
+    const link = document.createElement('a');
+    link.href = contentOrData;
+    link.download = data.filename || 'file';
+    link.textContent = `Download ${data.filename || 'file'}`;
+    link.setAttribute('alt', 'Received file');
+    messageDiv.appendChild(link);
+  } else {
+    messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
+  }
+  messages.prepend(messageDiv);
+  messages.scrollTop = 0;
+  if (isInitiator) {
+    dataChannels.forEach((dc, id) => {
+      if (id !== targetId && dc.readyState === 'open') {
+        dc.send(event.data);
+      }
+    });
+  }
 }
-// Other missing functions like exportPublicKey, deriveSharedKey, etc., assume defined elsewhere

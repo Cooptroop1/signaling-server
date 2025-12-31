@@ -93,10 +93,11 @@ let clientPublicKeys = new Map();
 let initiatorPublic;
 let userPrivateKey = localStorage.getItem('userPrivateKey'); // Added: Load from storage at top
 let userPublicKey; // Added: Will be set if needed
-let keyVersion = 0; // Added: Initialize keyVersion
-let keysReady = false; // Added: Flag to check if keys are ready
+let keyVersion = 0; // Initialize keyVersion
+let keysReady = false; // Flag to check if keys are ready
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
+window.isInitiator = false; // Make isInitiator global for utils.js
 if (typeof window !== 'undefined') {
  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
  console.log('WebSocket created');
@@ -429,6 +430,7 @@ socket.onmessage = async (event) => {
  clientId = message.clientId;
  maxClients = Math.min(message.maxClients, 10);
  isInitiator = message.isInitiator;
+ window.isInitiator = isInitiator; // Update global
  features = message.features || features;
  if (!features.enableP2P) {
  useRelay = true;
@@ -444,8 +446,9 @@ socket.onmessage = async (event) => {
  signingSalt = window.crypto.getRandomValues(new Uint8Array(16));
  messageSalt = window.crypto.getRandomValues(new Uint8Array(16));
  signingKey = await deriveSigningKey();
+ keyVersion = 0; // Initialize here
  console.log('Generated initial roomMaster, signingSalt, messageSalt, and signingKey for initiator.');
- keysReady = true; // Added
+ keysReady = true;
  isConnected = true;
  if (pendingTotpSecret) {
  socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
@@ -478,6 +481,7 @@ socket.onmessage = async (event) => {
  if (message.type === 'initiator-changed') {
  console.log(`Initiator changed to ${message.newInitiator} for code: ${code}`);
  isInitiator = message.newInitiator === clientId;
+ window.isInitiator = isInitiator; // Update global
  initializeMaxClientsUI();
  updateMaxClientsUI();
  return;
@@ -593,7 +597,7 @@ socket.onmessage = async (event) => {
  signingSalt = base64ToArrayBuffer(payload.signingSalt);
  messageSalt = base64ToArrayBuffer(payload.messageSalt);
  signingKey = await deriveSigningKey();
- keysReady = true; // Added
+ keysReady = true;
  console.log('Room master, salts successfully imported.');
  if (useRelay) {
  isConnected = true;
@@ -627,7 +631,7 @@ socket.onmessage = async (event) => {
  messageSalt = base64ToArrayBuffer(payload.messageSalt);
  signingKey = await deriveSigningKey();
  keyVersion = message.version;
- keysReady = true; // Added, though likely already true
+ keysReady = true;
  console.log(`New room master and salts received and set for PFS (version ${keyVersion}).`);
  } catch (error) {
  console.error('Error handling new-room-key:', error);

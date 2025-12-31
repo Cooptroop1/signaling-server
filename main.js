@@ -143,25 +143,31 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
  const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
 rawData = rawData.padEnd(paddedLength, ' '); // Pad with spaces (trim on receive if needed)
 const { encrypted, iv } = await encryptRaw(messageKey, rawData);
-const toSign = rawData + nonce; // New: Sign rawData + nonce (timestamp is inside rawData)
+const toSign = rawData + nonce + jitteredTimestamp; // Explicit timestamp for verify consistency
 const signature = await signMessage(signingKey, toSign);
 
 // Compute mime for media (if not message)
 let mime;
 if (type !== 'message') {
-  mime = file?.type; // From file input
+  mime = file?.type;
   if (!mime) {
-    if (type === 'image') mime = 'image/jpeg'; // Default for compressed images
-    if (type === 'voice') mime = 'audio/webm'; // From recorder
-    if (type === 'file') mime = 'application/octet-stream'; // Generic
+    if (type === 'image') mime = 'image/jpeg';
+    if (type === 'voice') mime = 'audio/webm';
+    if (type === 'file') mime = 'application/octet-stream';
   }
 }
 
-let payload = { messageId, nonce, iv, signature };
-if (type === 'message') {
-  payload.encryptedContent = encrypted;
+const payload = { messageId, nonce, iv, signature, timestamp: jitteredTimestamp }; // Add timestamp to payload for receive verify
+if (useRelay) {
+  if (type === 'message') {
+    payload.encryptedContent = encrypted;
+  } else {
+    payload.encryptedData = encrypted;
+    if (mime) payload.mime = mime;
+    if (type === 'file' || type === 'image' || type === 'voice') payload.filename = file?.name || `sent_${type}`;
+  }
 } else {
-  payload.encryptedData = encrypted;
+  payload.encryptedBlob = encrypted; // Standardize for P2P receive
   if (mime) payload.mime = mime;
   if (type === 'file' || type === 'image' || type === 'voice') payload.filename = file?.name || `sent_${type}`;
 }
@@ -175,7 +181,14 @@ if (useRelay) {
     if (dataChannel.readyState === 'open') {
       if (jsonString.length > CHUNK_SIZE) {
         const chunkId = generateMessageId();
-        // ... (rest of chunking logic unchanged)
+        const chunks = [];
+        for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
+          chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
+        }
+        for (let index = 0; index < chunks.length; index++) {
+          const chunk = chunks[index];
+          dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
+        }
       } else {
         dataChannel.send(jsonString);
       }
@@ -183,13 +196,15 @@ if (useRelay) {
     }
   });
   if (!sent) {
-    // ... (queuing logic unchanged)
+    console.log('No open data channels, queuing message for retry');
+    if (!messageQueue.has('global')) messageQueue.set('global', []);
+    messageQueue.get('global').push(jsonString); // Queue JSON string for retry
   }
 } else {
   showStatusMessage('Error: No connections.');
   return;
 }
-
+  
  // Increment global count and size after successful send
  globalSendRate.count += 1;
  globalSizeRate.totalSize += payloadSize;
@@ -1245,22 +1260,23 @@ function startVoiceRecording() {
  }
  });
  mediaRecorder.addEventListener('stop', async () => {
- console.log('Recorder stopped, chunks length:', voiceChunks.length);
- const audioBlob = new Blob(voiceChunks, { type: mimeType });
- console.log('Audio blob created, size:', audioBlob.size, 'type:', mimeType);
- if (audioBlob.size === 0) {
- showStatusMessage('No audio recorded. Speak louder or check microphone.');
- return;
- }
- await prepareAndSendMessage({ type: 'voice', file: audioBlob });
- stream.getTracks().forEach(track => track.stop());
- mediaRecorder = null;
- voiceChunks = [];
- document.getElementById('voiceButton').classList.remove('recording');
- document.getElementById('voiceTimer').style.display = 'none';
- document.getElementById('voiceTimer').textContent = '';
- clearInterval(voiceTimerInterval);
- });
+  console.log('Recorder stopped, chunks length:', voiceChunks.length);
+  const audioBlob = new Blob(voiceChunks, { type: mimeType });
+  console.log('Audio blob created, size:', audioBlob.size, 'type:', mimeType);
+  if (audioBlob.size === 0) {
+    showStatusMessage('No audio recorded. Speak louder or check microphone.');
+    return;
+  }
+  const dataToSend = await blobToDataURL(audioBlob);
+  await prepareAndSendMessage({ type: 'voice', base64: dataToSend.split(',')[1], file: { type: audioBlob.type, name: 'voice.webm' } });
+  stream.getTracks().forEach(track => track.stop());
+  mediaRecorder = null;
+  voiceChunks = [];
+  document.getElementById('voiceButton').classList.remove('recording');
+  document.getElementById('voiceTimer').style.display = 'none';
+  document.getElementById('voiceTimer').textContent = '';
+  clearInterval(voiceTimerInterval);
+});
  mediaRecorder.start(1000);
  document.getElementById('voiceButton').classList.add('recording');
  document.getElementById('voiceTimer').style.display = 'flex';

@@ -93,6 +93,8 @@ let clientPublicKeys = new Map();
 let initiatorPublic;
 let userPrivateKey = localStorage.getItem('userPrivateKey'); // Added: Load from storage at top
 let userPublicKey; // Added: Will be set if needed
+let keyVersion = 0; // Added: Initialize keyVersion
+let keysReady = false; // Added: Flag to check if keys are ready
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
 if (typeof window !== 'undefined') {
@@ -443,6 +445,7 @@ socket.onmessage = async (event) => {
  messageSalt = window.crypto.getRandomValues(new Uint8Array(16));
  signingKey = await deriveSigningKey();
  console.log('Generated initial roomMaster, signingSalt, messageSalt, and signingKey for initiator.');
+ keysReady = true; // Added
  isConnected = true;
  if (pendingTotpSecret) {
  socket.send(JSON.stringify({ type: 'set-totp', secret: pendingTotpSecret.send, code, clientId, token }));
@@ -511,7 +514,7 @@ socket.onmessage = async (event) => {
  connectedClients.delete(message.clientId);
  clientPublicKeys.delete(message.clientId);
  cleanupPeerConnection(message.clientId);
- retryCounts.delete(message.clientId); // Added to prevent retries after disconnect
+ retryCounts.delete(message.clientId);
  if (remoteAudios.has(message.clientId)) {
  const audio = remoteAudios.get(message.clientId);
  audio.remove();
@@ -573,7 +576,6 @@ socket.onmessage = async (event) => {
  clientId,
  token
  }));
- // Removed: await triggerRatchet(); to prevent immediate key mismatch
  } catch (error) {
  console.error('Error handling public-key:', error);
  showStatusMessage('Key exchange failed.');
@@ -591,6 +593,7 @@ socket.onmessage = async (event) => {
  signingSalt = base64ToArrayBuffer(payload.signingSalt);
  messageSalt = base64ToArrayBuffer(payload.messageSalt);
  signingKey = await deriveSigningKey();
+ keysReady = true; // Added
  console.log('Room master, salts successfully imported.');
  if (useRelay) {
  isConnected = true;
@@ -624,6 +627,7 @@ socket.onmessage = async (event) => {
  messageSalt = base64ToArrayBuffer(payload.messageSalt);
  signingKey = await deriveSigningKey();
  keyVersion = message.version;
+ keysReady = true; // Added, though likely already true
  console.log(`New room master and salts received and set for PFS (version ${keyVersion}).`);
  } catch (error) {
  console.error('Error handling new-room-key:', error);
@@ -1520,6 +1524,11 @@ async function sendMessage(content) {
  console.log('sendMessage called with content:', content);
  if (!content) {
  console.log('No content, returning');
+ return;
+ }
+ if (!keysReady) {
+ console.error('Encryption keys not ready yet.');
+ showStatusMessage('Encryption keys not ready. Please wait a moment and try again.');
  return;
  }
  if (grokBotActive && content.startsWith('/grok ')) {

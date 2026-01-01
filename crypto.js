@@ -237,21 +237,23 @@ async function verifyMessage(signingKey, signature, data) {
 }
 async function deriveSigningKey() {
   try {
-    if (!roomMaster || !(roomMaster instanceof ArrayBuffer)) {
-      throw new Error('Room master key not initialized or invalid');
+    if (!roomMaster) {
+      throw new Error('Room master key not initialized');
     }
-    if (!signingSalt || !(signingSalt instanceof ArrayBuffer)) {
-      throw new Error('Signing salt not initialized or invalid');
+    const roomMasterData = roomMaster instanceof Uint8Array ? roomMaster : roomMaster.buffer;
+    if (!signingSalt) {
+      throw new Error('Signing salt not initialized');
     }
+    const signingSaltData = signingSalt instanceof Uint8Array ? signingSalt : signingSalt.buffer;
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      roomMaster,
+      roomMasterData,
       { name: 'HKDF' },
       false,
       ['deriveKey']
     );
     const key = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt: signingSalt, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
+      { name: 'HKDF', salt: signingSaltData, info: new TextEncoder().encode('signing'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'HMAC', hash: 'SHA-256' },
       false,
@@ -266,21 +268,23 @@ async function deriveSigningKey() {
 }
 async function deriveMessageKey() {
   try {
-    if (!roomMaster || !(roomMaster instanceof ArrayBuffer)) {
-      throw new Error('Room master key not initialized or invalid');
+    if (!roomMaster) {
+      throw new Error('Room master key not initialized');
     }
-    if (!messageSalt || !(messageSalt instanceof ArrayBuffer)) {
-      throw new Error('Message salt not initialized or invalid');
+    const roomMasterData = roomMaster instanceof Uint8Array ? roomMaster : roomMaster.buffer;
+    if (!messageSalt) {
+      throw new Error('Message salt not initialized');
     }
+    const messageSaltData = messageSalt instanceof Uint8Array ? messageSalt : messageSalt.buffer;
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
-      roomMaster,
+      roomMasterData,
       { name: 'HKDF' },
       false,
       ['deriveKey']
     );
     const key = await window.crypto.subtle.deriveKey(
-      { name: 'HKDF', salt: messageSalt, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
+      { name: 'HKDF', salt: messageSaltData, info: new TextEncoder().encode('message'), hash: 'SHA-256' },
       hkdfKey,
       { name: 'AES-GCM', length: 256 },
       false,

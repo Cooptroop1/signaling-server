@@ -239,7 +239,9 @@ socket.onclose = () => {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
     return;
   }
-  const delay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
+  const baseDelay = 5000 * Math.pow(2, reconnectAttempts);
+  const jitter = Math.random() * 2000; // Random jitter up to 2 seconds
+  const delay = Math.min(30000, baseDelay + jitter);
   reconnectAttempts++;
   setTimeout(() => {
     socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
@@ -1091,6 +1093,33 @@ function setupWaitingForJoin(codeParam) {
   pendingCode = codeParam;
   document.getElementById('messageInput')?.focus();
 }
+// BroadcastChannel for multi-tab sync
+const bc = new BroadcastChannel('app-channel');
+bc.onmessage = (event) => {
+  if (event.data.type === 'join') {
+    // Sync join state across tabs, e.g., update UI or prevent duplicate joins
+    console.log('Received join broadcast from another tab:', event.data.code);
+    // Example: If already joined, ignore; else, autoConnect(event.data.code);
+  }
+  // Add more event types as needed
+};
+function broadcastToTabs(type, data) {
+  bc.postMessage({ type, ...data });
+}
+function refreshAccessToken() {
+  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
+    refreshingToken = true;
+    console.log('Proactively refreshing access token');
+    socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
+  } else {
+    console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
+    // On failure, backoff
+    if (refreshingToken) {
+      setTimeout(refreshAccessToken, Math.min(60000, refreshBackoff * 2));
+      refreshBackoff *= 2;
+    }
+  }
+}
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
@@ -1112,17 +1141,35 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   setupLazyObserver();
   loadRecentCodes();
+  setupUserDots();
+  setupToggleRecent();
+  setupModals();
+  setupLoginAndSearch();
+  setupClaimAndLogout();
+  updateLogoutButtonVisibility();
+  setupToggleButtons();
+  setupTotpModals();
+  setupChatButtons();
+  setupInputKeydowns();
+  setupCopyAndButtons();
+  setupCornerLogo();
+});
+function setupUserDots() {
   document.getElementById('userDots').addEventListener('click', (e) => {
     if (e.target.classList.contains('user-dot')) {
       e.target.classList.toggle('active');
     }
   });
+}
+function setupToggleRecent() {
   const toggleRecent = document.getElementById('toggleRecent');
   const recentCodesList = document.getElementById('recentCodesList');
   toggleRecent.addEventListener('click', () => {
     const isHidden = recentCodesList.classList.toggle('hidden');
     toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
   });
+}
+function setupModals() {
   document.getElementById('loginButton').addEventListener('click', () => {
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to switch accounts.');
@@ -1130,32 +1177,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.getElementById('loginModal').classList.add('active');
   });
-  document.getElementById('loginSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    const name = document.getElementById('loginUsernameInput').value.trim();
-    const pass = document.getElementById('loginPasswordInput').value;
-    if (name && pass) {
-      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-    }
-  };
-  document.getElementById('loginCancelButton').onclick = () => {
-    document.getElementById('loginModal').classList.remove('active');
-  };
   document.getElementById('searchUserButton').addEventListener('click', () => {
     document.getElementById('searchUserModal').classList.add('active');
   });
-  document.getElementById('searchSubmitButton').onclick = () => {
-    const name = document.getElementById('searchUsernameInput').value.trim();
-    if (name) {
-      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
-    }
-  };
-  document.getElementById('searchCancelButton').onclick = () => {
-    document.getElementById('searchUserModal').classList.remove('active');
-  };
   document.getElementById('claimUsernameButton').addEventListener('click', () => {
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to claim a new username.');
@@ -1163,79 +1187,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.getElementById('claimUsernameModal').classList.add('active');
   });
-  document.getElementById('claimCancelButton').onclick = () => {
-    document.getElementById('claimUsernameModal').classList.remove('active');
-  };
-  document.getElementById('claimSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to claim a new username.');
-      return;
-    }
-    const name = document.getElementById('claimUsernameInput').value.trim();
-    const pass = document.getElementById('claimPasswordInput').value;
-    if (validateUsername(name) && pass.length >= 8) {
-      generateUserKeypair().then(publicKey => {
-        socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
-      }).catch(error => {
-        console.error('Key generation error:', error);
-        showStatusMessage('Failed to generate keys for claim.');
-      });
-    } else {
-      showStatusMessage('Invalid username or password (min 8 chars).');
-    }
-  };
-  document.getElementById('loginSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    const name = document.getElementById('loginUsernameInput').value.trim();
-    const pass = document.getElementById('loginPasswordInput').value;
-    if (validateUsername(name) && pass.length >= 8) {
-      if (!userPrivateKey) {
-        generateUserKeypair().then(() => {
-          showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
-          socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-        }).catch(error => {
-          console.error('Key generation error:', error);
-          showStatusMessage('Failed to generate keys for login.');
-        });
-      } else {
-        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-      }
-    } else {
-      showStatusMessage('Invalid username or password (min 8 chars).');
-    }
-  };
-  document.getElementById('logoutButton').onclick = () => {
-    console.log('Logout button clicked');
-    logout();
-  };
-  updateLogoutButtonVisibility();
-  document.getElementById('startChatToggleButton').onclick = () => {
-    console.log('Start chat toggle clicked');
-    initialContainer.classList.add('hidden');
-    usernameContainer.classList.remove('hidden');
-    connectContainer.classList.add('hidden');
-    chatContainer.classList.add('hidden');
-    codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
-    statusElement.textContent = 'Enter a username to start a chat';
-    document.getElementById('usernameInput').value = username || '';
-    document.getElementById('usernameInput')?.focus();
-  };
-  document.getElementById('connectToggleButton').onclick = () => {
-    console.log('Connect toggle clicked');
-    initialContainer.classList.add('hidden');
-    usernameContainer.classList.add('hidden');
-    connectContainer.classList.remove('hidden');
-    chatContainer.classList.add('hidden');
-    codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
-    statusElement.textContent = 'Enter a username and code to join a chat';
-    document.getElementById('usernameConnectInput').value = username || '';
-    document.getElementById('usernameConnectInput')?.focus();
-  };
   document.getElementById('start2FAChatButton').onclick = () => {
     document.getElementById('totpOptionsModal').classList.add('active');
     document.getElementById('totpUsernameInput').value = username || '';
@@ -1303,6 +1254,107 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('totpInputModal').classList.remove('active');
     initialContainer.classList.remove('hidden');
   };
+}
+function setupLoginAndSearch() {
+  document.getElementById('loginSubmitButton').onclick = () => {
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to switch accounts.');
+      return;
+    }
+    const name = document.getElementById('loginUsernameInput').value.trim();
+    const pass = document.getElementById('loginPasswordInput').value;
+    if (name && pass) {
+      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+    }
+  };
+  document.getElementById('loginCancelButton').onclick = () => {
+    document.getElementById('loginModal').classList.remove('active');
+  };
+  document.getElementById('searchSubmitButton').onclick = () => {
+    const name = document.getElementById('searchUsernameInput').value.trim();
+    if (name) {
+      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
+    }
+  };
+  document.getElementById('searchCancelButton').onclick = () => {
+    document.getElementById('searchUserModal').classList.remove('active');
+  };
+}
+function setupClaimAndLogout() {
+  document.getElementById('claimCancelButton').onclick = () => {
+    document.getElementById('claimUsernameModal').classList.remove('active');
+  };
+  document.getElementById('claimSubmitButton').onclick = () => {
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to claim a new username.');
+      return;
+    }
+    const name = document.getElementById('claimUsernameInput').value.trim();
+    const pass = document.getElementById('claimPasswordInput').value;
+    if (validateUsername(name) && pass.length >= 8) {
+      generateUserKeypair().then(publicKey => {
+        socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+      }).catch(error => {
+        console.error('Key generation error:', error);
+        showStatusMessage('Failed to generate keys for claim.');
+      });
+    } else {
+      showStatusMessage('Invalid username or password (min 8 chars).');
+    }
+  };
+  document.getElementById('loginSubmitButton').onclick = () => {
+    if (username && token) {
+      showStatusMessage('You are already logged in. Log out first to switch accounts.');
+      return;
+    }
+    const name = document.getElementById('loginUsernameInput').value.trim();
+    const pass = document.getElementById('loginPasswordInput').value;
+    if (validateUsername(name) && pass.length >= 8) {
+      if (!userPrivateKey) {
+        generateUserKeypair().then(() => {
+          showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
+          socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+        }).catch(error => {
+          console.error('Key generation error:', error);
+          showStatusMessage('Failed to generate keys for login.');
+        });
+      } else {
+        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
+      }
+    } else {
+      showStatusMessage('Invalid username or password (min 8 chars).');
+    }
+  };
+  document.getElementById('logoutButton').onclick = () => {
+    console.log('Logout button clicked');
+    logout();
+  };
+}
+function setupToggleButtons() {
+  document.getElementById('startChatToggleButton').onclick = () => {
+    console.log('Start chat toggle clicked');
+    initialContainer.classList.add('hidden');
+    usernameContainer.classList.remove('hidden');
+    connectContainer.classList.add('hidden');
+    chatContainer.classList.add('hidden');
+    codeDisplayElement.classList.add('hidden');
+    copyCodeButton.classList.add('hidden');
+    statusElement.textContent = 'Enter a username to start a chat';
+    document.getElementById('usernameInput').value = username || '';
+    document.getElementById('usernameInput')?.focus();
+  };
+  document.getElementById('connectToggleButton').onclick = () => {
+    console.log('Connect toggle clicked');
+    initialContainer.classList.add('hidden');
+    usernameContainer.classList.add('hidden');
+    connectContainer.classList.remove('hidden');
+    chatContainer.classList.add('hidden');
+    codeDisplayElement.classList.add('hidden');
+    copyCodeButton.classList.add('hidden');
+    statusElement.textContent = 'Enter a username and code to join a chat';
+    document.getElementById('usernameConnectInput').value = username || '';
+    document.getElementById('usernameConnectInput')?.focus();
+  };
   document.getElementById('joinWithUsernameButton').onclick = () => {
     const usernameInput = document.getElementById('usernameInput').value.trim();
     if (!validateUsername(usernameInput)) {
@@ -1326,6 +1378,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (socket.readyState === WebSocket.OPEN && token) {
       console.log('Sending join message for new chat');
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      broadcastToTabs('join', { code });
     } else {
       pendingJoin = { code, clientId, username };
       if (socket.readyState !== WebSocket.OPEN) {
@@ -1334,6 +1387,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (token) {
             socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
             pendingJoin = null;
+            broadcastToTabs('join', { code });
           }
         }, { once: true });
       }
@@ -1369,6 +1423,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (socket.readyState === WebSocket.OPEN && token) {
       console.log('Sending join message for existing chat');
       socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      broadcastToTabs('join', { code });
     } else {
       pendingJoin = { code, clientId, username };
       if (socket.readyState !== WebSocket.OPEN) {
@@ -1377,6 +1432,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (token) {
             socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
             pendingJoin = null;
+            broadcastToTabs('join', { code });
           }
         }, { once: true });
       }
@@ -1409,6 +1465,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('connectToggleButton')?.focus();
     updateLogoutButtonVisibility();
   };
+}
+function setupChatButtons() {
   document.getElementById('sendButton').onclick = () => {
     const messageInput = document.getElementById('messageInput');
     const message = messageInput.value.trim();
@@ -1460,6 +1518,8 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('New session button clicked');
     window.location.href = 'https://anonomoose.com';
   };
+}
+function setupInputKeydowns() {
   document.getElementById('usernameInput').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -1478,6 +1538,8 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('connectButton')?.click();
     }
   });
+}
+function setupCopyAndButtons() {
   document.getElementById('copyCodeButton').onclick = () => {
     const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
     navigator.clipboard.writeText(codeText).then(() => {
@@ -1508,12 +1570,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.getElementById('button2')?.focus();
   };
+}
+function setupCornerLogo() {
   cornerLogo.addEventListener('click', () => {
     document.getElementById('messages').innerHTML = '';
     processedMessageIds.clear();
     showStatusMessage('Chat history cleared locally.');
   });
-});
+}
 async function sendMessage(content) {
   console.log('sendMessage called with content:', content);
   if (!content) {

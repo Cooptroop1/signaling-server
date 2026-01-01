@@ -160,19 +160,31 @@ async function encryptRaw(key, data) {
   try {
     if (typeof data === 'string') data = new TextEncoder().encode(data);
     if (!(data instanceof Uint8Array)) data = new Uint8Array(data);
-    const chunks = [];
-    for (let i = 0; i < data.length; i += ENCRYPT_CHUNK_SIZE) {
-      const chunk = data.slice(i, i + ENCRYPT_CHUNK_SIZE);
+    if (data.length <= ENCRYPT_CHUNK_SIZE) {
+      // Non-chunked for small data
       const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      const encryptedChunk = await window.crypto.subtle.encrypt(
+      const encrypted = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
         key,
-        chunk
+        data
       );
-      chunks.push({ encrypted: arrayBufferToBase64(encryptedChunk), iv: arrayBufferToBase64(iv) });
+      return { encrypted: arrayBufferToBase64(encrypted), iv: arrayBufferToBase64(iv) };
+    } else {
+      // Chunk for large data
+      const chunks = [];
+      for (let i = 0; i < data.length; i += ENCRYPT_CHUNK_SIZE) {
+        const chunk = data.slice(i, i + ENCRYPT_CHUNK_SIZE);
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        const encryptedChunk = await window.crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv },
+          key,
+          chunk
+        );
+        chunks.push({ encrypted: arrayBufferToBase64(encryptedChunk), iv: arrayBufferToBase64(iv) });
+      }
+      // Return array of chunks or serialized form
+      return { chunks }; // Caller can handle as needed
     }
-    // Return array of chunks or serialized form
-    return { chunks }; // Caller can handle as needed
   } catch (error) {
     console.error('encryptRaw error:', error);
     throw new Error('Raw encryption failed');
@@ -225,6 +237,12 @@ async function verifyMessage(signingKey, signature, data) {
 }
 async function deriveSigningKey() {
   try {
+    if (!roomMaster || !(roomMaster instanceof ArrayBuffer)) {
+      throw new Error('Room master key not initialized or invalid');
+    }
+    if (!signingSalt || !(signingSalt instanceof ArrayBuffer)) {
+      throw new Error('Signing salt not initialized or invalid');
+    }
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       roomMaster,
@@ -248,6 +266,12 @@ async function deriveSigningKey() {
 }
 async function deriveMessageKey() {
   try {
+    if (!roomMaster || !(roomMaster instanceof ArrayBuffer)) {
+      throw new Error('Room master key not initialized or invalid');
+    }
+    if (!messageSalt || !(messageSalt instanceof ArrayBuffer)) {
+      throw new Error('Message salt not initialized or invalid');
+    }
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       roomMaster,

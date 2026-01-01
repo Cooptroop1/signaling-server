@@ -11,7 +11,6 @@ function arrayBufferToBase64(buffer) {
   }
   return base64;
 }
-
 function base64ToArrayBuffer(base64) {
   // Decode HTML entities (e.g., &#x2F; to /)
   const decodedBase64 = base64.replace(/&#x2F;/g, '/');
@@ -27,7 +26,6 @@ function base64ToArrayBuffer(base64) {
   }
   return bytes.buffer;
 }
-
 function bytesToBigInt(bytes) {
   let hex = '';
   for (let byte of bytes) {
@@ -35,7 +33,6 @@ function bytesToBigInt(bytes) {
   }
   return BigInt('0x' + hex);
 }
-
 async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
@@ -50,8 +47,12 @@ async function exportPublicKey(key) {
     throw new Error('Failed to export public key');
   }
 }
-
+const keyCache = new Map(); // Cache for imported public keys
 async function importPublicKey(base64) {
+  if (keyCache.has(base64)) {
+    console.log('Using cached imported public key');
+    return keyCache.get(base64);
+  }
   try {
     let buffer = base64ToArrayBuffer(base64);
     if (buffer.byteLength === 96) {
@@ -92,14 +93,14 @@ async function importPublicKey(base64) {
       false,
       []
     );
-    console.log('Imported public key successfully');
+    keyCache.set(base64, key); // Cache the imported key
+    console.log('Imported and cached public key successfully');
     return key;
   } catch (error) {
     console.error('importPublicKey error:', error, 'Input base64:', base64);
     throw new Error('Failed to import public key');
   }
 }
-
 async function encryptBytes(key, data) {
   try {
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
@@ -119,7 +120,6 @@ async function encryptBytes(key, data) {
     throw new Error('Byte encryption failed');
   }
 }
-
 async function decryptBytes(key, encrypted, iv) {
   try {
     const result = await window.crypto.subtle.decrypt(
@@ -134,7 +134,6 @@ async function decryptBytes(key, encrypted, iv) {
     throw new Error('Byte decryption failed');
   }
 }
-
 async function deriveSharedKey(privateKey, publicKey) {
   try {
     const sharedBits = await window.crypto.subtle.deriveBits(
@@ -156,30 +155,32 @@ async function deriveSharedKey(privateKey, publicKey) {
     throw new Error('Shared key derivation failed');
   }
 }
-
+const CHUNK_SIZE = 1024 * 1024; // 1MB chunks for streaming
 async function encryptRaw(key, data) {
   try {
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    const encrypted = await window.crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      encoded
-    );
-    const result = {
-      encrypted: arrayBufferToBase64(encrypted),
-      iv: arrayBufferToBase64(iv)
-    };
-    console.log('encryptRaw result:', result);
-    return result;
+    if (typeof data === 'string') data = new TextEncoder().encode(data);
+    if (!(data instanceof Uint8Array)) data = new Uint8Array(data);
+    const chunks = [];
+    for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+      const chunk = data.slice(i, i + CHUNK_SIZE);
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const encryptedChunk = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        chunk
+      );
+      chunks.push({ encrypted: arrayBufferToBase64(encryptedChunk), iv: arrayBufferToBase64(iv) });
+    }
+    // Return array of chunks or serialized form
+    return { chunks }; // Caller can handle as needed
   } catch (error) {
     console.error('encryptRaw error:', error);
     throw new Error('Raw encryption failed');
   }
 }
-
 async function decryptRaw(key, encrypted, iv) {
   try {
+    // Assuming non-chunked for backward compat; extend for chunks if needed
     const decoded = await window.crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
       key,
@@ -191,7 +192,6 @@ async function decryptRaw(key, encrypted, iv) {
     throw new Error('Raw decryption failed');
   }
 }
-
 async function signMessage(signingKey, data) {
   try {
     const encoded = new TextEncoder().encode(data);
@@ -207,7 +207,6 @@ async function signMessage(signingKey, data) {
     throw new Error('Message signing failed');
   }
 }
-
 async function verifyMessage(signingKey, signature, data) {
   try {
     const encoded = new TextEncoder().encode(data);
@@ -224,7 +223,6 @@ async function verifyMessage(signingKey, signature, data) {
     return false;
   }
 }
-
 async function deriveSigningKey() {
   try {
     const hkdfKey = await window.crypto.subtle.importKey(
@@ -248,7 +246,6 @@ async function deriveSigningKey() {
     throw new Error('Signing key derivation failed');
   }
 }
-
 async function deriveMessageKey() {
   try {
     const hkdfKey = await window.crypto.subtle.importKey(

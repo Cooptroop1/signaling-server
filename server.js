@@ -1,3 +1,4 @@
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -12,35 +13,6 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-const redis = require('redis'); // NEW: Redis client
-
-// NEW: Redis connections (pub/sub clients)
-let pubClient, subClient;
-async function initRedis() {
-  pubClient = redis.createClient({ url: process.env.REDIS_URL });
-  subClient = pubClient.duplicate();
-
-  pubClient.on('error', err => console.error('Redis Pub Client Error', err));
-  subClient.on('error', err => console.error('Redis Sub Client Error', err));
-
-  await pubClient.connect();
-  await subClient.connect();
-
-  // NEW: Subscribe to all room channels for broadcasting
-  await subClient.pSubscribe('room:*', (msg, channel) => {
-    const code = channel.split(':')[1];
-    if (rooms.has(code)) {
-      const parsedMsg = JSON.parse(msg);
-      rooms.get(code).clients.forEach(client => {
-        if (client.ws.readyState === WebSocket.OPEN) {
-          client.ws.send(JSON.stringify(parsedMsg));
-        }
-      });
-      console.log(`Pub/sub broadcast to ${rooms.get(code).clients.size} local clients in ${code}`);
-    }
-  });
-  console.log('Redis pub/sub initialized');
-}
 
 // Hash password
 async function hashPassword(password) {
@@ -1036,23 +1008,27 @@ wss.on('connection', (ws, req) => {
         }
         messageSet.set(data.nonce, data.timestamp);
         const mime = data.mime ? validator.escape(validator.trim(data.mime)) : undefined;
-        // NEW: Use broadcast (which now publishes to Redis) instead of local forEach
-        broadcast(data.code, {
-          type: data.type.replace('relay-', ''),
-          messageId: data.messageId,
-          username: room.clients.get(senderId).username,
-          content: data.content,
-          encryptedContent: data.encryptedContent,
-          data: data.data,
-          encryptedData: data.encryptedData,
-          filename: data.filename,
-          timestamp: data.timestamp,
-          iv: data.iv,
-          signature: data.signature,
-          nonce: data.nonce,
-          mime: mime
+        room.clients.forEach((client, clientId) => {
+          if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify({
+              type: data.type.replace('relay-', ''),
+              messageId: data.messageId,
+              username: room.clients.get(senderId).username,
+              content: data.content,
+              encryptedContent: data.encryptedContent,
+              data: data.data,
+              encryptedData: data.encryptedData,
+              filename: data.filename,
+              timestamp: data.timestamp,
+              iv: data.iv,
+              signature: data.signature,
+              nonce: data.nonce,
+              mime: mime
+            }));
+            console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
+          }
         });
-        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} via pub/sub`);
+        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} to ${room.clients.size - 1} clients`);
         return;
       }
       if (data.type === 'get-stats') {
@@ -1142,15 +1118,6 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'pong') {
         console.log('Received pong from client');
-        return;
-      }
-      if (data.type === 'set-totp') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          totpSecrets.set(data.code, data.secret);
-          broadcast(data.code, { type: 'totp-enabled', code: data.code });
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
-        }
         return;
       }
       if (data.type === 'register-username') {
@@ -1555,9 +1522,17 @@ function generateLogsCSV() {
 }
 
 function broadcast(code, message) {
-  pubClient.publish(`room:${code}`, JSON.stringify(message)).catch(err => {
-    console.error('Redis publish error:', err);
-  });
+  const room = rooms.get(code);
+  if (room) {
+    room.clients.forEach(client => {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify(message));
+      }
+    });
+    console.log(`Broadcasted ${message.type} to ${room.clients.size} clients in code ${code}`);
+  } else {
+    console.warn(`Cannot broadcast: Room ${code} not found`);
+  }
 }
 
 function broadcastRandomCodes() {
@@ -1581,12 +1556,7 @@ function hashUa(ua) {
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
 
-// NEW: Init Redis before starting server
-initRedis().then(() => {
-  server.listen(process.env.PORT || 10000, () => {
-    console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
-  });
-}).catch(err => {
-  console.error('Failed to init Redis:', err);
-  process.exit(1);
+server.listen(process.env.PORT || 10000, () => {
+  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

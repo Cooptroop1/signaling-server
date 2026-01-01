@@ -1,4 +1,3 @@
-
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -694,6 +693,7 @@ wss.on('connection', (ws, req) => {
     }
     try {
       const data = JSON.parse(message);
+      console.log('Received full data:', data); // NEW: Debug full received message
       const loggedData = { ...data };
       if (loggedData.secret) {
         loggedData.secret = '[REDACTED]';

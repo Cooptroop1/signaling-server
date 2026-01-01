@@ -1,3 +1,4 @@
+
 function showStatusMessage(message, duration = 3000) {
   if (typeof statusElement !== 'undefined' && statusElement) {
     statusElement.textContent = message;
@@ -168,32 +169,22 @@ function log(level, ...msg) {
   }
 }
 
-function createMediaModal(type, base64, focusId) {
-  const modalId = `${type}Modal`;
-  const ariaLabel = type === 'image' ? 'Image viewer' : 'Audio player';
-  let modal = document.getElementById(modalId);
+function createImageModal(base64, focusId) {
+  let modal = document.getElementById('imageModal');
   if (!modal) {
     modal = document.createElement('div');
-    modal.id = modalId;
+    modal.id = 'imageModal';
     modal.className = 'modal';
     modal.setAttribute('role', 'dialog');
-    modal.setAttribute('aria-label', ariaLabel);
+    modal.setAttribute('aria-label', 'Image viewer');
     modal.setAttribute('tabindex', '-1');
     document.body.appendChild(modal);
   }
   modal.innerHTML = '';
-  let mediaElement;
-  if (type === 'image') {
-    mediaElement = document.createElement('img');
-    mediaElement.src = base64;
-    mediaElement.setAttribute('alt', 'Enlarged image');
-  } else if (type === 'audio') {
-    mediaElement = document.createElement('audio');
-    mediaElement.src = base64;
-    mediaElement.controls = true;
-    mediaElement.setAttribute('alt', 'Voice message');
-  }
-  modal.appendChild(mediaElement);
+  const modalImg = document.createElement('img');
+  modalImg.src = base64;
+  modalImg.setAttribute('alt', 'Enlarged image');
+  modal.appendChild(modalImg);
   modal.classList.add('active');
   modal.focus();
   modal.addEventListener('click', () => {
@@ -208,12 +199,35 @@ function createMediaModal(type, base64, focusId) {
   });
 }
 
-function createImageModal(base64, focusId) {
-  createMediaModal('image', base64, focusId);
-}
-
 function createAudioModal(base64, focusId) {
-  createMediaModal('audio', base64, focusId);
+  let modal = document.getElementById('audioModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'audioModal';
+    modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Audio player');
+    modal.setAttribute('tabindex', '-1');
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = '';
+  const audio = document.createElement('audio');
+  audio.src = base64;
+  audio.controls = true;
+  audio.setAttribute('alt', 'Voice message');
+  modal.appendChild(audio);
+  modal.classList.add('active');
+  modal.focus();
+  modal.addEventListener('click', () => {
+    modal.classList.remove('active');
+    document.getElementById(focusId)?.focus();
+  });
+  modal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      modal.classList.remove('active');
+      document.getElementById(focusId)?.focus();
+    }
+  });
 }
 
 function generateTotpSecret() {

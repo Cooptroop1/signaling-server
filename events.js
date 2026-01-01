@@ -864,6 +864,11 @@ function refreshAccessToken() {
     socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
   } else {
     console.log('Cannot refresh token: WebSocket not open, no refresh token, or refresh in progress');
+    // On failure, backoff
+    if (refreshingToken) {
+      setTimeout(refreshAccessToken, Math.min(60000, refreshBackoff * 2));
+      refreshBackoff *= 2;
+    }
   }
 }
 async function triggerRatchet() {
@@ -1224,6 +1229,8 @@ function setupModals() {
       showTotpInputModal(code);
     };
   };
+}
+function setupTotpModals() {
   document.querySelectorAll('input[name="totpType"]').forEach(radio => {
     radio.addEventListener('change', () => {
       document.getElementById('customTotpSecretContainer').classList.toggle('hidden', radio.value !== 'custom');

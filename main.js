@@ -168,20 +168,10 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
   const toSign = rawData + nonce;
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, timestamp: jitteredTimestamp }; // FIX: Add timestamp
-  // FIX: Use correct field names for server validation
-  if (type === 'message') {
-    payload.encryptedContent = encrypted; // For text messages
-  } else {
-    payload.encryptedData = encrypted; // For media (image/voice/file)
-    if (type === 'file') {
-      payload.filename = file?.name;
-    }
-    if (data.mime) { // If mime provided
-      payload.mime = data.mime;
-    }
+  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };
+  if (dataToSend && type === 'file') {
+    payload.filename = file?.name;
   }
-  console.log(`Sending relay-${type} with payload:`, payload); // NEW: Debug log
   const jsonString = JSON.stringify(payload);
   let sent = false;
   if (useRelay) {
@@ -423,7 +413,7 @@ function setupDataChannel(dataChannel, targetId) {
   dataChannel.onmessage = async (event) => {
     const now = performance.now();
     const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
-    if (!checkAndUpdateRateLimit(rateLimit, 10, false, 1, 1000) ) {
+    if (!checkAndUpdateRateLimit(rateLimit, 10, false, 1, 1000)) {
       console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
       showStatusMessage('Message rate limit reached, please slow down.');
       return;
@@ -517,7 +507,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedContent && !data.encryptedData)) { // FIX: Check correct fields
+  if (!data.messageId || (!data.encryptedBlob)) {
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -539,8 +529,7 @@ async function processReceivedMessage(data, targetId) {
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     const messageKey = await deriveMessageKey();
-    const encrypted = data.encryptedContent || data.encryptedData; // FIX: Use correct field
-    const rawData = await decryptRaw(messageKey, encrypted, data.iv);
+    const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
     const toVerify = rawData + data.nonce;
     const valid = await verifyMessage(signingKey, data.signature, toVerify);
     if (!valid) {

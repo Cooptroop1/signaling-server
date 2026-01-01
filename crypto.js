@@ -240,11 +240,11 @@ async function deriveSigningKey() {
     if (!roomMaster) {
       throw new Error('Room master key not initialized');
     }
-    const roomMasterData = roomMaster instanceof Uint8Array ? roomMaster : roomMaster.buffer;
+    const roomMasterData = roomMaster instanceof Uint8Array ? roomMaster : new Uint8Array(roomMaster);
     if (!signingSalt) {
       throw new Error('Signing salt not initialized');
     }
-    const signingSaltData = signingSalt instanceof Uint8Array ? signingSalt : signingSalt.buffer;
+    const signingSaltData = signingSalt instanceof Uint8Array ? signingSalt : new Uint8Array(signingSalt);
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       roomMasterData,
@@ -271,11 +271,11 @@ async function deriveMessageKey() {
     if (!roomMaster) {
       throw new Error('Room master key not initialized');
     }
-    const roomMasterData = roomMaster instanceof Uint8Array ? roomMaster : roomMaster.buffer;
+    const roomMasterData = roomMaster instanceof Uint8Array ? roomMaster : new Uint8Array(roomMaster);
     if (!messageSalt) {
       throw new Error('Message salt not initialized');
     }
-    const messageSaltData = messageSalt instanceof Uint8Array ? messageSalt : messageSalt.buffer;
+    const messageSaltData = messageSalt instanceof Uint8Array ? messageSalt : new Uint8Array(messageSalt);
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       roomMasterData,

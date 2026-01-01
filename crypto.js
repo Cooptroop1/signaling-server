@@ -155,14 +155,14 @@ async function deriveSharedKey(privateKey, publicKey) {
     throw new Error('Shared key derivation failed');
   }
 }
-const CHUNK_SIZE = 1024 * 1024; // 1MB chunks for streaming
+const ENCRYPT_CHUNK_SIZE = 1024 * 1024; // 1MB chunks for streaming, renamed to avoid conflict
 async function encryptRaw(key, data) {
   try {
     if (typeof data === 'string') data = new TextEncoder().encode(data);
     if (!(data instanceof Uint8Array)) data = new Uint8Array(data);
     const chunks = [];
-    for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-      const chunk = data.slice(i, i + CHUNK_SIZE);
+    for (let i = 0; i < data.length; i += ENCRYPT_CHUNK_SIZE) {
+      const chunk = data.slice(i, i + ENCRYPT_CHUNK_SIZE);
       const iv = window.crypto.getRandomValues(new Uint8Array(12));
       const encryptedChunk = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },

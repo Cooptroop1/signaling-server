@@ -22,7 +22,8 @@ const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
-let messageQueue = new Map(); // New: Per-target message queue for retries
+let messageQueue = new Map();  // New: Per-target message queue for retries
+
 function appendMessage({ username, timestamp, type, content, isSelf, fileName = null }) {
   const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
@@ -32,6 +33,7 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   messageDiv.appendChild(document.createTextNode(`${username}: `));
+
   if (type === 'image' || type === 'voice' || type === 'file') {
     let element;
     if (type === 'image') {
@@ -61,9 +63,11 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
   } else {
     messageDiv.appendChild(document.createTextNode(content));
   }
+
   messagesElement.prepend(messageDiv);
   messagesElement.scrollTop = 0;
 }
+
 function checkAndUpdateRateLimit(rateObj, maxValue, isSize = false, addValue = 1, windowMs = 60000) {
   const now = performance.now();
   if (now - rateObj.startTime >= windowMs) {
@@ -77,23 +81,28 @@ function checkAndUpdateRateLimit(rateObj, maxValue, isSize = false, addValue = 1
   rateObj[isSize ? 'totalSize' : 'count'] += addValue;
   return true;
 }
+
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   if (!username || (dataChannels.size === 0 && !useRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');
     return;
   }
+
   const now = performance.now();
+
   // Global send rate limit check
   if (!checkAndUpdateRateLimit(globalSendRate, 50)) {
     showStatusMessage('Global message rate limit exceeded (50/min). Please wait.');
     return;
   }
+
   // Client-side size limit check
   const payloadSize = (content || base64 || '').length * 3 / 4; // Approximate byte size
   if (!checkAndUpdateRateLimit(globalSizeRate, 1048576, true, payloadSize)) {
     showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
     return;
   }
+
   let dataToSend = content || base64;
   if (type === 'image' || type === 'file') {
     if (!features.enableImages) {
@@ -106,10 +115,12 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       return;
     }
   }
+
   if (file && file.size > 5 * 1024 * 1024) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
     return;
   }
+
   const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
   const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
   if (!checkAndUpdateRateLimit(rateLimit, 5)) {
@@ -117,12 +128,14 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     return;
   }
   rateLimitsMap.set(clientId, rateLimit);
+
   if (file && type === 'image') {
     const maxWidth = 640;
     const maxHeight = 360;
     let quality = 0.4;
     if (file.size > 3 * 1024 * 1024) quality = 0.3;
     else if (file.size > 1 * 1024 * 1024) quality = 0.35;
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     const img = new Image();
@@ -154,6 +167,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       reader.readAsDataURL(file);
     });
   }
+
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
@@ -169,9 +183,11 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const toSign = rawData + nonce;
   const signature = await signMessage(signingKey, toSign);
   let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };
+
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
   }
+
   const jsonString = JSON.stringify(payload);
   let sent = false;
   if (useRelay) {
@@ -205,6 +221,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     showStatusMessage('Error: No connections.');
     return;
   }
+
   if (sent) {
     appendMessage({ username, timestamp, type, content: sanitizedContent || dataToSend, isSelf: true, fileName: file?.name });
     processedMessageIds.add(messageId);
@@ -215,6 +232,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     }
   }
 }
+
 async function sendMessage(content) {
   if (!content) return;
   if (grokBotActive && content.startsWith('/grok ')) {
@@ -231,6 +249,7 @@ async function sendMessage(content) {
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
 }
+
 async function sendMedia(file, type) {
   const validTypes = {
     image: ['image/jpeg', 'image/png'],
@@ -243,6 +262,7 @@ async function sendMedia(file, type) {
   await prepareAndSendMessage({ type, file });
   document.getElementById(`${type}Button`)?.focus();
 }
+
 // Rest of the code remains the same...
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
@@ -261,7 +281,7 @@ async function startPeerConnection(targetId, isOfferer) {
   }
   const peerConnection = new RTCPeerConnection({
     iceServers: [
-      { urls: "stun:stun.l.google.com:19302" }, // Public fallback
+      { urls: "stun:stun.l.google.com:19302" },  // Public fallback
       { urls: "stun:stun.relay.metered.ca:80" },
       {
         urls: "turn:global.relay.metered.ca:80",
@@ -295,7 +315,28 @@ async function startPeerConnection(targetId, isOfferer) {
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
   }
-  setupIceHandlers(peerConnection, targetId);
+  peerConnection.onicecandidate = (event) => {
+    if (event.candidate) {
+      console.log(`Sending ICE candidate to ${targetId} for code: ${code}`);
+      sendSignalingMessage('candidate', { candidate: event.candidate, targetId });
+    }
+  };
+  peerConnection.onicecandidateerror = (event) => {
+    console.error(`ICE candidate error for ${targetId}: ${event.errorText}, code=${event.errorCode}`);
+    if (event.errorCode !== 701) {
+      const retryCount = retryCounts.get(targetId) || 0;
+      if (retryCount < maxRetries) {
+        retryCounts.set(targetId, retryCount + 1);
+        console.log(`Retrying connection with ${targetId}, attempt ${retryCount + 1}`);
+        startPeerConnection(targetId, isOfferer);
+      }
+    } else {
+      console.log(`Ignoring ICE 701 error for ${targetId}, continuing connection`);
+    }
+  };
+  peerConnection.onicegatheringstatechange = () => {
+    console.log(`ICE gathering state for ${targetId}: ${peerConnection.iceGatheringState}`);
+  };
   peerConnection.onconnectionstatechange = () => {
     console.log(`Connection state for ${targetId}: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
@@ -343,6 +384,9 @@ async function startPeerConnection(targetId, isOfferer) {
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
   };
+  peerConnection.onsignalingstatechange = () => {
+    console.log(`Signaling state for ${targetId}: ${peerConnection.signalingState}`);
+  };
   if (isOfferer) {
     peerConnection.createOffer().then(offer => {
       return peerConnection.setLocalDescription(offer);
@@ -369,30 +413,7 @@ async function startPeerConnection(targetId, isOfferer) {
   }, 10000);
   connectionTimeouts.set(targetId, timeout);
 }
-function setupIceHandlers(peerConnection, targetId) {
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      console.log(`Sending ICE candidate to ${targetId} for code: ${code}`);
-      sendSignalingMessage('candidate', { candidate: event.candidate, targetId });
-    }
-  };
-  peerConnection.onicecandidateerror = (event) => {
-    console.error(`ICE candidate error for ${targetId}: ${event.errorText}, code=${event.errorCode}`);
-    if (event.errorCode !== 701) {
-      const retryCount = retryCounts.get(targetId) || 0;
-      if (retryCount < maxRetries) {
-        retryCounts.set(targetId, retryCount + 1);
-        console.log(`Retrying connection with ${targetId}, attempt ${retryCount + 1}`);
-        startPeerConnection(targetId, isOfferer);
-      }
-    } else {
-      console.log(`Ignoring ICE 701 error for ${targetId}, continuing connection`);
-    }
-  };
-  peerConnection.onicegatheringstatechange = () => {
-    console.log(`ICE gathering state for ${targetId}: ${peerConnection.iceGatheringState}`);
-  };
-}
+
 function setupDataChannel(dataChannel, targetId) {
   console.log('setupDataChannel initialized for targetId:', targetId);
   dataChannel.onopen = () => {
@@ -473,6 +494,7 @@ function setupDataChannel(dataChannel, targetId) {
     }
   };
 }
+
 function processMessageQueue(targetId) {
   if (messageQueue.has(targetId)) {
     const queue = messageQueue.get(targetId);
@@ -486,6 +508,7 @@ function processMessageQueue(targetId) {
     if (queue.length === 0) messageQueue.delete(targetId);
   }
 }
+
 async function processReceivedMessage(data, targetId) {
   if (data.type === 'voice-call-start') {
     if (!voiceCallActive) {
@@ -555,7 +578,7 @@ async function processReceivedMessage(data, targetId) {
     showStatusMessage('Failed to decrypt/verify message.');
     return;
   }
-  appendMessageThrottled({ username: senderUsername, timestamp, type: contentType, content: sanitizeMessage(contentOrData), isSelf: senderUsername === username, fileName: data.filename || 'file' });
+  appendMessage({ username: senderUsername, timestamp, type: contentType, content: sanitizeMessage(contentOrData), isSelf: senderUsername === username, fileName: data.filename || 'file' });
   if (isInitiator) {
     dataChannels.forEach((dc, id) => {
       if (id !== targetId && dc.readyState === 'open') {
@@ -564,17 +587,7 @@ async function processReceivedMessage(data, targetId) {
     });
   }
 }
-// Throttled appendMessage to batch DOM updates
-const appendMessageThrottled = throttle(appendMessage, 100); // Throttle to 100ms
-function throttle(func, delay) {
-  let timeoutId;
-  return (...args) => {
-    if (!timeoutId) {
-      func(...args);
-      timeoutId = setTimeout(() => timeoutId = null, delay);
-    }
-  };
-}
+
 async function handleOffer(offer, targetId) {
   console.log(`Handling offer from ${targetId} for code: ${code}`);
   if (offer.type !== 'offer') {
@@ -602,6 +615,7 @@ async function handleOffer(offer, targetId) {
     console.error(`Error handling offer from ${targetId}:`, error);
   }
 }
+
 async function handleAnswer(answer, targetId) {
   console.log(`Handling answer from ${targetId} for code: ${code}`);
   if (!peerConnections.has(targetId)) {
@@ -629,6 +643,7 @@ async function handleAnswer(answer, targetId) {
     console.error(`Error handling answer from ${targetId}:`, error);
   }
 }
+
 async function handleCandidate(candidate, targetId) {
   console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
   if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
@@ -648,6 +663,7 @@ async function handleCandidate(candidate, targetId) {
     candidatesQueues.set(targetId, queue);
   }
 }
+
 async function processCandidateQueue(peerConnection, queue) {
   for (const item of queue) {
     if (item.type === 'answer') {
@@ -665,6 +681,7 @@ async function processCandidateQueue(peerConnection, queue) {
     }
   }
 }
+
 async function toggleVoiceCall() {
   if (!features.enableVoiceCalls) {
     showStatusMessage('Voice calls are disabled by admin.');
@@ -678,6 +695,7 @@ async function toggleVoiceCall() {
     broadcastVoiceCallEvent('voice-call-start');
   }
 }
+
 function updateAudioTracks(action) {
   peerConnections.forEach((peerConnection, targetId) => {
     if (action === 'add' && localStream) {
@@ -694,6 +712,7 @@ function updateAudioTracks(action) {
     renegotiate(targetId);
   });
 }
+
 async function startVoiceCall() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showStatusMessage('Microphone not supported.');
@@ -712,6 +731,7 @@ async function startVoiceCall() {
     showStatusMessage('Failed to access microphone for voice call.');
   }
 }
+
 function stopVoiceCall() {
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
@@ -724,6 +744,7 @@ function stopVoiceCall() {
   document.getElementById('audioOutputButton').classList.add('hidden');
   showStatusMessage('Voice call ended.');
 }
+
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
   if (peerConnection) {
@@ -734,6 +755,7 @@ async function renegotiate(targetId) {
       return;
     }
     renegotiationCounts.set(targetId, count + 1);
+
     if (!negotiationQueues.has(targetId)) {
       negotiationQueues.set(targetId, Promise.resolve());
     }
@@ -763,6 +785,7 @@ async function renegotiate(targetId) {
     console.log(`No peer connection for ${targetId}, cannot renegotiate.`);
   }
 }
+
 function sendMessageViaSocket(type, additionalData, isRelay = false) {
   if (!token || refreshingToken) {
     console.log('Token missing or refresh in progress, queuing message');
@@ -780,12 +803,15 @@ function sendMessageViaSocket(type, additionalData, isRelay = false) {
     signalingQueue.get('global').push({ type: isRelay ? `relay-${type}` : type, additionalData });
   }
 }
+
 function sendSignalingMessage(type, additionalData) {
   sendMessageViaSocket(type, additionalData, false);
 }
+
 function sendRelayMessage(type, additionalData) {
   sendMessageViaSocket(type, additionalData, true);
 }
+
 function broadcastVoiceCallEvent(eventType) {
   dataChannels.forEach((dataChannel) => {
     if (dataChannel.readyState === 'open') {
@@ -793,6 +819,7 @@ function broadcastVoiceCallEvent(eventType) {
     }
   });
 }
+
 function processSignalingQueue() {
   signalingQueue.forEach((queue, key) => {
     while (queue.length > 0) {
@@ -802,6 +829,7 @@ function processSignalingQueue() {
   });
   signalingQueue.clear();
 }
+
 function updatePrivacyStatus(text) {
   const privacyStatus = document.getElementById('privacyStatus');
   if (privacyStatus) {
@@ -809,6 +837,7 @@ function updatePrivacyStatus(text) {
     privacyStatus.classList.remove('hidden');
   }
 }
+
 function updateUIState(isConnected = false, hasChat = false) {
   initialContainer.classList.toggle('hidden', isConnected || hasChat);
   usernameContainer.classList.toggle('hidden', isConnected || hasChat);
@@ -818,6 +847,7 @@ function updateUIState(isConnected = false, hasChat = false) {
   inputContainer.classList.toggle('hidden', !isConnected);
   messages.classList.toggle('waiting', !isConnected);
 }
+
 async function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
   code = codeParam;
@@ -880,6 +910,7 @@ async function autoConnect(codeParam) {
     document.getElementById('connectToggleButton')?.focus();
   }
 }
+
 function updateFeaturesUI() {
   const imageButton = document.getElementById('imageButton');
   const voiceButton = document.getElementById('voiceButton');
@@ -916,7 +947,7 @@ function updateFeaturesUI() {
     grokButton.title = features.enableGrokBot ? 'Toggle Grok Bot' : 'Grok bot disabled by admin';
   }
   if (!features.enableService) {
-    showStatusMessage(`Service disabled by admin. Disconnecting...`);
+    showStatusMessage('Service disabled by admin. Disconnecting...');
     socket.close();
   }
   if (!features.enableP2P && !features.enableRelay) {
@@ -927,6 +958,7 @@ function updateFeaturesUI() {
     messages.classList.remove('waiting');
   }
 }
+
 async function sendToGrok(query) {
   if (!grokApiKey) {
     showStatusMessage('Error: xAI API key not set. Enter it in the Grok bot settings.');
@@ -952,6 +984,7 @@ async function sendToGrok(query) {
     showStatusMessage('Error querying Grok: ' + error.message + '. Check your API key or visit https://x.ai/api for details.');
   }
 }
+
 function toggleGrokBot() {
   grokBotActive = !grokBotActive;
   const grokButton = document.getElementById('grokButton');
@@ -968,6 +1001,7 @@ function toggleGrokBot() {
     showStatusMessage('Grok bot disabled.');
   }
 }
+
 function saveGrokKey() {
   const keyInput = document.getElementById('grokApiKey');
   grokApiKey = keyInput.value.trim();
@@ -980,14 +1014,15 @@ function saveGrokKey() {
     showStatusMessage('Error: Enter a valid API key.');
   }
 }
+
 async function setAudioOutput(audioElement, targetId) {
   try {
     if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
       if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker'
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default')
+        const targetDevice = audioOutputMode === 'speaker' 
+          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default') 
           : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
         if (targetDevice) {
           await audioElement.setSinkId(targetDevice.deviceId);
@@ -1009,6 +1044,7 @@ async function setAudioOutput(audioElement, targetId) {
     audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
   }
 }
+
 function toggleAudioOutput() {
   audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
   console.log(`Toggling audio output to ${audioOutputMode}`);
@@ -1021,6 +1057,7 @@ function toggleAudioOutput() {
   audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
   showStatusMessage(`Audio output set to ${audioOutputMode}`);
 }
+
 async function startTotpRoom(serverGenerated) {
   const usernameInput = document.getElementById('totpUsernameInput').value.trim();
   if (!validateUsername(usernameInput)) {
@@ -1060,6 +1097,7 @@ async function startTotpRoom(serverGenerated) {
   statusElement.textContent = 'Waiting for connection...';
   document.getElementById('messageInput')?.focus();
 }
+
 function showTotpSecretModal(secret) {
   console.log('Showing TOTP modal with secret:', secret);
   document.getElementById('totpSecretDisplay').textContent = secret;
@@ -1068,9 +1106,11 @@ function showTotpSecretModal(secret) {
   new QRCode(qrCanvas, generateTotpUri(code, secret));
   document.getElementById('totpSecretModal').classList.add('active');
 }
+
 async function joinWithTotp(code, totpCode) {
   socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
 }
+
 function startVoiceRecording() {
   if (!features.enableVoice) {
     showStatusMessage('Voice messages are disabled by admin.');
@@ -1137,11 +1177,13 @@ function startVoiceRecording() {
     showStatusMessage('Failed to access microphone for voice message.');
   });
 }
+
 function stopVoiceRecording() {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }
 }
+
 async function isWebPSupported() {
   const elem = document.createElement('canvas');
   if (!!(elem.getContext && elem.getContext('2d'))) {
@@ -1149,6 +1191,7 @@ async function isWebPSupported() {
   }
   return false;
 }
+
 async function generateThumbnail(dataURL, width = 100, height = 100) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -1164,6 +1207,7 @@ async function generateThumbnail(dataURL, width = 100, height = 100) {
     img.onerror = () => resolve(dataURL); // Fallback to full if error
   });
 }
+
 // New: Cleanup old nonces every 5min
 setInterval(() => {
   const now = Date.now();
@@ -1174,6 +1218,7 @@ setInterval(() => {
   }
   console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
 }, 300000); // 5min
+
 // New: Claim username handler (in socket.onmessage or separate)
 document.getElementById('claimSubmitButton').onclick = async () => {
   const name = document.getElementById('claimUsernameInput').value.trim();
@@ -1182,6 +1227,7 @@ document.getElementById('claimSubmitButton').onclick = async () => {
     socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
   }
 };
+
 // New: Search user handler
 document.getElementById('searchSubmitButton').onclick = () => {
   const name = document.getElementById('searchUsernameInput').value.trim();

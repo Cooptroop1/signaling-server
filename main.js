@@ -168,10 +168,17 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
   const toSign = rawData + nonce;
   const signature = await signMessage(signingKey, toSign);
-  let payload = { messageId, nonce, iv, signature, encryptedBlob: encrypted };
+  let payload = { messageId, nonce, iv, signature };
+  // FIX: Use correct field names for server validation
+  if (type === 'message') {
+    payload.encryptedContent = encrypted; // For text messages
+  } else {
+    payload.encryptedData = encrypted; // For media (image/voice/file)
+  }
   if (dataToSend && type === 'file') {
     payload.filename = file?.name;
   }
+  console.log('Sending payload to server:', payload); // NEW: Debug log
   const jsonString = JSON.stringify(payload);
   let sent = false;
   if (useRelay) {

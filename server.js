@@ -157,9 +157,9 @@ const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
   enableService: true,
   enableImages: true,
-  enableVoice: true,
-  enableVoiceCalls: true,
-  enableAudioToggle: true,
+  enableVoice: false,
+  enableVoiceCalls: false,
+  enableAudioToggle: false,
   enableGrokBot: false,
   enableP2P: true,
   enableRelay: true
@@ -178,9 +178,9 @@ async function loadFeatures() {
       features = {
         enableService: true,
         enableImages: true,
-        enableVoice: true,
-        enableVoiceCalls: true,
-        enableAudioToggle: true,
+        enableVoice: false,
+        enableVoiceCalls: false,
+        enableAudioToggle: false,
         enableGrokBot: false,
         enableP2P: true,
         enableRelay: true
@@ -1558,3 +1558,4 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

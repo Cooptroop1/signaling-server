@@ -172,17 +172,22 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     messageId,
     nonce,
     iv,
-    signature,
-    timestamp: jitteredTimestamp  // Add this (server requires timestamp as number)
+    signature
   };
 
-  if (type === 'message') {
-    payload.encryptedContent = encrypted;
-  } else {
-    payload.encryptedData = encrypted;
-    if (file?.type) {
-      payload.mime = file.type;  // Add mime for image/voice/file (optional, but server validates if provided)
+  if (useRelay) {
+    payload.timestamp = jitteredTimestamp;
+    if (type === 'message') {
+      payload.encryptedContent = encrypted;
+    } else {
+      payload.encryptedData = encrypted;
+      if (file?.type) {
+        payload.mime = file.type;
+      }
     }
+  } else {
+    payload.encryptedBlob = encrypted;
+    payload.timestamp = jitteredTimestamp;  // Add for consistency, though P2P receive uses metadata.timestamp
   }
 
   if (type === 'file') {

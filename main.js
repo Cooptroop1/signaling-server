@@ -197,7 +197,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const jsonString = JSON.stringify(payload);
   let sent = false;
   if (useRelay) {
-    sendMessageViaSocket(`relay-${type}`, payload, true);
+    sendMessageViaSocket(type, payload, true);
     sent = true;
   } else if (dataChannels.size > 0) {
     dataChannels.forEach((dataChannel, id) => {
@@ -529,7 +529,7 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedBlob)) {
+  if (!data.messageId || (!data.encryptedBlob && !data.encryptedContent && !data.encryptedData)) {
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -551,7 +551,8 @@ async function processReceivedMessage(data, targetId) {
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     const messageKey = await deriveMessageKey();
-    const rawData = await decryptRaw(messageKey, data.encryptedBlob, data.iv);
+    const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
+    const rawData = await decryptRaw(messageKey, encrypted, data.iv);
     const toVerify = rawData + data.nonce;
     const valid = await verifyMessage(signingKey, data.signature, toVerify);
     if (!valid) {

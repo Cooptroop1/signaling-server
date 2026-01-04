@@ -590,6 +590,7 @@ socket.onmessage = async (event) => {
         signingSalt = base64ToArrayBuffer(payload.signingSalt);
         messageSalt = base64ToArrayBuffer(payload.messageSalt);
         signingKey = await deriveSigningKey();
+        keyVersion = 1;  // Set initial version
         console.log('Room master, salts successfully imported.');
         if (useRelay) {
           isConnected = true;
@@ -609,8 +610,8 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'new-room-key' && message.targetId === clientId) {
-      if (message.version <= keyVersion) {
-        console.log(`Ignoring outdated key version ${message.version} (current: ${keyVersion})`);
+      if (!message.version || !Number.isInteger(message.version) || message.version <= keyVersion) {
+        console.log(`Ignoring outdated or invalid key version ${message.version} (current: ${keyVersion})`);
         return;
       }
       try {

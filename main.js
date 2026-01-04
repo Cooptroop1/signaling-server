@@ -156,7 +156,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   }
   const messageId = generateMessageId();
   const timestamp = Date.now();
-  const jitter = Math.floor(Math.random() * 61) - 30; // ±30s jitter
+  const jitter = Math.floor(Math.random() * 31) * -1000; // 0 to -30s
   const jitteredTimestamp = timestamp + jitter * 1000;
   const nonce = crypto.randomUUID();
   const sanitizedContent = content ? sanitizeMessage(content) : null;

@@ -302,7 +302,7 @@ socket.onmessage = async (event) => {
         setTimeout(() => {
           claimError.textContent = '';
         }, 5000);
-          document.getElementById('claimUsernameInput').value = '';
+        document.getElementById('claimUsernameInput').value = '';
         document.getElementById('claimPasswordInput').value = '';
         document.getElementById('claimUsernameInput')?.focus();
         return;
@@ -668,7 +668,7 @@ socket.onmessage = async (event) => {
           const encrypted = payload.encryptedContent || payload.encryptedData;
           const iv = payload.iv;
           const rawData = await decryptRaw(messageKey, encrypted, iv);
-          const toVerify = rawData + payload.nonce + payload.timestamp.toString();
+          const toVerify = rawData + payload.nonce;
           const valid = await verifyMessage(signingKey, payload.signature, toVerify);
           if (!valid) {
             console.warn(`Invalid signature for relay message`);

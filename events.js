@@ -449,7 +449,7 @@ socket.onmessage = async (event) => {
           showTotpSecretModal(pendingTotpSecret.display);
           pendingTotpSecret = null;
         }
-        // setInterval(triggerRatchet, 5 * 60 * 1000);  // Temporarily disabled to troubleshoot
+        // setInterval(triggerRatchet, 5 * 60 * 1000); // Temporarily disabled to avoid key desync
         if (useRelay) {
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
@@ -665,9 +665,9 @@ socket.onmessage = async (event) => {
       if (payload.encryptedContent || payload.encryptedData) {
         try {
           const messageKey = await deriveMessageKey();
-          const encryptedBuffer = base64ToArrayBuffer(payload.encryptedContent || payload.encryptedData);
-          const ivBuffer = base64ToArrayBuffer(payload.iv);
-          const rawData = await decryptRaw(messageKey, encryptedBuffer, ivBuffer);
+          const encrypted = payload.encryptedContent || payload.encryptedData;
+          const iv = payload.iv;
+          const rawData = await decryptRaw(messageKey, encrypted, iv);
           const toVerify = rawData + payload.nonce;
           const valid = await verifyMessage(signingKey, payload.signature, toVerify);
           if (!valid) {

@@ -667,14 +667,28 @@ socket.onmessage = async (event) => {
           const messageKey = await deriveMessageKey();
           const encrypted = payload.encryptedContent || payload.encryptedData;
           const iv = payload.iv;
-          contentOrData = await decryptRaw(messageKey, encrypted, iv);
-          const toVerify = contentOrData + payload.timestamp;
+          const rawData = await decryptRaw(messageKey, encrypted, iv);
+          const toVerify = rawData + payload.nonce;
           const valid = await verifyMessage(signingKey, payload.signature, toVerify);
           if (!valid) {
             console.warn(`Invalid signature for relay message`);
             showStatusMessage('Invalid message signature detected.');
             return;
           }
+          let metadataStr = '';
+          let braceCount = 0;
+          for (let i = 0; i < rawData.length; i++) {
+            metadataStr += rawData[i];
+            if (rawData[i] === '{') braceCount++;
+            if (rawData[i] === '}') braceCount--;
+            if (braceCount === 0 && metadataStr.startsWith('{')) break;
+          }
+          const metadata = JSON.parse(metadataStr);
+          senderUsername = metadata.username;
+          timestamp = metadata.timestamp;
+          contentType = metadata.type;
+          let contentOrData = rawData.substring(metadataStr.length);
+          displayContent = (contentType === 'message') ? contentOrData.trimEnd() : contentOrData;
         } catch (error) {
           console.error(`Decryption/verification failed for relay message:`, error);
           showStatusMessage('Failed to decrypt/verify message.');
@@ -683,29 +697,29 @@ socket.onmessage = async (event) => {
       }
       if (message.type === 'image') {
         const img = document.createElement('img');
-        img.src = contentOrData;
+        img.src = displayContent;
         img.style.maxWidth = '100%';
         img.style.borderRadius = '0.5rem';
         img.style.cursor = 'pointer';
         img.setAttribute('alt', 'Received image');
-        img.addEventListener('click', () => createImageModal(contentOrData, 'messageInput'));
+        img.addEventListener('click', () => createImageModal(displayContent, 'messageInput'));
         messageDiv.appendChild(img);
       } else if (message.type === 'voice') {
         const audio = document.createElement('audio');
-        audio.src = contentOrData;
+        audio.src = displayContent;
         audio.controls = true;
         audio.setAttribute('alt', 'Received voice message');
-        audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
+        audio.addEventListener('click', () => createAudioModal(displayContent, 'messageInput'));
         messageDiv.appendChild(audio);
       } else if (message.type === 'file') {
         const link = document.createElement('a');
-        link.href = contentOrData;
+        link.href = displayContent;
         link.download = payload.filename || 'file';
         link.textContent = `Download ${payload.filename || 'file'}`;
         link.setAttribute('alt', 'Received file');
         messageDiv.appendChild(link);
       } else {
-        messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
+        messageDiv.appendChild(document.createTextNode(sanitizeMessage(displayContent)));
       }
       messages.prepend(messageDiv);
       messages.scrollTop = 0;

@@ -449,7 +449,8 @@ socket.onmessage = async (event) => {
           showTotpSecretModal(pendingTotpSecret.display);
           pendingTotpSecret = null;
         }
-        setInterval(triggerRatchet, 5 * 60 * 1000);
+        // Comment out to disable ratchet temporarily
+        // setInterval(triggerRatchet, 5 * 60 * 1000);
         if (useRelay) {
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {

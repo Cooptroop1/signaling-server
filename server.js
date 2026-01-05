@@ -51,11 +51,9 @@ const redisClient = redis.createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379' // Use env var from Render
 });
 redisClient.on('error', err => console.error('Redis Client Error', err));
-await redisClient.connect();
 
 const pubClient = redisClient;
 const subClient = redisClient.duplicate();
-await subClient.connect();
 
 const subscribed = new Set(); // Track subscribed rooms
 
@@ -84,6 +82,13 @@ const messageHandler = async (msg, channel) => {
     console.log(`Relayed via pub/sub ${parsed.messageType} from ${senderId} in code ${code} to ${room.clients.size - 1} clients`);
   }
 };
+
+// Connect to Redis asynchronously
+(async () => {
+  await redisClient.connect();
+  await subClient.connect();
+  console.log('Connected to Redis');
+})();
 
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -1056,8 +1061,11 @@ wss.on('connection', (ws, req) => {
           senderId: senderId
         };
         const pubJson = JSON.stringify(pubObj);
-        await pubClient.publish(`room:${data.code}`, pubJson);
-        console.log(`Published ${data.type} from ${senderId} to Redis channel room:${data.code}`);
+        pubClient.publish(`room:${data.code}`, pubJson).then(() => {
+          console.log(`Published ${data.type} from ${senderId} to Redis channel room:${data.code}`);
+        }).catch(err => {
+          console.error('Redis publish error:', err);
+        });
 
         return;
       }

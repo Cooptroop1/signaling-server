@@ -675,6 +675,7 @@ socket.onmessage = async (event) => {
         console.warn(`Rejecting relay message with timestamp ${message.timestamp} (now: ${now})`);
         return;
       }
+      // Added rate limit check for relay messages
       let rateMap;
       let maxCount = 10;
       if (message.type === 'message') {
@@ -684,7 +685,7 @@ socket.onmessage = async (event) => {
         maxCount = 5;
       } else if (message.type === 'voice') {
         rateMap = voiceRateLimits;
-        maxCount = 50; // Higher limit for voice to avoid rate limit issues
+        maxCount = 100; // Increased limit for voice to avoid rate limit issues
       } else if (message.type === 'file') {
         rateMap = imageRateLimits;
         maxCount = 5;
@@ -738,18 +739,25 @@ socket.onmessage = async (event) => {
         messageDiv.appendChild(timeSpan);
         messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
         let mime = message.mime;
-        let defaultMime = 'text/plain';
-        if (contentType === 'image') defaultMime = 'image/jpeg';
-        if (contentType === 'voice') defaultMime = 'audio/webm';
-        if (contentType === 'file' && !mime && message.filename) {
-          const ext = message.filename.split('.').pop().toLowerCase();
-          const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', webm: 'audio/webm' };
-          mime = mimeMap[ext] || 'application/octet-stream';
-        }
-        if (contentType !== 'message') {
-          contentOrData = `data:${mime || defaultMime};base64,${base64Data}`;
-        } else {
+        if (contentType === 'message') {
           contentOrData = base64Data;
+        } else {
+          let defaultMime = 'application/octet-stream';
+          if (contentType === 'image') defaultMime = 'image/jpeg';
+          if (contentType === 'voice') defaultMime = 'audio/webm';
+          if (contentType === 'file' && !mime && message.filename) {
+            const ext = message.filename.split('.').pop().toLowerCase();
+            const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', webm: 'audio/webm' };
+            mime = mimeMap[ext] || defaultMime;
+          }
+          if (base64Data.startsWith('data:')) {
+            contentOrData = base64Data;
+          } else {
+            if (!mime && contentType === 'image') {
+              mime = detectImageMime(base64Data) || defaultMime;
+            }
+            contentOrData = `data:${mime || defaultMime};base64,${base64Data}`;
+          }
         }
         if (contentType === 'image') {
           const img = document.createElement('img');

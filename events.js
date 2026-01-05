@@ -675,7 +675,6 @@ socket.onmessage = async (event) => {
         console.warn(`Rejecting relay message with timestamp ${message.timestamp} (now: ${now})`);
         return;
       }
-      // Added rate limit check for relay messages
       let rateMap;
       let maxCount = 10;
       if (message.type === 'message') {

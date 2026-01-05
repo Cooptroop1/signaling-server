@@ -238,6 +238,32 @@ function logout() {
   showStatusMessage('Logged out successfully.');
   document.getElementById('startChatToggleButton')?.focus();
 }
+function endChat() {
+  if (socket.readyState === WebSocket.OPEN && code && token) {
+    socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
+  }
+  processedMessageIds.clear();
+  connectedClients.clear();
+  peerConnections.forEach((pc) => pc.close());
+  peerConnections.clear();
+  dataChannels.forEach((dc) => dc.close());
+  dataChannels.clear();
+  initialContainer.classList.remove('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  chatContainer.classList.add('hidden');
+  codeDisplayElement.classList.add('hidden');
+  copyCodeButton.classList.add('hidden');
+  newSessionButton.classList.add('hidden');
+  maxClientsContainer.classList.add('hidden');
+  inputContainer.classList.add('hidden');
+  messages.classList.remove('waiting');
+  messages.innerHTML = '';
+  statusElement.textContent = 'Start a new chat or connect to an existing one';
+  updateLogoutButtonVisibility();
+  showStatusMessage('Chat ended.');
+  document.getElementById('startChatToggleButton')?.focus();
+}
 socket.onopen = () => {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
@@ -437,6 +463,8 @@ socket.onmessage = async (event) => {
         socket.close();
         updateLogoutButtonVisibility();
         return;
+      } else if (message.message.includes('Target client not found or offline')) {
+        showStatusMessage('The other user is offline or not found.');
       } else {
         showStatusMessage(message.message);
       }

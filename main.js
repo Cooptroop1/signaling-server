@@ -157,7 +157,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const messageId = generateMessageId();
   const timestamp = Date.now();
   const jitter = Math.floor(Math.random() * 31) * -1000; // 0 to -30s
-  const jitteredTimestamp = timestamp + jitter * 1000;
+  const jitteredTimestamp = timestamp + jitter;
   const nonce = crypto.randomUUID();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
   const messageKey = await deriveMessageKey();
@@ -174,7 +174,6 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     iv,
     signature
   };
-
   if (useRelay) {
     payload.timestamp = jitteredTimestamp;
     if (type === 'message') {
@@ -187,13 +186,11 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     }
   } else {
     payload.encryptedBlob = encrypted;
-    payload.timestamp = jitteredTimestamp;  // Add for consistency, though P2P receive uses metadata.timestamp
+    payload.timestamp = jitteredTimestamp; // Add for consistency, though P2P receive uses metadata.timestamp
   }
-
   if (type === 'file') {
     payload.filename = file?.name;
   }
-
   const jsonString = JSON.stringify(payload);
   let sent = false;
   if (useRelay) {

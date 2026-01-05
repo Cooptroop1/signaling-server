@@ -1,3 +1,4 @@
+
 // generateUserKeypair moved to top to ensure it's defined before onclick handlers
 async function generateUserKeypair() {
   try {
@@ -572,7 +573,6 @@ socket.onmessage = async (event) => {
           clientId,
           token
         }));
-        await triggerRatchet();
       } catch (error) {
         console.error('Error handling public-key:', error);
         showStatusMessage('Key exchange failed.');
@@ -687,7 +687,9 @@ socket.onmessage = async (event) => {
           const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', webm: 'audio/webm' };
           mime = mimeMap[ext] || 'application/octet-stream';
         }
-        // Do not prepend for non-message, as contentOrData is already data URL
+        if (contentType !== 'message') {
+          contentOrData = `data:${mime || defaultMime};base64,${contentOrData}`;
+        }
         if (contentType === 'image') {
           const img = document.createElement('img');
           img.dataset.src = contentOrData;

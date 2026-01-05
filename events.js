@@ -4,7 +4,7 @@ function detectImageMime(base64) {
     const bin = atob(base64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) {
-      arr[i] = bin.charCodeAt(0);
+      arr[i] = bin.charCodeAt(i);
     }
     // PNG signature
     if (arr[0] === 137 && arr[1] === 80 && arr[2] === 78 && arr[3] === 71 && arr[4] === 13 && arr[5] === 10 && arr[6] === 26 && arr[7] === 10) {
@@ -698,7 +698,8 @@ socket.onmessage = async (event) => {
         const senderUsername = metadata.username;
         const timestamp = metadata.timestamp;
         const contentType = metadata.type;
-        let contentOrData = rawData.substring(metadataStr.length).trimEnd();
+        let base64Data = rawData.substring(metadataStr.length).trimEnd();
+        let contentOrData;
         const messages = document.getElementById('messages');
         const isSelf = senderUsername === username;
         const messageDiv = document.createElement('div');
@@ -709,23 +710,27 @@ socket.onmessage = async (event) => {
         messageDiv.appendChild(timeSpan);
         messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
         let mime = message.mime;
-        let defaultMime = 'text/plain';
-        if (contentType === 'image') defaultMime = 'image/jpeg';
-        if (contentType === 'voice') defaultMime = 'audio/webm';
-        if (contentType === 'file' && !mime && message.filename) {
-          const ext = message.filename.split('.').pop().toLowerCase();
-          const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', webm: 'audio/webm' };
-          mime = mimeMap[ext] || 'application/octet-stream';
-        }
-        if (contentType !== 'message') {
-          contentOrData = `data:${mime || defaultMime};base64,${contentOrData}`;
+        if (contentType === 'message') {
+          contentOrData = base64Data;
+        } else {
+          let defaultMime = 'application/octet-stream';
+          if (contentType === 'image') defaultMime = 'image/jpeg';
+          if (contentType === 'voice') defaultMime = 'audio/webm';
+          if (contentType === 'file' && !mime && message.filename) {
+            const ext = message.filename.split('.').pop().toLowerCase();
+            const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', webm: 'audio/webm' };
+            mime = mimeMap[ext] || defaultMime;
+          }
+          if (base64Data.startsWith('data:')) {
+            contentOrData = base64Data;
+          } else {
+            if (!mime && contentType === 'image') {
+              mime = detectImageMime(base64Data) || defaultMime;
+            }
+            contentOrData = `data:${mime || defaultMime};base64,${base64Data}`;
+          }
         }
         if (contentType === 'image') {
-          // Added: Detect mime if not provided
-          if (!mime) {
-            mime = detectImageMime(contentOrData) || 'image/jpeg';  // Note: here contentOrData is still the base64, not the data URL yet
-          }
-          contentOrData = `data:${mime};base64,${rawData.substring(metadataStr.length).trimEnd()}`;  // Reconstruct with detected mime
           const img = document.createElement('img');
           img.dataset.src = contentOrData;
           img.style.maxWidth = '100%';

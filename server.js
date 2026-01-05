@@ -13,20 +13,22 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-const redis = require('redis'); // Added for Redis pub/sub
 
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
+
 // Validate password
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
+
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false } // For Render Postgres
 });
+
 // Test DB connection on startup
 dbPool.connect(async (err) => {
   if (err) {
@@ -37,6 +39,7 @@ dbPool.connect(async (err) => {
     await loadAggregatedStats();
   }
 });
+
 // Clean up old offline messages (TTL: 24 hours)
 setInterval(async () => {
   try {
@@ -47,52 +50,9 @@ setInterval(async () => {
   }
 }, 24 * 60 * 60 * 1000); // Run daily
 
-// Added: Redis setup
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379' // Use env var from Render
-});
-redisClient.on('error', err => console.error('Redis Client Error', err));
-
-const pubClient = redisClient;
-const subClient = redisClient.duplicate();
-
-const subscribed = new Set(); // Track subscribed rooms
-
-// Added: Redis message handler for pub/sub
-const messageHandler = async (msg, channel) => {
-  const code = channel.slice(5); // 'room:' prefix
-  const room = rooms.get(code);
-  if (!room) {
-    console.warn(`No room found for channel ${channel}`);
-    return;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(msg);
-  } catch (err) {
-    console.error('Invalid pub/sub message:', err);
-    return;
-  }
-  if (parsed.type === 'relay') {
-    const { clientMessage, senderId } = parsed;
-    room.clients.forEach((client, clientId) => {
-      if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(clientMessage);
-      }
-    });
-    console.log(`Relayed via pub/sub ${parsed.messageType} from ${senderId} in code ${code} to ${room.clients.size - 1} clients`);
-  }
-};
-
-// Connect to Redis asynchronously
-(async () => {
-  await redisClient.connect();
-  await subClient.connect();
-  console.log('Connected to Redis');
-})();
-
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
+
 let server;
 if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
   server = http.createServer();
@@ -104,6 +64,7 @@ if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !f
   });
   console.log('Using HTTPS server for local development');
 }
+
 server.on('request', (req, res) => {
   const proto = req.headers['x-forwarded-proto'];
   if (proto && proto !== 'https') {
@@ -155,6 +116,7 @@ server.on('request', (req, res) => {
     res.end(data);
   });
 });
+
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
 const dailyUsers = new Map();
@@ -204,6 +166,7 @@ let features = {
   enableRelay: true
 };
 let aggregatedStats = { daily: {} };
+
 async function loadFeatures() {
   try {
     const res = await dbPool.query('SELECT * FROM features LIMIT 1');
@@ -229,6 +192,7 @@ async function loadFeatures() {
     console.error('Error loading features from DB:', err.message, err.stack);
   }
 }
+
 async function saveFeatures() {
   try {
     await dbPool.query(
@@ -249,6 +213,7 @@ async function saveFeatures() {
     console.error('Error saving features to DB:', err.message, err.stack);
   }
 }
+
 async function loadAggregatedStats() {
   try {
     const res = await dbPool.query('SELECT data FROM aggregated_stats LIMIT 1');
@@ -263,6 +228,7 @@ async function loadAggregatedStats() {
     console.error('Error loading aggregatedStats from DB:', err.message, err.stack);
   }
 }
+
 async function saveAggregatedStats() {
   try {
     await dbPool.query('UPDATE aggregated_stats SET data = $1', [JSON.stringify(aggregatedStats)]);
@@ -271,9 +237,11 @@ async function saveAggregatedStats() {
     console.error('Error saving aggregatedStats to DB:', err.message, err.stack);
   }
 }
+
 function isValidBase32(str) {
   return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16;
 }
+
 function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -284,6 +252,7 @@ function isValidBase64(str) {
   if (!isValid) console.warn('Invalid base64 detected:', str);
   return isValid;
 }
+
 function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
@@ -550,6 +519,7 @@ function validateMessage(data) {
   }
   return { valid: true };
 }
+
 if (fs.existsSync(LOG_FILE)) {
   const logContent = fs.readFileSync(LOG_FILE, 'utf8');
   const lines = logContent.split('\n');
@@ -559,6 +529,7 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
+
 setInterval(() => {
   randomCodes.forEach(code => {
     if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
@@ -568,6 +539,7 @@ setInterval(() => {
   broadcastRandomCodes();
   console.log('Auto-cleaned random codes.');
 }, 3600000);
+
 const pingInterval = setInterval(() => {
   wss.clients.forEach(ws => {
     if (ws.isAlive === false) return ws.terminate();
@@ -575,6 +547,7 @@ const pingInterval = setInterval(() => {
     ws.ping();
   });
 }, 50000);
+
 setInterval(() => {
   const now = Date.now();
   revokedTokens.forEach((expiry, token) => {
@@ -595,6 +568,7 @@ setInterval(() => {
   });
   console.log(`Cleaned up expired revoked tokens and message IDs. Tokens: ${revokedTokens.size}, Messages: ${processedMessageIds.size}`);
 }, 600000);
+
 function checkAdminSecret(data, ws) {
   if (data.secret === ADMIN_SECRET) {
     return true;
@@ -603,6 +577,7 @@ function checkAdminSecret(data, ws) {
     return false;
   }
 }
+
 function revokeTokens(clientId) {
   const tokens = clientTokens.get(clientId);
   if (tokens) {
@@ -620,6 +595,7 @@ function revokeTokens(clientId) {
     }
   }
 }
+
 async function safeQuery(query, params, ws, errorMsg) {
   try {
     return await dbPool.query(query, params);
@@ -629,6 +605,7 @@ async function safeQuery(query, params, ws, errorMsg) {
     throw err;
   }
 }
+
 function forwardMessage(code, targetId, message, ws, fromId, isInitiator = false) {
   if (rooms.has(code)) {
     const room = rooms.get(code);
@@ -641,6 +618,7 @@ function forwardMessage(code, targetId, message, ws, fromId, isInitiator = false
     }
   }
 }
+
 function restrictLimit(map, key, increment, threshold, windowMs = 60000, logMsgPrefix) {
   const now = Date.now();
   const limit = map.get(key) || { value: 0, startTime: now };
@@ -657,6 +635,7 @@ function restrictLimit(map, key, increment, threshold, windowMs = 60000, logMsgP
   }
   return true;
 }
+
 wss.on('connection', (ws, req) => {
   const origin = req.headers.origin;
   if (!ALLOWED_ORIGINS.includes(origin)) {
@@ -848,12 +827,6 @@ wss.on('connection', (ws, req) => {
         }
         if (!rooms.has(code)) {
           rooms.set(code, { initiator: clientId, clients: new Map(), maxClients: 2 });
-          // Added: Subscribe to new room channel
-          if (!subscribed.has(code)) {
-            await subClient.subscribe(`room:${code}`, messageHandler);
-            subscribed.add(code);
-            console.log(`Subscribed to Redis channel room:${code}`);
-          }
           ws.send(JSON.stringify({ type: 'init', clientId, maxClients: 2, isInitiator: true, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
           logStats({ clientId, username, code, event: 'init', totalClients: 1 });
         } else {
@@ -1035,39 +1008,27 @@ wss.on('connection', (ws, req) => {
         }
         messageSet.set(data.nonce, data.timestamp);
         const mime = data.mime ? validator.escape(validator.trim(data.mime)) : undefined;
-
-        // Prepare client message object
-        const clientMessageObj = {
-          type: data.type.replace('relay-', ''),
-          messageId: data.messageId,
-          username: room.clients.get(senderId).username,
-          content: data.content,
-          encryptedContent: data.encryptedContent,
-          data: data.data,
-          encryptedData: data.encryptedData,
-          filename: data.filename,
-          timestamp: data.timestamp,
-          iv: data.iv,
-          signature: data.signature,
-          nonce: data.nonce,
-          mime: mime
-        };
-        const clientJson = JSON.stringify(clientMessageObj);
-
-        // Publish to Redis
-        const pubObj = {
-          type: 'relay',
-          messageType: data.type, // For logging
-          clientMessage: clientJson,
-          senderId: senderId
-        };
-        const pubJson = JSON.stringify(pubObj);
-        pubClient.publish(`room:${data.code}`, pubJson).then(() => {
-          console.log(`Published ${data.type} from ${senderId} to Redis channel room:${data.code}`);
-        }).catch(err => {
-          console.error('Redis publish error:', err);
+        room.clients.forEach((client, clientId) => {
+          if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) {
+            client.ws.send(JSON.stringify({
+              type: data.type.replace('relay-', ''),
+              messageId: data.messageId,
+              username: room.clients.get(senderId).username,
+              content: data.content,
+              encryptedContent: data.encryptedContent,
+              data: data.data,
+              encryptedData: data.encryptedData,
+              filename: data.filename,
+              timestamp: data.timestamp,
+              iv: data.iv,
+              signature: data.signature,
+              nonce: data.nonce,
+              mime: mime
+            }));
+            console.log(`Relayed ${data.type} from ${senderId} to ${clientId} in code ${data.code}`);
+          }
         });
-
+        console.log(`Relayed ${data.type} from ${senderId} in code ${data.code} to ${room.clients.size - 1} clients`);
         return;
       }
       if (data.type === 'get-stats') {
@@ -1157,15 +1118,6 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'pong') {
         console.log('Received pong from client');
-        return;
-      }
-      if (data.type === 'set-totp') {
-        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
-          totpSecrets.set(data.code, data.secret);
-          broadcast(data.code, { type: 'totp-enabled', code: data.code });
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
-        }
         return;
       }
       if (data.type === 'register-username') {
@@ -1313,12 +1265,6 @@ wss.on('connection', (ws, req) => {
             randomCodes.delete(ws.code);
             totpSecrets.delete(ws.code);
             processedMessageIds.delete(ws.code);
-            // Added: Unsubscribe from room channel
-            if (subscribed.has(ws.code)) {
-              await subClient.unsubscribe(`room:${ws.code}`);
-              subscribed.delete(ws.code);
-              console.log(`Unsubscribed from Redis channel room:${ws.code}`);
-            }
             broadcast(ws.code, {
               type: 'client-disconnected',
               clientId: ws.clientId,
@@ -1367,12 +1313,6 @@ wss.on('connection', (ws, req) => {
         randomCodes.delete(ws.code);
         totpSecrets.delete(ws.code);
         processedMessageIds.delete(ws.code);
-        // Added: Unsubscribe from room channel
-        if (subscribed.has(ws.code)) {
-          await subClient.unsubscribe(`room:${ws.code}`);
-          subscribed.delete(ws.code);
-          console.log(`Unsubscribed from Redis channel room:${ws.code}`);
-        }
         broadcast(ws.code, {
           type: 'client-disconnected',
           clientId: ws.clientId,
@@ -1406,6 +1346,7 @@ wss.on('connection', (ws, req) => {
     }
   });
 });
+
 function incrementFailure(ip, ua) {
   const hashedIp = hashIp(ip);
   const hashedUa = hashUa(ua);
@@ -1435,14 +1376,17 @@ function incrementFailure(ip, ua) {
     ipFailureCounts.delete(key);
   }
 }
+
 function validateUsername(username) {
   const regex = /^[a-zA-Z0-9]{1,16}$/;
   return username && regex.test(username);
 }
+
 function validateCode(code) {
   const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
   return code && regex.test(code);
 }
+
 function logStats(data) {
   const timestamp = new Date().toISOString();
   const day = timestamp.slice(0, 10);
@@ -1480,6 +1424,7 @@ function logStats(data) {
     }
   });
 }
+
 function rotateAuditLog() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -1500,8 +1445,10 @@ function rotateAuditLog() {
   });
   fs.writeFileSync(currentFile, '');
 }
+
 rotateAuditLog();
 setInterval(rotateAuditLog, 24 * 60 * 60 * 1000);
+
 function updateLogFile() {
   const now = new Date();
   const day = now.toISOString().slice(0, 10);
@@ -1520,6 +1467,7 @@ function updateLogFile() {
   aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
   saveAggregatedStats();
 }
+
 fs.writeFileSync(LOG_FILE, '', (err) => {
   if (err) console.error('Error creating log file:', err);
   else {
@@ -1527,6 +1475,7 @@ fs.writeFileSync(LOG_FILE, '', (err) => {
     setInterval(updateLogFile, UPDATE_INTERVAL);
   }
 });
+
 function computeAggregate(days) {
   const now = new Date();
   let users = 0, connections = 0;
@@ -1541,6 +1490,7 @@ function computeAggregate(days) {
   }
   return { users, connections };
 }
+
 // New: Generate CSV for stats
 function generateStatsCSV() {
   let csv = 'Period,Users,Connections\n';
@@ -1556,6 +1506,7 @@ function generateStatsCSV() {
   csv += `All-Time,${allTimeUsers.size},N/A\n`;
   return csv;
 }
+
 // New: Generate CSV for logs (combine LOG_FILE and AUDIT_FILE)
 function generateLogsCSV() {
   let csv = 'Timestamp,Event\n';
@@ -1569,6 +1520,7 @@ function generateLogsCSV() {
   });
   return csv;
 }
+
 function broadcast(code, message) {
   const room = rooms.get(code);
   if (room) {
@@ -1582,6 +1534,7 @@ function broadcast(code, message) {
     console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
+
 function broadcastRandomCodes() {
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
@@ -1590,9 +1543,11 @@ function broadcastRandomCodes() {
   });
   console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
 }
+
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
 }
+
 function hashUa(ua) {
   if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
   const parser = new UAParser(ua);
@@ -1600,6 +1555,9 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
+
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+
+

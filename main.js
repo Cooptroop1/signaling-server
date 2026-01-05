@@ -409,7 +409,7 @@ async function startPeerConnection(targetId, isOfferer) {
         cleanupPeerConnection(targetId);
       }
     }
-  }, 10000);
+  }, 20000);
   connectionTimeouts.set(targetId, timeout);
 }
 function setupDataChannel(dataChannel, targetId) {

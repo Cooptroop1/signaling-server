@@ -572,7 +572,6 @@ socket.onmessage = async (event) => {
           clientId,
           token
         }));
-        await triggerRatchet();
       } catch (error) {
         console.error('Error handling public-key:', error);
         showStatusMessage('Key exchange failed.');

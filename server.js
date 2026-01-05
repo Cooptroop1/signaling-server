@@ -1,3 +1,4 @@
+
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -1353,7 +1354,7 @@ wss.on('connection', (ws, req) => {
       incrementFailure(clientIp, ws.userAgent);
     }
   });
-  ws.on('close', async () => {
+  ws.on('close', () => {
     revokeTokens(ws.clientId);
     if (ws.code && rooms.has(ws.code)) {
       const room = rooms.get(ws.code);

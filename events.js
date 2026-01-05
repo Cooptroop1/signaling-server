@@ -1,3 +1,33 @@
+// Add this new function at the top
+function detectImageMime(base64) {
+  try {
+    const bin = atob(base64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) {
+      arr[i] = bin.charCodeAt(0);
+    }
+    // PNG signature
+    if (arr[0] === 137 && arr[1] === 80 && arr[2] === 78 && arr[3] === 71 && arr[4] === 13 && arr[5] === 10 && arr[6] === 26 && arr[7] === 10) {
+      return 'image/png';
+    }
+    // JPEG signature
+    if (arr[0] === 255 && arr[1] === 216 && arr[2] === 255) {
+      return 'image/jpeg';
+    }
+    // GIF signature
+    if (arr[0] === 71 && arr[1] === 73 && arr[2] === 70 && arr[3] === 56) {
+      return 'image/gif';
+    }
+    // WEBP signature
+    if (bin.slice(0, 4) === 'RIFF' && bin.slice(8, 12) === 'WEBP') {
+      return 'image/webp';
+    }
+    return null;
+  } catch (e) {
+    console.error('Mime detection error:', e);
+    return null;
+  }
+}
 
 // generateUserKeypair moved to top to ensure it's defined before onclick handlers
 async function generateUserKeypair() {
@@ -691,6 +721,11 @@ socket.onmessage = async (event) => {
           contentOrData = `data:${mime || defaultMime};base64,${contentOrData}`;
         }
         if (contentType === 'image') {
+          // Added: Detect mime if not provided
+          if (!mime) {
+            mime = detectImageMime(contentOrData) || 'image/jpeg';  // Note: here contentOrData is still the base64, not the data URL yet
+          }
+          contentOrData = `data:${mime};base64,${rawData.substring(metadataStr.length).trimEnd()}`;  // Reconstruct with detected mime
           const img = document.createElement('img');
           img.dataset.src = contentOrData;
           img.style.maxWidth = '100%';

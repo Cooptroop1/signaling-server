@@ -48,7 +48,7 @@ function processSignalingQueue() {
 let reconnectAttempts = 0;
 const imageRateLimits = new Map();
 const voiceRateLimits = new Map();
-let globalMessageRate = { count: 0, startTime: Date.now() };
+let globalMessageRate = { count: 0, startTime: performance.now() };
 function generateCode() {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   const randomBytes = window.crypto.getRandomValues(new Uint8Array(16));
@@ -648,7 +648,7 @@ socket.onmessage = async (event) => {
       try {
         const messageKey = await deriveMessageKey();
         let rawData = await decryptRaw(messageKey, encrypted, message.iv);
-        const toVerify = rawData + message.nonce + message.timestamp;
+        const toVerify = rawData + message.nonce;
         const valid = await verifyMessage(signingKey, message.signature, toVerify);
         if (!valid) {
           console.warn(`Invalid signature for relay message`);

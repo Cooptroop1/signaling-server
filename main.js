@@ -432,7 +432,7 @@ function setupDataChannel(dataChannel, targetId) {
   dataChannel.onmessage = async (event) => {
     const now = performance.now();
     const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
-    if (!checkAndUpdateRateLimit(rateLimit, 10, false, 1, 1000)) {
+    if (!checkAndUpdateRateLimit(rateLimit, 50, false, 1, 1000)) {
       console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
       showStatusMessage('Message rate limit reached, please slow down.');
       return;

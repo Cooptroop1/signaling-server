@@ -555,6 +555,7 @@ socket.onmessage = async (event) => {
       if (totalClients <= 1) {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
+        endChat();
       }
       return;
     }

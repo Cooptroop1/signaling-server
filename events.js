@@ -685,7 +685,7 @@ socket.onmessage = async (event) => {
         maxCount = 5;
       } else if (message.type === 'voice') {
         rateMap = voiceRateLimits;
-        maxCount = 100; // Increased limit for voice to avoid rate limit issues
+        maxCount = 200; // Further increased limit for voice
       } else if (message.type === 'file') {
         rateMap = imageRateLimits;
         maxCount = 5;

@@ -1353,7 +1353,7 @@ wss.on('connection', (ws, req) => {
       incrementFailure(clientIp, ws.userAgent);
     }
   });
-  ws.on('close', () => {
+  ws.on('close', async () => {
     revokeTokens(ws.clientId);
     if (ws.code && rooms.has(ws.code)) {
       const room = rooms.get(ws.code);

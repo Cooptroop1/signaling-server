@@ -88,6 +88,10 @@ const messageHandler = async (msg, channel) => {
   await redisClient.connect();
   await subClient.connect();
   console.log('Connected to Redis');
+  // Added: Load initial randomCodes from Redis
+  const randomCodesFromRedis = await redisClient.sMembers('randomCodes');
+  randomCodesFromRedis.forEach(code => randomCodes.add(code));
+  console.log(`Loaded ${randomCodes.size} random codes from Redis`);
 })();
 
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
@@ -128,7 +132,7 @@ server.on('request', (req, res) => {
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +  // Updated: Added new server origins here
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com wss://signaling-server-2.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +  // Updated with all servers
         "object-src 'none'; base-uri 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
@@ -558,10 +562,11 @@ if (fs.existsSync(LOG_FILE)) {
   });
   console.log(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
 }
-setInterval(() => {
-  randomCodes.forEach(code => {
+setInterval(async () => {
+  randomCodes.forEach(async code => {
     if (!rooms.has(code) || rooms.get(code).clients.size === 0) {
       randomCodes.delete(code);
+      await redisClient.sRem('randomCodes', code);
     }
   });
   broadcastRandomCodes();
@@ -955,8 +960,12 @@ wss.on('connection', (ws, req) => {
           return;
         }
         if (rooms.get(data.code)?.initiator === data.clientId) {
-          randomCodes.add(data.code);
-          broadcastRandomCodes();
+          // Added: Add to Redis Set and local Set
+          const added = await redisClient.sAdd('randomCodes', data.code);
+          if (added) {
+            randomCodes.add(data.code);
+            broadcastRandomCodes();
+          }
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
@@ -964,11 +973,15 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'get-random-codes') {
-        ws.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+        // Updated: Fetch from Redis for global sync
+        const codes = await redisClient.sMembers('randomCodes');
+        ws.send(JSON.stringify({ type: 'random-codes', codes }));
         return;
       }
       if (data.type === 'remove-random-code') {
         if (randomCodes.has(data.code)) {
+          // Added: Remove from Redis and local Set
+          await redisClient.sRem('randomCodes', data.code);
           randomCodes.delete(data.code);
           broadcastRandomCodes();
           console.log(`Removed code ${data.code} from randomCodes`);
@@ -1309,6 +1322,8 @@ wss.on('connection', (ws, req) => {
           logStats({ clientId: ws.clientId, code: ws.code, event: 'logout', totalClients: room.clients.size, isInitiator });
           if (room.clients.size === 0 || isInitiator) {
             rooms.delete(ws.code);
+            // Added: Remove from Redis if was random
+            await redisClient.sRem('randomCodes', ws.code);
             randomCodes.delete(ws.code);
             totpSecrets.delete(ws.code);
             processedMessageIds.delete(ws.code);
@@ -1363,6 +1378,8 @@ wss.on('connection', (ws, req) => {
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.clients.size, isInitiator });
       if (room.clients.size === 0 || isInitiator) {
         rooms.delete(ws.code);
+        // Added: Remove from Redis if was random
+        await redisClient.sRem('randomCodes', ws.code);
         randomCodes.delete(ws.code);
         totpSecrets.delete(ws.code);
         processedMessageIds.delete(ws.code);
@@ -1581,13 +1598,14 @@ function broadcast(code, message) {
     console.warn(`Cannot broadcast: Room ${code} not found`);
   }
 }
-function broadcastRandomCodes() {
+async function broadcastRandomCodes() {
+  const codes = await redisClient.sMembers('randomCodes');
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ type: 'random-codes', codes: Array.from(randomCodes) }));
+      client.send(JSON.stringify({ type: 'random-codes', codes }));
     }
   });
-  console.log(`Broadcasted random codes to all clients: ${Array.from(randomCodes)}`);
+  console.log(`Broadcasted random codes to all clients: ${codes}`);
 }
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
@@ -1602,4 +1620,3 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-

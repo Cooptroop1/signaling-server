@@ -128,7 +128,7 @@ server.on('request', (req, res) => {
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +  // Updated: Added new server origins here
         "object-src 'none'; base-uri 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
@@ -1602,3 +1602,4 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

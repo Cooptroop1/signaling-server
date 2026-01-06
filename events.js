@@ -129,7 +129,7 @@ let lazyObserver;
 if (typeof window !== 'undefined') {
   // In events.js, replace the socket creation with this:
 const serverUrls = [
-  'wss://signaling-server.onrender.com',  // server1
+  'wss://signaling-server-zc6m.onrender.com',  // server1
   'wss://signaling-server-1.onrender.com' // server2
 ];
 const serverIndex = Math.floor(Math.random() * serverUrls.length); // Randomly pick a server

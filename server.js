@@ -212,17 +212,26 @@ async function loadFeatures() {
     const res = await dbPool.query('SELECT * FROM features LIMIT 1');
     if (res.rows.length > 0) {
       features = res.rows[0];
+      // Normalize to camelCase if DB has lowercase (for backward compat)
+      features.enableService = features.enableservice !== undefined ? features.enableservice : features.enableService;
+      features.enableImages = features.enableimages !== undefined ? features.enableimages : features.enableImages;
+      features.enableVoice = features.enablevoice !== undefined ? features.enablevoice : features.enableVoice;
+      features.enableVoiceCalls = features.enablevoicecalls !== undefined ? features.enablevoicecalls : features.enableVoiceCalls;
+      features.enableAudioToggle = features.enableaudiotoggle !== undefined ? features.enableaudiotoggle : features.enableAudioToggle;
+      features.enableGrokBot = features.enablegrokbot !== undefined ? features.enablegrokbot : features.enableGrokBot;
+      features.enableP2P = features.enablep2p !== undefined ? features.enablep2p : features.enableP2P;
+      features.enableRelay = features.enablerelay !== undefined ? features.enablerelay : features.enableRelay;
     } else {
       await dbPool.query(
-        'INSERT INTO features (enableService, enableImages, enableVoice, enableVoiceCalls, enableAudioToggle, enableGrokBot, enableP2P, enableRelay) VALUES (true, true, true, true, true, true, true, true)'
+        'INSERT INTO features ("enableService", "enableImages", "enableVoice", "enableVoiceCalls", "enableAudioToggle", "enableGrokBot", "enableP2P", "enableRelay") VALUES (true, true, true, true, true, true, true, true)'
       );
       features = {
         enableService: true,
         enableImages: true,
-        enableVoice: false,
-        enableVoiceCalls: false,
-        enableAudioToggle: false,
-        enableGrokBot: false,
+        enableVoice: true,
+        enableVoiceCalls: true,
+        enableAudioToggle: true,
+        enableGrokBot: true,
         enableP2P: true,
         enableRelay: true
       };
@@ -235,7 +244,7 @@ async function loadFeatures() {
 async function saveFeatures() {
   try {
     await dbPool.query(
-      'UPDATE features SET enableService=$1, enableImages=$2, enableVoice=$3, enableVoiceCalls=$4, enableAudioToggle=$5, enableGrokBot=$6, enableP2P=$7, enableRelay=$8',
+      'UPDATE features SET "enableService"=$1, "enableImages"=$2, "enableVoice"=$3, "enableVoiceCalls"=$4, "enableAudioToggle"=$5, "enableGrokBot"=$6, "enableP2P"=$7, "enableRelay"=$8',
       [
         features.enableService,
         features.enableImages,
@@ -1620,4 +1629,5 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+
 

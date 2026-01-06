@@ -127,13 +127,19 @@ let userPublicKey; // Added: Will be set if needed
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
 if (typeof window !== 'undefined') {
-  socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-  console.log('WebSocket created');
-  if (getCookie('clientId')) {
-    clientId = getCookie('clientId');
-  } else {
-    setCookie('clientId', clientId, 365);
-  }
+  // In events.js, replace the socket creation with this:
+const serverUrls = [
+  'wss://signaling-server.onrender.com',  // server1
+  'wss://signaling-server-1.onrender.com' // server2
+];
+const serverIndex = Math.floor(Math.random() * serverUrls.length); // Randomly pick a server
+socket = new WebSocket(serverUrls[serverIndex]);
+console.log(`WebSocket created, connected to ${serverUrls[serverIndex]}`);
+if (getCookie('clientId')) {
+  clientId = getCookie('clientId');
+} else {
+  setCookie('clientId', clientId, 365);
+}
   username = localStorage.getItem('username')?.trim() || '';
   globalMessageRate.startTime = performance.now();
   statusElement = document.getElementById('status');

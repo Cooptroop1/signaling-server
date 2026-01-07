@@ -1209,8 +1209,9 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
           return;
         }
-        if (data.timestamp > now) {
-          logger.warn(`Future timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp}`);
+        // Updated: Allow small future tolerance to handle clock skew (e.g., 30 seconds)
+        if (data.timestamp > now + 30000) {
+          logger.warn(`Future timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp} (now: ${now})`);
           ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
           return;
         }

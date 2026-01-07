@@ -14,7 +14,6 @@ const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const redis = require('redis');
 const winston = require('winston');
-const DailyRotateFile = require('winston-daily-rotate-file');
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
@@ -50,16 +49,12 @@ const userLogger = winston.createLogger({
     new winston.transports.File({ filename: path.join(__dirname, 'user_counts.log') })
   ]
 });
-// Audit logger with daily rotation
+// Audit logger without rotation
 const auditLogger = winston.createLogger({
   format: winston.format.simple(),
   transports: [
-    new DailyRotateFile({
-      filename: path.join(__dirname, 'audit-%DATE%.log'),
-      datePattern: 'YYYY-MM-DD',
-      zippedArchive: true,
-      maxSize: '20m',
-      maxFiles: '7d'
+    new winston.transports.File({
+      filename: path.join(__dirname, 'audit.log')
     })
   ]
 });

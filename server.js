@@ -1,5 +1,3 @@
-const cluster = require('cluster');
-const os = require('os');
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -417,8 +415,8 @@ function validateMessage(data) {
       }
       break;
     case 'set-max-clients':
-      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2) {
-        return { valid: false, error: 'set-max-clients: maxClients must be number >=2' };
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
+        return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
       }
       if (!data.code) {
         return { valid: false, error: 'set-max-clients: code required' };
@@ -1006,13 +1004,6 @@ wss.on('connection', (ws, req) => {
         const totalClients = currentSize;
         const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients };
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
-        // Remove from random if totalClients >=2 and was random
-        if (!isInitiatorLocal && totalClients >= 2 && randomCodes.has(code)) {
-          await redisClient.sRem('randomCodes', code);
-          randomCodes.delete(code);
-          broadcastRandomCodes();
-          console.log(`Removed code ${code} from randomCodes as it has been picked`);
-        }
         return;
       }
       if (data.type === 'check-totp') {
@@ -1031,7 +1022,7 @@ wss.on('connection', (ws, req) => {
         }
         if (data.clientId === rooms.get(data.code).initiator) {
           const room = rooms.get(data.code);
-          room.maxClients = data.maxClients;
+          room.maxClients = Math.min(data.maxClients, 10);
           await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients }), { EX: 86400 });
           const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
           const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients };
@@ -1685,18 +1676,6 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
-if (cluster.isMaster) {
-  const numCPUs = os.cpus().length;
-  console.log(`Master ${process.pid} is running. Forking ${numCPUs} workers...`);
-  for (let i = 0; i < numCPUs; i++) {
-    cluster.fork();
-  }
-  cluster.on('exit', (worker, code, signal) => {
-    console.log(`Worker ${worker.process.pid} died. Forking a new one...`);
-    cluster.fork();
-  });
-} else {
-  server.listen(process.env.PORT || 10000, () => {
-    console.log(`Worker ${process.pid} running on port ${process.env.PORT || 10000}`);
-  });
-}
+server.listen(process.env.PORT || 10000, () => {
+  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});

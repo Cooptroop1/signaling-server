@@ -415,8 +415,8 @@ function validateMessage(data) {
       }
       break;
     case 'set-max-clients':
-      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
-        return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2) {
+        return { valid: false, error: 'set-max-clients: maxClients must be number >=2' };
       }
       if (!data.code) {
         return { valid: false, error: 'set-max-clients: code required' };
@@ -1004,6 +1004,13 @@ wss.on('connection', (ws, req) => {
         const totalClients = currentSize;
         const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients };
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
+        // Remove from random if totalClients >=2 and was random
+        if (!isInitiatorLocal && totalClients >= 2 && randomCodes.has(code)) {
+          await redisClient.sRem('randomCodes', code);
+          randomCodes.delete(code);
+          broadcastRandomCodes();
+          console.log(`Removed code ${code} from randomCodes as it has been picked`);
+        }
         return;
       }
       if (data.type === 'check-totp') {
@@ -1022,7 +1029,7 @@ wss.on('connection', (ws, req) => {
         }
         if (data.clientId === rooms.get(data.code).initiator) {
           const room = rooms.get(data.code);
-          room.maxClients = Math.min(data.maxClients, 10);
+          room.maxClients = data.maxClients;
           await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients }), { EX: 86400 });
           const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
           const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients };

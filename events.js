@@ -28,7 +28,6 @@ function detectImageMime(base64) {
     return null;
   }
 }
-
 // generateUserKeypair moved to top to ensure it's defined before onclick handlers
 async function generateUserKeypair() {
   try {
@@ -126,15 +125,17 @@ let userPrivateKey = localStorage.getItem('userPrivateKey'); // Added: Load from
 let userPublicKey; // Added: Will be set if needed
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
+let intentionalClose = false; // New: Flag for intentional closes
+const serverUrls = [
+  'wss://signaling-server-zc6m.onrender.com',
+  'wss://signaling-server-1.onrender.com',
+  'wss://signaling-server.onrender.com' // Add more if available
+];
+let currentServerIndex = Math.floor(Math.random() * serverUrls.length);
 if (typeof window !== 'undefined') {
   // In events.js, replace the socket creation with this:
-const serverUrls = [
-  'wss://signaling-server-zc6m.onrender.com',  // server1
-  'wss://signaling-server-1.onrender.com' // server2
-];
-const serverIndex = Math.floor(Math.random() * serverUrls.length); // Randomly pick a server
-socket = new WebSocket(serverUrls[serverIndex]);
-console.log(`WebSocket created, connected to ${serverUrls[serverIndex]}`);
+socket = new WebSocket(serverUrls[currentServerIndex]);
+console.log(`WebSocket created, connected to ${serverUrls[currentServerIndex]}`);
 if (getCookie('clientId')) {
   clientId = getCookie('clientId');
 } else {
@@ -209,6 +210,7 @@ function updateLogoutButtonVisibility() {
   }
 }
 function logout() {
+  intentionalClose = true;
   if (socket.readyState === WebSocket.OPEN && token) {
     socket.send(JSON.stringify({ type: 'logout', clientId, token }));
   }
@@ -245,6 +247,7 @@ function logout() {
   document.getElementById('startChatToggleButton')?.focus();
 }
 function endChat() {
+  intentionalClose = true;
   if (socket.readyState === WebSocket.OPEN && code && token) {
     socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
   }
@@ -254,6 +257,7 @@ function endChat() {
   peerConnections.clear();
   dataChannels.forEach((dc) => dc.close());
   dataChannels.clear();
+  socket.close();
   initialContainer.classList.remove('hidden');
   usernameContainer.classList.add('hidden');
   connectContainer.classList.add('hidden');
@@ -289,6 +293,10 @@ socket.onopen = () => {
     copyCodeButton.classList.add('hidden');
   }
   updateLogoutButtonVisibility();
+  // If this is a reconnect to a different server and we were in a room, rejoin
+  if (code && username) {
+    pendingJoin = { code, clientId, username };
+  }
 };
 socket.onerror = (error) => {
   console.error('WebSocket error:', error);
@@ -298,18 +306,25 @@ socket.onerror = (error) => {
 socket.onclose = () => {
   console.log('WebSocket closed');
   stopKeepAlive();
+  if (intentionalClose) {
+    intentionalClose = false;
+    return;
+  }
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
     return;
   }
+  // Switch to next server
+  currentServerIndex = (currentServerIndex + 1) % serverUrls.length;
   const delay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
   reconnectAttempts++;
   setTimeout(() => {
-    socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+    socket = new WebSocket(serverUrls[currentServerIndex]);
     socket.onopen = socket.onopen;
     socket.onerror = socket.onerror;
     socket.onclose = socket.onclose;
     socket.onmessage = socket.onmessage;
+    showStatusMessage(`Changed server to ${new URL(serverUrls[currentServerIndex]).hostname}`);
   }, delay);
 };
 socket.onmessage = async (event) => {
@@ -339,6 +354,11 @@ socket.onmessage = async (event) => {
       }
       processSignalingQueue();
       updateLogoutButtonVisibility();
+      // If pending join (from reconnect), send join
+      if (pendingJoin) {
+        socket.send(JSON.stringify({ type: 'join', ...pendingJoin, token }));
+        pendingJoin = null;
+      }
       return;
     }
     if (message.type === 'token-refreshed') {

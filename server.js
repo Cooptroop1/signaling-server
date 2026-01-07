@@ -143,8 +143,8 @@ const messageHandler = async (msg, channel) => {
       client.ws.send(JSON.stringify({ type: parsed.type, message: `You have been ${parsed.type}ed from the room.` }));
       client.ws.close();
       room.clients.delete(targetId);
-      await redisClient.hIncrBy(`room:${code}`, 'client_count', -1);
-      const newTotal = await redisClient.hGet(`room:${code}`, 'client_count');
+      await redisClient.incrBy(`room:${code}:client_count`, -1);
+      const newTotal = await redisClient.get(`room:${code}:client_count`);
       pubClient.publish(`room:${code}`, JSON.stringify({ type: 'client-disconnected', clientId: targetId, totalClients: parseInt(newTotal), isInitiator: targetId === room.initiator }));
     }
   } else if (parsed.type === 'initiator-changed') {

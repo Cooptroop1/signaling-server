@@ -1,4 +1,3 @@
-
 // Add this new function at the top
 function detectImageMime(base64) {
   try {
@@ -29,7 +28,6 @@ function detectImageMime(base64) {
     return null;
   }
 }
-
 // generateUserKeypair moved to top to ensure it's defined before onclick handlers
 async function generateUserKeypair() {
   try {
@@ -130,7 +128,7 @@ let lazyObserver;
 if (typeof window !== 'undefined') {
   // In events.js, replace the socket creation with this:
 const serverUrls = [
-  'wss://signaling-server-zc6m.onrender.com',  // server1
+  'wss://signaling-server-zc6m.onrender.com', // server1
   'wss://signaling-server-1.onrender.com' // server2
 ];
 const serverIndex = Math.floor(Math.random() * serverUrls.length); // Randomly pick a server

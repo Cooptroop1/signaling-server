@@ -450,8 +450,9 @@ function validateMessage(data) {
       }
       break;
     case 'set-max-clients':
-      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > 10) {
-        return { valid: false, error: 'set-max-clients: maxClients must be number between 2 and 10' };
+      const maxLimit = features.enableP2P ? 10 : 50;
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > maxLimit) {
+        return { valid: false, error: `set-max-clients: maxClients must be number between 2 and ${maxLimit}` };
       }
       if (!data.code) {
         return { valid: false, error: 'set-max-clients: code required' };
@@ -1068,8 +1069,9 @@ wss.on('connection', (ws, req) => {
           return;
         }
         if (data.clientId === rooms.get(data.code).initiator) {
+          const maxLimit = features.enableP2P ? 10 : 50;
           const room = rooms.get(data.code);
-          room.maxClients = Math.min(data.maxClients, 10);
+          room.maxClients = Math.min(data.maxClients, maxLimit);
           await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients }), { EX: 86400 });
           const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
           const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients };

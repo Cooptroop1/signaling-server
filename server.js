@@ -641,10 +641,10 @@ if (fs.existsSync(LOG_FILE)) {
 setInterval(async () => {
   for (const code of [...randomCodes]) {
     const clientsKey = `room:${code}:clients`;
-    const size = await redisClient.sCard(clientsKey);
+    const size = await redisClient.scard(clientsKey);
     if (size === 0) {
       randomCodes.delete(code);
-      await redisClient.sRem('randomCodes', code);
+      await redisClient.srem('randomCodes', code);
     }
   }
   broadcastRandomCodes();
@@ -667,10 +667,10 @@ setInterval(async () => {
   // Clean old nonces
   const nonceKeys = await redisClient.keys('room:*:nonces');
   for (const key of nonceKeys) {
-    const nonces = await redisClient.hGetAll(key);
+    const nonces = await redisClient.hgetall(key);
     for (const [nonce, ts] of Object.entries(nonces)) {
       if (now - parseInt(ts) > 300000) {
-        await redisClient.hDel(key, nonce);
+        await redisClient.hdel(key, nonce);
       }
     }
   }
@@ -1726,6 +1726,6 @@ if (cluster.isMaster) {
   });
 } else {
   server.listen(process.env.PORT || 10000, () => {
-    logger.info(`Worker ${process.pid} running on port ${process.env.PORT || 10000}`);
+    logger.info(`Worker ${process.pid} running on port ${process.env || 10000}`);
   });
 }

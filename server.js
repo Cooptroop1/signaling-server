@@ -282,7 +282,6 @@ async function loadFeatures() {
     const res = await dbPool.query('SELECT * FROM features LIMIT 1');
     if (res.rows.length > 0) {
       features = res.rows[0];
-      // Normalize to camelCase if DB has lowercase (for backward compat)
       features.enableService = features.enableservice !== undefined ? features.enableservice : features.enableService;
       features.enableImages = features.enableimages !== undefined ? features.enableimages : features.enableImages;
       features.enableVoice = features.enablevoice !== undefined ? features.enablevoice : features.enableVoice;
@@ -500,12 +499,6 @@ function validateMessage(data) {
       break;
     case 'get-random-codes':
       break;
-    // New: Add validation for clear-random-codes
-    case 'clear-random-codes':
-      if (!data.secret || typeof data.secret !== 'string') {
-        return { valid: false, error: 'clear-random-codes: secret required as string' };
-      }
-      break;
     case 'relay-message':
       if ((!data.content && !data.encryptedContent && !data.data && !data.encryptedData) || typeof (data.content || data.encryptedContent || data.data || data.encryptedData) !== 'string') {
         return { valid: false, error: 'relay-message: content, encryptedContent, data, or encryptedData required as string' };
@@ -604,6 +597,10 @@ function validateMessage(data) {
       }
       if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
         return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
+      }
+      // Updated: Allow public_key in login for key update
+      if (data.public_key && !isValidBase64(data.public_key)) {
+        return { valid: false, error: 'login-username: invalid public_key (base64)' };
       }
       break;
     case 'find-user':
@@ -1371,7 +1368,7 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'login-username') {
-        const { username, password } = data;
+        const { username, password, public_key } = data; // Updated: Allow public_key
         if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
           const res = await safeQuery('SELECT * FROM users WHERE username = $1', [username], ws, 'Failed to login.');
           if (res.rows.length === 0) {
@@ -1384,7 +1381,16 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid login credentials.' }));
             return;
           }
-          await safeQuery('UPDATE users SET client_id = $1, last_active = CURRENT_TIMESTAMP WHERE id = $2', [data.clientId, user.id], ws, 'Failed to login.');
+          // Updated: Update public_key if provided
+          const updateParams = [data.clientId, new Date(), user.id];
+          let updateQuery = 'UPDATE users SET client_id = $1, last_active = $2 WHERE id = $3';
+          if (public_key && isValidBase64(public_key)) {
+            updateQuery = 'UPDATE users SET client_id = $1, last_active = $2, public_key = $4 WHERE id = $5';
+            updateParams.push(public_key, user.id);
+          } else {
+            updateParams.push(user.id);
+          }
+          await safeQuery(updateQuery, updateParams, ws, 'Failed to update user on login.');
           const msgRes = await safeQuery(`
             SELECT om.id, om.message, u.username AS from_username
             FROM offline_messages om

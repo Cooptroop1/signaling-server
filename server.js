@@ -565,6 +565,7 @@ function validateMessage(data) {
       break;
     case 'export-stats-csv':
     case 'export-logs-csv':
+    case 'clear-random-codes':
       if (!data.secret || typeof data.secret !== 'string') {
         return { valid: false, error: data.type + ': secret required as string' };
       }

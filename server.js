@@ -1043,6 +1043,13 @@ wss.on('connection', (ws, req) => {
         const totalClients = currentSize;
         const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients };
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
+        // New: Remove from randomCodes if this is a non-initiator joining a random code (one-time use)
+        if (randomCodes.has(code) && clientId !== roomState.initiator) {
+          randomCodes.delete(code);
+          await redisClient.sRem('randomCodes', code);
+          broadcastRandomCodes();
+          logger.info(`Removed one-time random code ${code} after join by ${clientId}`);
+        }
         return;
       }
       if (data.type === 'check-totp') {

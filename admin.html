@@ -6,7 +6,7 @@
  <title>Anonomoose Admin Dashboard</title>
  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'sha256-7rwBwscuTFWF0kdC50SzLSDtn7ntbbhM0aVb4QMm9z8='; style-src 'self' https://cdn.jsdelivr.net 'nonce-randomNonce123'; img-src 'self' data: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; connect-src 'self' wss://signaling-server-zc6m.onrender.com;">
  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
- <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
+ <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG">
  <style>
  body {
  background-color: #000;
@@ -124,6 +124,7 @@
  <h2 class="text-xl font-bold mb-4">Exports</h2>
  <button id="exportStatsButton" aria-label="Export stats to CSV">Export Stats (CSV)</button>
  <button id="exportLogsButton" aria-label="Export logs to CSV">Export Logs (CSV)</button>
+ <button id="clearRandomButton" aria-label="Clear random board">Clear Random Board</button>
  </div>
  <div class="text-center mt-4">
  <a href="index.html" class="text-blue-500 hover:underline">Back to Chat</a>
@@ -143,13 +144,11 @@
  const maxReconnectAttempts = 5;
  let lastToggleTime = 0;
  let csrfToken = '';
-
  if (localStorage.getItem('clientId')) {
  clientId = localStorage.getItem('clientId');
  } else {
  localStorage.setItem('clientId', clientId);
  }
-
  function showStatusMessage(message, duration = 3000) {
  statusElement.textContent = message;
  statusElement.setAttribute('aria-live', 'assertive');
@@ -158,7 +157,6 @@
  statusElement.setAttribute('aria-live', 'polite');
  }, duration);
  }
-
  function fetchStatsAndFeatures() {
  const secret = adminPasswordInput.value.trim();
  if (!secret) {
@@ -174,7 +172,6 @@
  showStatusMessage('Connecting to server...');
  }
  }
-
  function toggleFeature(feature) {
  const now = Date.now();
  if (now - lastToggleTime < 1000) {
@@ -192,7 +189,6 @@
  showStatusMessage('Connection closed. Reconnecting to toggle...');
  }
  }
-
  // New: Function to export data to CSV
  function exportToCSV(data, filename) {
  const csvContent = "data:text/csv;charset=utf-8," + data;
@@ -204,7 +200,6 @@
  link.click();
  document.body.removeChild(link);
  }
-
  // New: Request export from server
  function requestExport(type) {
  const secret = adminPasswordInput.value.trim();
@@ -214,7 +209,6 @@
  showStatusMessage('Connection not open. Please reconnect.');
  }
  }
-
  socket.onopen = () => {
  console.log('Admin page WebSocket opened');
  if (socket.readyState === WebSocket.OPEN) {
@@ -224,7 +218,6 @@
  statusElement.textContent = 'Connected. Enter admin password to view stats.';
  adminPasswordInput.focus();
  };
-
  socket.onmessage = (event) => {
  console.log('Received message:', event.data);
  try {
@@ -276,9 +269,6 @@
  document.getElementById('toggleP2P').classList.toggle('off', !data.enableP2P);
  document.getElementById('toggleRelay').textContent = data.enableRelay ? 'On' : 'Off';
  document.getElementById('toggleRelay').classList.toggle('off', !data.enableRelay);
- if (!data.enableService) {
- statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
- }
  } else if (data.type === 'feature-toggled') {
  const button = document.getElementById(`toggle${data.feature.charAt(0).toUpperCase() + data.feature.slice(1)}`);
  button.textContent = data.enabled ? 'On' : 'Off';
@@ -316,6 +306,8 @@
  } else if (data.type === 'export-logs-csv') {
  exportToCSV(data.csv, 'logs.csv');
  showStatusMessage('Logs exported to CSV.');
+ } else if (data.type === 'random-codes-cleared') {
+ showStatusMessage('Random board cleared successfully.');
  } else if (data.type === 'error') {
  if (data.message.includes('Service has been disabled by admin.')) {
  statusElement.textContent = 'Service is disabled. Toggle to re-enable.';
@@ -355,7 +347,6 @@
  exportContainer.classList.add('hidden');
  }
  };
-
  socket.onerror = () => {
  console.error('WebSocket error');
  showStatusMessage('Connection error. Reconnecting...');
@@ -363,7 +354,6 @@
  featuresContainer.classList.add('hidden');
  exportContainer.classList.add('hidden');
  };
-
  socket.onclose = () => {
  console.log('WebSocket closed');
  showStatusMessage('Disconnected. Reconnecting...');
@@ -384,18 +374,15 @@
  socket.onclose = socket.onclose;
  }, delay);
  };
-
  submitButton.onclick = () => {
  fetchStatsAndFeatures();
  };
-
  adminPasswordInput.addEventListener('keydown', (event) => {
  if (event.key === 'Enter') {
  event.preventDefault();
  fetchStatsAndFeatures();
  }
  });
-
  document.getElementById('toggleService').onclick = () => toggleFeature('service');
  document.getElementById('toggleImages').onclick = () => toggleFeature('images');
  document.getElementById('toggleVoice').onclick = () => toggleFeature('voice');
@@ -404,10 +391,18 @@
  document.getElementById('toggleGrokBot').onclick = () => toggleFeature('grokBot');
  document.getElementById('toggleP2P').onclick = () => toggleFeature('p2P');
  document.getElementById('toggleRelay').onclick = () => toggleFeature('relay');
-
  // New: Export buttons handlers
  document.getElementById('exportStatsButton').onclick = () => requestExport('export-stats-csv');
  document.getElementById('exportLogsButton').onclick = () => requestExport('export-logs-csv');
+ // New: Clear random board handler
+ document.getElementById('clearRandomButton').onclick = () => {
+   const secret = adminPasswordInput.value.trim();
+   if (socket.readyState === WebSocket.OPEN && token) {
+     socket.send(JSON.stringify({ type: 'clear-random-codes', secret, clientId, token, csrfToken }));
+   } else {
+     showStatusMessage('Connection not open. Please reconnect.');
+   }
+ };
  </script>
 </body>
 </html>

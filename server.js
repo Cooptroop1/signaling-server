@@ -1,6 +1,3 @@
-
-const cluster = require('cluster');
-const os = require('os');
 const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
@@ -1686,18 +1683,6 @@ function hashUa(ua) {
   const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
   return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
 }
-if (cluster.isMaster) {
-  const numCPUs = os.cpus().length;
-  console.log(`Master ${process.pid} is running. Forking ${numCPUs} workers...`);
-  for (let i = 0; i < numCPUs; i++) {
-    cluster.fork();
-  }
-  cluster.on('exit', (worker, code, signal) => {
-    console.log(`Worker ${worker.process.pid} died. Forking a new one...`);
-    cluster.fork();
-  });
-} else {
-  server.listen(process.env.PORT || 10000, () => {
-    console.log(`Worker ${process.pid} running on port ${process.env.PORT || 10000}`);
-  });
-}
+server.listen(process.env.PORT || 10000, () => {
+  console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});

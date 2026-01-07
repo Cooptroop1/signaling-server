@@ -14,7 +14,7 @@ const otplib = require('otplib');
 const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-const redis = require('redis');
+const Redis = require('ioredis');
 const winston = require('winston');
 
 const logger = winston.createLogger({
@@ -61,22 +61,22 @@ setInterval(async () => {
     logger.error('Error cleaning up offline messages:', err.message, err.stack);
   }
 }, 24 * 60 * 60 * 1000); // Run daily
-// Added: Redis setup
-const redisClient = redis.createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379', // Use env var from Render
-  socket: {
-    reconnectStrategy: (retries) => {
-      if (retries > 20) {
-        return new Error("Too many attempts to reconnect.");
-      } else {
-        return Math.min(retries * 50, 2000);
-      }
-    }
+// Added: Redis setup with ioredis
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const redisClient = new Redis(redisUrl, {
+  retryStrategy(times) {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
   }
 });
 redisClient.on('error', err => logger.error('Redis Client Error', err));
-const pubClient = redisClient;
-const subClient = redisClient.duplicate();
+const pubClient = redisClient; // ioredis supports pub/sub directly
+const subClient = new Redis(redisUrl, {
+  retryStrategy(times) {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  }
+});
 const subscribed = new Set(); // Track subscribed rooms
 // Added: Redis message handler for pub/sub
 const messageHandler = async (msg, channel) => {
@@ -128,34 +128,37 @@ const messageHandler = async (msg, channel) => {
 };
 // Connect to Redis asynchronously
 (async () => {
-  await redisClient.connect();
-  await subClient.connect();
   logger.info('Connected to Redis');
   // Added: Load initial randomCodes from Redis
-  const randomCodesFromRedis = await redisClient.sMembers('randomCodes');
+  const randomCodesFromRedis = await redisClient.smembers('randomCodes');
   randomCodesFromRedis.forEach(code => randomCodes.add(code));
   logger.info(`Loaded ${randomCodes.size} random codes from Redis`);
   // New: Subscribe to global features channel
-  await subClient.subscribe('global:features', (msg) => {
-    try {
-      const newFeatures = JSON.parse(msg);
-      if (JSON.stringify(newFeatures) !== JSON.stringify(features)) {
-        features = newFeatures;
-        logger.info('Received global features update via Redis:', features);
-        wss.clients.forEach(client => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'features-update', ...features }));
-            if (!features.enableService && !client.isAdmin) {
-              client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
-              client.close();
+  subClient.on('message', (channel, msg) => {
+    if (channel === 'global:features') {
+      try {
+        const newFeatures = JSON.parse(msg);
+        if (JSON.stringify(newFeatures) !== JSON.stringify(features)) {
+          features = newFeatures;
+          logger.info('Received global features update via Redis:', features);
+          wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(JSON.stringify({ type: 'features-update', ...features }));
+              if (!features.enableService && !client.isAdmin) {
+                client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+                client.close();
+              }
             }
-          }
-        });
+          });
+        }
+      } catch (err) {
+        logger.error('Invalid global features message:', err);
       }
-    } catch (err) {
-      logger.error('Invalid global features message:', err);
+    } else {
+      messageHandler(msg, channel);
     }
   });
+  await subClient.subscribe('global:features');
   logger.info('Subscribed to global:features channel');
 })();
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
@@ -963,7 +966,7 @@ wss.on('connection', (ws, req) => {
         } else {
           const allClientKeys = await redisClient.keys(`room:${code}:client:*`);
           if (allClientKeys.length > 0) {
-            const allUsernamesMap = await redisClient.mGet(allClientKeys);
+            const allUsernamesMap = await redisClient.mget(allClientKeys);
             const usernames = Object.values(allUsernamesMap);
             if (usernames.includes(username)) {
               ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
@@ -975,12 +978,12 @@ wss.on('connection', (ws, req) => {
         // Check if room full
         const clientsKey = `room:${code}:clients`;
         const multi = redisClient.multi();
-        multi.sAdd(clientsKey, clientId);
-        multi.sCard(clientsKey);
+        multi.sadd(clientsKey, clientId);
+        multi.scard(clientsKey);
         const [added, currentSize] = await multi.exec();
         await redisClient.expire(clientsKey, 86400);
         if (currentSize > roomState.maxClients) {
-          await redisClient.sRem(clientsKey, clientId);
+          await redisClient.srem(clientsKey, clientId);
           ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           return;
@@ -1003,13 +1006,13 @@ wss.on('connection', (ws, req) => {
         ws.username = username;
         // Check if initiator online
         const isInitiatorLocal = clientId === roomState.initiator;
-        const initiatorOnline = await redisClient.sIsMember(clientsKey, roomState.initiator);
+        const initiatorOnline = await redisClient.sismember(clientsKey, roomState.initiator);
         if (!initiatorOnline && !isInitiatorLocal) {
           ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           // Cleanup
           room.clients.delete(clientId);
-          await redisClient.sRem(clientsKey, clientId);
+          await redisClient.srem(clientsKey, clientId);
           await redisClient.del(clientKey);
           return;
         }
@@ -1034,7 +1037,7 @@ wss.on('connection', (ws, req) => {
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
         // Remove from random if totalClients >=2 and was random
         if (!isInitiatorLocal && totalClients >= 2 && randomCodes.has(code)) {
-          await redisClient.sRem('randomCodes', code);
+          await redisClient.srem('randomCodes', code);
           randomCodes.delete(code);
           broadcastRandomCodes();
           logger.info(`Removed code ${code} from randomCodes as it has been picked`);
@@ -1059,7 +1062,7 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(data.code);
           room.maxClients = data.maxClients;
           await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients }), { EX: 86400 });
-          const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
+          const totalClients = await redisClient.scard(`room:${data.code}:clients`);
           const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients };
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(msg) }));
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients });
@@ -1123,14 +1126,14 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
           return;
         }
-        const size = await redisClient.sCard(`room:${data.code}:clients`);
+        const size = await redisClient.scard(`room:${data.code}:clients`);
         if (size === 0) {
           ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
         if (rooms.get(data.code)?.initiator === data.clientId) {
-          const added = await redisClient.sAdd('randomCodes', data.code);
+          const added = await redisClient.sadd('randomCodes', data.code);
           if (added) {
             randomCodes.add(data.code);
             broadcastRandomCodes();
@@ -1143,14 +1146,14 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'get-random-codes') {
         // Updated: Fetch from Redis for global sync
-        const codes = await redisClient.sMembers('randomCodes');
+        const codes = await redisClient.smembers('randomCodes');
         ws.send(JSON.stringify({ type: 'random-codes', codes }));
         return;
       }
       if (data.type === 'remove-random-code') {
         if (randomCodes.has(data.code)) {
           // Added: Remove from Redis and local Set
-          await redisClient.sRem('randomCodes', data.code);
+          await redisClient.srem('randomCodes', data.code);
           randomCodes.delete(data.code);
           broadcastRandomCodes();
           logger.info(`Removed code ${data.code} from randomCodes`);
@@ -1197,7 +1200,7 @@ wss.on('connection', (ws, req) => {
         }
         // Check duplicate nonce globally
         const noncesKey = `room:${data.code}:nonces`;
-        const existingTs = await redisClient.hGet(noncesKey, data.nonce);
+        const existingTs = await redisClient.hget(noncesKey, data.nonce);
         if (existingTs) {
           logger.warn(`Duplicate nonce ${data.nonce} in room ${data.code}, ignoring`);
           return;
@@ -1208,12 +1211,12 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
           return;
         }
-        if (data.timestamp > now) {
+        if (data.timestamp > now + 5000) { // Allow 5s clock skew
           logger.warn(`Future timestamp for nonce ${data.nonce} in room ${data.code}: ${data.timestamp}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Message timestamp in future.', code: data.code }));
           return;
         }
-        await redisClient.hSet(noncesKey, data.nonce, data.timestamp);
+        await redisClient.hset(noncesKey, data.nonce, data.timestamp);
         await redisClient.expire(noncesKey, 86400);
         const mime = data.mime ? validator.escape(validator.trim(data.mime)) : undefined;
         // Prepare client message object
@@ -1483,13 +1486,13 @@ wss.on('connection', (ws, req) => {
       const code = ws.code;
       const roomKey = `room:${code}`;
       const clientsKey = `${roomKey}:clients`;
-      await redisClient.sRem(clientsKey, ws.clientId);
+      await redisClient.srem(clientsKey, ws.clientId);
       const clientKey = `${roomKey}:client:${ws.clientId}`;
       await redisClient.del(clientKey);
       rooms.get(code).clients.delete(ws.clientId);
       rateLimits.delete(ws.clientId);
       const isInitiator = ws.clientId === rooms.get(code).initiator;
-      const totalClients = await redisClient.sCard(clientsKey);
+      const totalClients = await redisClient.scard(clientsKey);
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients, isInitiator });
       const disconnectedMsg = {
         type: 'client-disconnected',
@@ -1509,7 +1512,7 @@ wss.on('connection', (ws, req) => {
           logger.info(`Unsubscribed from Redis channel room:${code}`);
         }
       } else if (isInitiator) {
-        const newInitiator = await redisClient.sRandMember(clientsKey);
+        const newInitiator = await redisClient.srandmember(clientsKey);
         if (newInitiator) {
           rooms.get(code).initiator = newInitiator;
           await redisClient.set(roomKey, JSON.stringify({ initiator: newInitiator, maxClients: rooms.get(code).maxClients }), { EX: 86400 });
@@ -1693,7 +1696,7 @@ function generateLogsCSV() {
   return csv;
 }
 async function broadcastRandomCodes() {
-  const codes = await redisClient.sMembers('randomCodes');
+  const codes = await redisClient.smembers('randomCodes');
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify({ type: 'random-codes', codes }));

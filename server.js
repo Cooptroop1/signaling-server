@@ -143,8 +143,8 @@ const messageHandler = async (msg, channel) => {
       client.ws.send(JSON.stringify({ type: parsed.type, message: `You have been ${parsed.type}ed from the room.` }));
       client.ws.close();
       room.clients.delete(targetId);
-      await redisClient.incrBy(`room:${code}:client_count`, -1);
-      const newTotal = await redisClient.get(`room:${code}:client_count`);
+      await redisClient.hIncrBy(`room:${code}`, 'client_count', -1);
+      const newTotal = await redisClient.hGet(`room:${code}`, 'client_count');
       pubClient.publish(`room:${code}`, JSON.stringify({ type: 'client-disconnected', clientId: targetId, totalClients: parseInt(newTotal), isInitiator: targetId === room.initiator }));
     }
   } else if (parsed.type === 'initiator-changed') {
@@ -960,13 +960,23 @@ wss.on('connection', (ws, req) => {
         }
         let room;
         const roomKey = `room:${code}`;
+        const clientsKey = `room:${code}:clients`;
+        const usernamesKey = `room:${code}:usernames`;
         const roomExists = await redisClient.exists(roomKey);
         if (roomExists) {
           const roomData = await redisClient.hGetAll(roomKey);
+          const clients = await redisClient.sMembers(clientsKey);
+          const usernamesData = await redisClient.hGetAll(usernamesKey);
           if (!rooms.has(code)) {
-            rooms.set(code, { initiator: roomData.initiator, maxClients: parseInt(roomData.maxClients), clients: new Map(), remoteClients: new Set(), usernames: new Map(), totalClients: parseInt(roomData.client_count) });
+            rooms.set(code, { initiator: roomData.initiator, maxClients: parseInt(roomData.maxClients), clients: new Map(), remoteClients: new Set(), usernames: new Map(), totalClients: clients.length });
           }
           room = rooms.get(code);
+          for (const cId of clients) {
+            if (!room.clients.has(cId)) {
+              room.remoteClients.add(cId);
+            }
+            room.usernames.set(cId, usernamesData[cId] || '');
+          }
           if (room.totalClients >= room.maxClients) {
             ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
             incrementFailure(clientIp, ws.userAgent);
@@ -975,7 +985,9 @@ wss.on('connection', (ws, req) => {
         } else {
           room = { initiator: clientId, maxClients: 2, clients: new Map(), remoteClients: new Set(), usernames: new Map(), totalClients: 0 };
           rooms.set(code, room);
-          await redisClient.hSet(roomKey, { initiator: clientId, maxClients: 2, client_count: 0 });
+          await redisClient.hSet(roomKey, { initiator: clientId, maxClients: 2 });
+          await redisClient.del(clientsKey);
+          await redisClient.del(usernamesKey);
         }
         if (room.clients.has(clientId)) {
           if (room.clients.get(clientId).username === username) {
@@ -984,7 +996,8 @@ wss.on('connection', (ws, req) => {
               oldWs.close();
             }, 1000);
             room.clients.delete(clientId);
-            await redisClient.hIncrBy(roomKey, 'client_count', -1);
+            await redisClient.sRem(clientsKey, clientId);
+            await redisClient.hDel(usernamesKey, clientId);
             room.totalClients--;
             pubClient.publish(`room:${code}`, JSON.stringify({ type: 'client-disconnected', clientId, totalClients: room.totalClients, isInitiator: clientId === room.initiator }));
           } else {
@@ -997,7 +1010,8 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
-        if (room.initiator !== clientId && !room.clients.has(room.initiator) && !room.remoteClients.has(room.initiator)) {
+        const initiatorOnline = await redisClient.sIsMember(clientsKey, room.initiator);
+        if (room.initiator !== clientId && !initiatorOnline) {
           ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
           return;
@@ -1006,8 +1020,9 @@ wss.on('connection', (ws, req) => {
         room.usernames.set(clientId, username);
         ws.code = code;
         ws.username = username;
-        await redisClient.hIncrBy(roomKey, 'client_count', 1);
-        room.totalClients = await redisClient.hGet(roomKey, 'client_count').then(Number);
+        await redisClient.sAdd(clientsKey, clientId);
+        await redisClient.hSet(usernamesKey, clientId, username);
+        room.totalClients = await redisClient.sCard(clientsKey);
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'client-joined', clientId, username, totalClients: room.totalClients }));
         if (!subscribed.has(code)) {
           await subClient.subscribe(`room:${code}`, messageHandler);
@@ -1042,7 +1057,7 @@ wss.on('connection', (ws, req) => {
           const newMax = Math.min(data.maxClients, 10);
           room.maxClients = newMax;
           await redisClient.hSet(`room:${data.code}`, 'maxClients', newMax);
-          room.totalClients = await redisClient.hGet(`room:${data.code}`, 'client_count').then(Number);
+          room.totalClients = await redisClient.sCard(`room:${data.code}:clients`);
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'max-clients-updated', maxClients: newMax, totalClients: room.totalClients }));
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients: room.totalClients });
         }
@@ -1424,13 +1439,16 @@ wss.on('connection', (ws, req) => {
           const isInitiator = ws.clientId === room.initiator;
           room.clients.delete(ws.clientId);
           room.usernames.delete(ws.clientId);
-          await redisClient.hIncrBy(`room:${ws.code}`, 'client_count', -1);
-          room.totalClients = await redisClient.hGet(`room:${ws.code}`, 'client_count').then(Number);
+          await redisClient.sRem(`room:${ws.code}:clients`, ws.clientId);
+          await redisClient.hDel(`room:${ws.code}:usernames`, ws.clientId);
+          room.totalClients = await redisClient.sCard(`room:${ws.code}:clients`);
           pubClient.publish(`room:${ws.code}`, JSON.stringify({ type: 'client-disconnected', clientId: ws.clientId, totalClients: room.totalClients, isInitiator }));
           logStats({ clientId: ws.clientId, code: ws.code, event: 'logout', totalClients: room.totalClients, isInitiator });
           if (room.clients.size === 0 && room.remoteClients.size === 0) {
             rooms.delete(ws.code);
             await redisClient.del(`room:${ws.code}`);
+            await redisClient.del(`room:${ws.code}:clients`);
+            await redisClient.del(`room:${ws.code}:usernames`);
             // Added: Remove from Redis if was random
             await redisClient.sRem('randomCodes', ws.code);
             randomCodes.delete(ws.code);
@@ -1467,14 +1485,16 @@ wss.on('connection', (ws, req) => {
       const isInitiator = ws.clientId === room.initiator;
       room.clients.delete(ws.clientId);
       room.usernames.delete(ws.clientId);
-      rateLimits.delete(ws.clientId);
-      await redisClient.hIncrBy(`room:${ws.code}`, 'client_count', -1);
-      room.totalClients = await redisClient.hGet(`room:${ws.code}`, 'client_count').then(Number);
+      await redisClient.sRem(`room:${ws.code}:clients`, ws.clientId);
+      await redisClient.hDel(`room:${ws.code}:usernames`, ws.clientId);
+      room.totalClients = await redisClient.sCard(`room:${ws.code}:clients`);
       pubClient.publish(`room:${ws.code}`, JSON.stringify({ type: 'client-disconnected', clientId: ws.clientId, totalClients: room.totalClients, isInitiator }));
       logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients: room.totalClients, isInitiator });
       if (room.clients.size === 0 && room.remoteClients.size === 0) {
         rooms.delete(ws.code);
         await redisClient.del(`room:${ws.code}`);
+        await redisClient.del(`room:${ws.code}:clients`);
+        await redisClient.del(`room:${ws.code}:usernames`);
         // Added: Remove from Redis if was random
         await redisClient.sRem('randomCodes', ws.code);
         randomCodes.delete(ws.code);

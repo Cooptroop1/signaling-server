@@ -973,11 +973,16 @@ wss.on('connection', (ws, req) => {
         room.clients.set(clientId, { ws, username });
         ws.code = code;
         ws.username = username;
-        // Send init
-        const isInitiatorLocal = clientId === room.initiator;
-        if (!room.clients.has(room.initiator) && !isInitiatorLocal) {
+        // Check if initiator online
+        const isInitiatorLocal = clientId === roomState.initiator;
+        const initiatorOnline = await redisClient.sIsMember(clientsKey, roomState.initiator);
+        if (!initiatorOnline && !isInitiatorLocal) {
           ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
           incrementFailure(clientIp, ws.userAgent);
+          // Cleanup
+          room.clients.delete(clientId);
+          await redisClient.sRem(clientsKey, clientId);
+          await redisClient.del(clientKey);
           return;
         }
         ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));

@@ -500,6 +500,12 @@ function validateMessage(data) {
       break;
     case 'get-random-codes':
       break;
+    // New: Add validation for clear-random-codes
+    case 'clear-random-codes':
+      if (!data.secret || typeof data.secret !== 'string') {
+        return { valid: false, error: 'clear-random-codes: secret required as string' };
+      }
+      break;
     case 'relay-message':
       if ((!data.content && !data.encryptedContent && !data.data && !data.encryptedData) || typeof (data.content || data.encryptedContent || data.data || data.encryptedData) !== 'string') {
         return { valid: false, error: 'relay-message: content, encryptedContent, data, or encryptedData required as string' };
@@ -1156,6 +1162,18 @@ wss.on('connection', (ws, req) => {
           broadcastRandomCodes();
           logger.info(`Removed code ${data.code} from randomCodes`);
         }
+        return;
+      }
+      // New: Handle clear-random-codes (admin only)
+      if (data.type === 'clear-random-codes') {
+        if (!checkAdminSecret(data, ws)) return;
+        await redisClient.del('randomCodes');
+        randomCodes.clear();
+        broadcastRandomCodes();
+        logger.info('Random codes cleared by admin');
+        const timestamp = new Date().toISOString();
+        userLogger.info(`${timestamp} - Admin cleared random codes`);
+        ws.send(JSON.stringify({ type: 'random-codes-cleared' }));
         return;
       }
       if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') {

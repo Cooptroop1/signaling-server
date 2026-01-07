@@ -975,7 +975,7 @@ wss.on('connection', (ws, req) => {
         } else {
           room = { initiator: clientId, maxClients: 2, clients: new Map(), remoteClients: new Set(), usernames: new Map(), totalClients: 0 };
           rooms.set(code, room);
-          await redisClient.hMSet(roomKey, { initiator: clientId, maxClients: 2, client_count: 0 });
+          await redisClient.hSet(roomKey, { initiator: clientId, maxClients: 2, client_count: 0 });
         }
         if (room.clients.has(clientId)) {
           if (room.clients.get(clientId).username === username) {
@@ -1443,14 +1443,11 @@ wss.on('connection', (ws, req) => {
               console.log(`Unsubscribed from Redis channel room:${ws.code}`);
             }
           } else if (isInitiator) {
-            // Choose new initiator, perhaps first local or publish to elect
             const newInitiator = room.clients.keys().next().value;
             if (newInitiator) {
               room.initiator = newInitiator;
               await redisClient.hSet(`room:${ws.code}`, 'initiator', newInitiator);
               pubClient.publish(`room:${ws.code}`, JSON.stringify({ type: 'initiator-changed', newInitiator, totalClients: room.totalClients }));
-            } else {
-              // If no local, perhaps close room or leave to other servers
             }
           }
         }

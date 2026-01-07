@@ -13,7 +13,6 @@ const UAParser = require('ua-parser-js');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const redis = require('redis'); // Added for Redis pub/sub
-
 // Hash password
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
@@ -45,18 +44,14 @@ setInterval(async () => {
     console.error('Error cleaning up offline messages:', err.message, err.stack);
   }
 }, 24 * 60 * 60 * 1000); // Run daily
-
 // Added: Redis setup
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379' // Use env var from Render
 });
 redisClient.on('error', err => console.error('Redis Client Error', err));
-
 const pubClient = redisClient;
 const subClient = redisClient.duplicate();
-
 const subscribed = new Set(); // Track subscribed rooms
-
 // Added: Redis message handler for pub/sub
 const messageHandler = async (msg, channel) => {
   const code = channel.slice(5); // 'room:' prefix
@@ -82,7 +77,6 @@ const messageHandler = async (msg, channel) => {
     console.log(`Relayed via pub/sub ${parsed.messageType} from ${senderId} in code ${code} to ${room.clients.size - 1} clients`);
   }
 };
-
 // Connect to Redis asynchronously
 (async () => {
   await redisClient.connect();
@@ -92,8 +86,26 @@ const messageHandler = async (msg, channel) => {
   const randomCodesFromRedis = await redisClient.sMembers('randomCodes');
   randomCodesFromRedis.forEach(code => randomCodes.add(code));
   console.log(`Loaded ${randomCodes.size} random codes from Redis`);
+  // New: Subscribe to global features channel
+  await subClient.subscribe('global:features', (msg) => {
+    try {
+      features = JSON.parse(msg);
+      console.log('Received global features update via Redis:', features);
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: 'features-update', ...features }));
+          if (!features.enableService && !client.isAdmin) {
+            client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+            client.close();
+          }
+        }
+      });
+    } catch (err) {
+      console.error('Invalid global features message:', err);
+    }
+  });
+  console.log('Subscribed to global:features channel');
 })();
-
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
 let server;
@@ -132,7 +144,7 @@ server.on('request', (req, res) => {
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " +  // Updated with all servers
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " + // Updated with all servers
         "object-src 'none'; base-uri 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
@@ -237,6 +249,8 @@ async function loadFeatures() {
       };
     }
     console.log('Loaded features from DB:', features);
+    // New: Publish initial features to Redis for sync
+    pubClient.publish('global:features', JSON.stringify(features));
   } catch (err) {
     console.error('Error loading features from DB:', err.message, err.stack);
   }
@@ -957,6 +971,27 @@ wss.on('connection', (ws, req) => {
         forwardMessage(data.code, data.targetId, { ...data, clientId: data.clientId }, ws, data.clientId);
         return;
       }
+      if (data.type === 'kick' || data.type === 'ban') {
+        if (rooms.has(data.code) && data.clientId === rooms.get(data.code).initiator) {
+          const room = rooms.get(data.code);
+          const targetClient = room.clients.get(data.targetId);
+          if (targetClient) {
+            targetClient.ws.send(JSON.stringify({ type: data.type, message: `You have been ${data.type}ed from the room.` }));
+            targetClient.ws.close();
+            room.clients.delete(data.targetId);
+            broadcast(data.code, {
+              type: 'client-disconnected',
+              clientId: data.targetId,
+              totalClients: room.clients.size,
+              isInitiator: data.targetId === room.initiator
+            });
+            logStats({ clientId: data.targetId, code: data.code, event: data.type, totalClients: room.clients.size });
+          }
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can kick/ban.', code: data.code }));
+        }
+        return;
+      }
       if (data.type === 'submit-random') {
         if (!restrictLimit(ipRateLimits, `${hashedIp}:submit-random`, 1, 5, 60000, 'Submit rate limit')) {
           ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.', code: data.code }));
@@ -1056,7 +1091,6 @@ wss.on('connection', (ws, req) => {
         }
         messageSet.set(data.nonce, data.timestamp);
         const mime = data.mime ? validator.escape(validator.trim(data.mime)) : undefined;
-
         // Prepare client message object
         const clientMessageObj = {
           type: data.type.replace('relay-', ''),
@@ -1074,7 +1108,6 @@ wss.on('connection', (ws, req) => {
           mime: mime
         };
         const clientJson = JSON.stringify(clientMessageObj);
-
         // Publish to Redis
         const pubObj = {
           type: 'relay',
@@ -1088,7 +1121,6 @@ wss.on('connection', (ws, req) => {
         }).catch(err => {
           console.error('Redis publish error:', err);
         });
-
         return;
       }
       if (data.type === 'get-stats') {
@@ -1132,15 +1164,8 @@ wss.on('connection', (ws, req) => {
           const timestamp = new Date().toISOString();
           fs.appendFileSync(LOG_FILE, `${timestamp} - Admin toggled ${featureKey} to ${features[featureKey]} by client ${hashIp(clientIp)}\n`);
           ws.send(JSON.stringify({ type: 'feature-toggled', feature: data.feature, enabled: features[featureKey] }));
-          wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'features-update', ...features }));
-              if (data.feature === 'service' && !features.enableService && !client.isAdmin) {
-                client.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
-                client.close();
-              }
-            }
-          });
+          // New: Publish updated features to Redis instead of local broadcast
+          pubClient.publish('global:features', JSON.stringify(features));
           if (data.feature === 'service' && !features.enableService) {
             clientTokens.forEach((tokens, clientId) => {
               revokedTokens.set(tokens.accessToken, Date.now() + 1000);
@@ -1629,5 +1654,3 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   console.log(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-
-

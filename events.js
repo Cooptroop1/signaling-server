@@ -678,7 +678,6 @@ socket.onmessage = async (event) => {
         return;
       }
       try {
-        initiatorPublic = message.publicKey; // Update if needed, but typically same
         const importedInitiatorPublic = await importPublicKey(initiatorPublic);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
         const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv);
@@ -835,7 +834,6 @@ socket.onmessage = async (event) => {
       features = message;
       console.log('Received features update:', features);
       setTimeout(updateFeaturesUI, 0);
-      initializeMaxClientsUI(); // Reinitialize max clients UI on features update
       if (!features.enableService) {
         showStatusMessage(`Service disabled by admin. Disconnecting...`);
         socket.close();
@@ -1668,39 +1666,3 @@ async function sendOfflineMessage(toUsername, messageText) {
   // Assuming implementation elsewhere
 }
 // Other missing functions like exportPublicKey, deriveSharedKey, etc., assume defined elsewhere
-function initializeMaxClientsUI() {
-  const maxClientsRadios = document.getElementById('maxClientsRadios');
-  const addUserRadios = document.getElementById('addUserRadios');
-  const maxLimit = features.enableP2P ? 10 : 50;
-  maxClientsRadios.innerHTML = '';
-  addUserRadios.innerHTML = '';
-  for (let i = 2; i <= maxLimit; i++) {
-    const button = document.createElement('button');
-    button.textContent = i;
-    button.classList.toggle('active', i === maxClients);
-    button.disabled = !isInitiator;
-    button.onclick = () => setMaxClients(i);
-    maxClientsRadios.appendChild(button);
-
-    const addButton = button.cloneNode(true);
-    addUserRadios.appendChild(addButton);
-  }
-  maxClientsContainer.classList.toggle('hidden', !isInitiator);
-  addUserText.classList.toggle('hidden', !isInitiator);
-}
-function updateMaxClientsUI() {
-  const buttons = document.querySelectorAll('#maxClientsRadios button');
-  buttons.forEach(button => {
-    button.classList.toggle('active', parseInt(button.textContent) === maxClients);
-  });
-}
-function setMaxClients(newMax) {
-  if (isInitiator && socket.readyState === WebSocket.OPEN && token) {
-    socket.send(JSON.stringify({ type: 'set-max-clients', maxClients: newMax, code, clientId, token }));
-    maxClients = newMax;
-    updateMaxClientsUI();
-    updateDots();
-    showStatusMessage(`Max clients set to ${newMax}.`);
-  }
-}
-// Other functions...

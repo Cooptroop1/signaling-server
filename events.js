@@ -489,14 +489,14 @@ socket.onmessage = async (event) => {
     }
     if (message.type === 'init') {
       clientId = message.clientId;
-      maxClients = Math.min(message.maxClients, 10);
+      maxClients = message.maxClients;
       isInitiator = message.isInitiator;
       features = message.features || features;
+      console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       if (!features.enableP2P) {
         useRelay = true;
       }
       totalClients = 1;
-      console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
       connectedClients.add(clientId);
       initializeMaxClientsUI();
@@ -593,7 +593,7 @@ socket.onmessage = async (event) => {
       return;
     }
     if (message.type === 'max-clients') {
-      maxClients = Math.min(message.maxClients, 10);
+      maxClients = message.maxClients;
       console.log(`Max clients updated to ${maxClients} for code: ${code}`);
       updateMaxClientsUI();
       updateDots();
@@ -678,6 +678,7 @@ socket.onmessage = async (event) => {
         return;
       }
       try {
+        initiatorPublic = message.publicKey; // Update if needed, but typically same
         const importedInitiatorPublic = await importPublicKey(initiatorPublic);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
         const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv);
@@ -834,6 +835,7 @@ socket.onmessage = async (event) => {
       features = message;
       console.log('Received features update:', features);
       setTimeout(updateFeaturesUI, 0);
+      initializeMaxClientsUI(); // Reinitialize max clients UI on features update
       if (!features.enableService) {
         showStatusMessage(`Service disabled by admin. Disconnecting...`);
         socket.close();
@@ -1666,3 +1668,47 @@ async function sendOfflineMessage(toUsername, messageText) {
   // Assuming implementation elsewhere
 }
 // Other missing functions like exportPublicKey, deriveSharedKey, etc., assume defined elsewhere
+function initializeMaxClientsUI() {
+  const maxClientsRadios = document.getElementById('maxClientsRadios');
+  const addUserRadios = document.getElementById('addUserRadios');
+  const maxLimit = features.enableP2P ? 10 : 50;
+  console.log('Initializing max clients UI | enableP2P:', features.enableP2P, 'maxLimit:', maxLimit, 'isInitiator:', isInitiator);
+  maxClientsRadios.innerHTML = '';
+  addUserRadios.innerHTML = '';
+  for (let i = 2; i <= maxLimit; i++) {
+    const button = document.createElement('button');
+    button.textContent = i;
+    button.classList.toggle('active', i === maxClients);
+    button.disabled = !isInitiator;
+    button.onclick = () => setMaxClients(i);
+    maxClientsRadios.appendChild(button);
+
+    const addButton = button.cloneNode(true);
+    addUserRadios.appendChild(addButton);
+  }
+  maxClientsContainer.classList.toggle('hidden', !isInitiator);
+  addUserText.classList.toggle('hidden', !isInitiator);
+}
+function updateMaxClientsUI() {
+  console.log('Updating max clients UI | maxClients:', maxClients, 'totalClients:', totalClients);
+  const buttons = document.querySelectorAll('#maxClientsRadios button, #addUserRadios button');
+  buttons.forEach(button => {
+    button.classList.toggle('active', parseInt(button.textContent) === maxClients);
+  });
+}
+function setMaxClients(newMax) {
+  console.log('Attempting to set max clients to', newMax, ' | isInitiator:', isInitiator, 'socket state:', socket.readyState, 'has token:', !!token);
+  if (isInitiator && socket.readyState === WebSocket.OPEN && token) {
+    const message = { type: 'set-max-clients', maxClients: newMax, code, clientId, token };
+    console.log('Sending set-max-clients message:', message);
+    socket.send(JSON.stringify(message));
+    maxClients = newMax; // Optimistic update
+    updateMaxClientsUI();
+    updateDots();
+    showStatusMessage(`Max clients set to ${newMax}.`);
+  } else {
+    console.warn('Cannot set max clients: Not initiator, socket not open, or no token.');
+    showStatusMessage('Cannot update max users right now.');
+  }
+}
+// Other functions...

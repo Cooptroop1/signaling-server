@@ -1671,8 +1671,8 @@ async function sendOfflineMessage(toUsername, messageText) {
 function initializeMaxClientsUI() {
   const maxClientsRadios = document.getElementById('maxClientsRadios');
   const addUserRadios = document.getElementById('addUserRadios');
-  const maxLimit = features.enableP2P ? 10 : 50;
-  console.log('Initializing max clients UI | enableP2P:', features.enableP2P, 'maxLimit:', maxLimit, 'isInitiator:', isInitiator);
+  const maxLimit =   4 : 50;
+  console.log('Initializing max clients UI | maxLimit:', maxLimit, 'isInitiator:', isInitiator);
   maxClientsRadios.innerHTML = '';
   addUserRadios.innerHTML = '';
   for (let i = 2; i <= maxLimit; i++) {

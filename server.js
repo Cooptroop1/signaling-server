@@ -1069,7 +1069,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         if (data.clientId === rooms.get(data.code).initiator) {
-          const maxLimit = features.enableP2P ? 10 : 50;
+          const maxLimit = features.enableP2P ? 4 : 50;
           const room = rooms.get(data.code);
           room.maxClients = Math.min(data.maxClients, maxLimit);
           await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients }), { EX: 86400 });
@@ -1709,4 +1709,5 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   logger.info(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+
 

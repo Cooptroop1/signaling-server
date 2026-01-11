@@ -1,4 +1,3 @@
-
 // Add this new function at the top
 function detectImageMime(base64) {
   try {
@@ -476,6 +475,11 @@ socket.onmessage = async (event) => {
       }
       return;
     }
+    if (message.type === 'kick' || message.type === 'ban') {
+      alert(message.message || `You have been ${message.type}ed from the room.`);
+      endChat();
+      return;
+    }
     if (message.type === 'totp-required') {
       showTotpInputModal(message.code);
       return;
@@ -586,6 +590,10 @@ socket.onmessage = async (event) => {
       }
       updateMaxClientsUI();
       updateDots();
+      if (totalClients <= 1) {
+        alert('The chat room is now empty. Returning to start page.');
+        endChat();
+      }
       if (totalClients <= 1) {
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');

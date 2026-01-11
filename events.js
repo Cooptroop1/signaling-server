@@ -1,3 +1,4 @@
+
 // Add this new function at the top
 function detectImageMime(base64) {
   try {
@@ -321,11 +322,6 @@ socket.onmessage = async (event) => {
       showStatusMessage('Invalid server message received.');
       return;
     }
-    if (message.type === 'kick' || message.type === 'ban') {
-      alert(message.message || `You have been ${message.type}ed from the room.`);
-      endChat();
-      return;
-    }
     if (message.type === 'ping') {
       socket.send(JSON.stringify({ type: 'pong' }));
       console.log('Received ping, sent pong');
@@ -478,6 +474,11 @@ socket.onmessage = async (event) => {
       } else {
         showStatusMessage(message.message);
       }
+      return;
+    }
+    if (message.type === 'kick' || message.type === 'ban') {
+      alert(message.message || `You have been ${message.type}ed from the room.`);
+      endChat();
       return;
     }
     if (message.type === 'totp-required') {

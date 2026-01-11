@@ -450,7 +450,7 @@ function validateMessage(data) {
       }
       break;
     case 'set-max-clients':
-      const maxLimit = features.enableP2P ? 10 : 50;
+      const maxLimit = features.enableP2P ? 4 : 50;
       if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > maxLimit) {
         return { valid: false, error: `set-max-clients: maxClients must be number between 2 and ${maxLimit}` };
       }
@@ -1709,3 +1709,4 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   logger.info(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
+

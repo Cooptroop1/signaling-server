@@ -1709,5 +1709,3 @@ function hashUa(ua) {
 server.listen(process.env.PORT || 10000, () => {
   logger.info(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
 });
-
-

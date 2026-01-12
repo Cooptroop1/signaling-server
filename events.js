@@ -1,4 +1,3 @@
-
 // Add this new function at the top
 function detectImageMime(base64) {
   try {
@@ -1637,11 +1636,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.getElementById('button2')?.focus();
   };
-  cornerLogo.addEventListener('click', () => {
-    document.getElementById('messages').innerHTML = '';
-    processedMessageIds.clear();
-    showStatusMessage('Chat history cleared locally.');
-  });
+  if (cornerLogo) {
+    cornerLogo.addEventListener('click', () => {
+      document.getElementById('messages').innerHTML = '';
+      processedMessageIds.clear();
+      showStatusMessage('Chat history cleared locally.');
+    });
+  } else {
+    console.error('cornerLogo element not found—check ID in index.html');
+  }
 });
 async function sendMessage(content) {
   console.log('sendMessage called with content:', content);

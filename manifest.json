@@ -1,13 +1,13 @@
 {
-  "background_color": "#0458f5",
+  "background_color": "#ffffff",
   "dir": "ltr",
   "display": "standalone",
-  "name": "anonomoose",
+  "name": "Anonomoose",
   "orientation": "portrait",
-  "scope": "/www.anonomoose.com",
-  "short_name": "anonomoose",
+  "scope": "/",
+  "short_name": "Anonomoose",
   "start_url": "/www.anonomoose.com",
-  "theme_color": "#f40606",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG",
@@ -62,6 +62,7 @@
       "is192x192": false
     }
   ],
+  "description": "Chat App No Data",
   "lang": "en",
   "categories": [
     "security",

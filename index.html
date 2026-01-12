@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; object-src 'none'; base-uri 'self';">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
-  <link rel="manifest" href="https://raw.githubusercontent.com/Cooptroop1/signaling-server/blob/main/manifest.json">
+  <link rel="manifest" href="https://raw.githubusercontent.com/Cooptroop1/signaling-server/main/manifest.json">
   <link rel="apple-touch-icon" sizes="192x192" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/192.png">
   <link rel="apple-touch-icon" sizes="256x256" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/256.png">
   <link rel="apple-touch-icon" sizes="512x512" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/512.png">
@@ -868,7 +868,7 @@
   <script src="events.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/pwabuilder-sw.js')
+      navigator.serviceWorker.register('/sw.js')
         .then(() => console.log('Service Worker registered'))
         .catch(err => console.error('Service Worker error:', err));
     }

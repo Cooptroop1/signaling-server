@@ -1,0 +1,70 @@
+{
+  "background_color": "#0458f5",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "anonomoose",
+  "orientation": "portrait",
+  "scope": "/www.anonomoose.com",
+  "short_name": "anonomoose",
+  "start_url": "/www.anonomoose.com",
+  "theme_color": "#f40606",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG",
+      "type": "image/jpeg",
+      "sizes": "960x960",
+      "isSquare": true,
+      "isPng": false,
+      "isWebp": false,
+      "isJpg": true,
+      "width": 960,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": false
+    },
+    {
+      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "isSquare": true,
+      "isPng": true,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 192,
+      "is512x512": false,
+      "is256x256": false,
+      "is192x192": true
+    },
+    {
+      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/256.png",
+      "type": "image/png",
+      "sizes": "256x256",
+      "isSquare": true,
+      "isPng": true,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 256,
+      "is512x512": false,
+      "is256x256": true,
+      "is192x192": false
+    },
+    {
+      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "isSquare": true,
+      "isPng": true,
+      "isWebp": false,
+      "isJpg": false,
+      "width": 512,
+      "is512x512": true,
+      "is256x256": false,
+      "is192x192": false
+    }
+  ],
+  "lang": "en",
+  "categories": [
+    "security",
+    "social"
+  ]
+}

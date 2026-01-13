@@ -1636,6 +1636,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.getElementById('button2')?.focus();
   };
+  const cornerLogo = document.getElementById('cornerLogo');
   if (cornerLogo) {
     cornerLogo.addEventListener('click', () => {
       document.getElementById('messages').innerHTML = '';

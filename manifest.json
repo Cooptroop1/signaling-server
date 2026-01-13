@@ -1,71 +1,35 @@
 {
-  "background_color": "#ffffff",
+  "background_color": "#0458f5",
   "dir": "ltr",
   "display": "standalone",
-  "name": "Anonomoose",
+  "name": "anonomoose",
   "orientation": "portrait",
   "scope": "/",
-  "short_name": "Anonomoose",
-  "start_url": "/www.anonomoose.com",
-  "theme_color": "#ffffff",
+  "short_name": "anonomoose",
+  "start_url": "/",
+  "theme_color": "#f40606",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG",
+      "src": "/logo.JPG",
       "type": "image/jpeg",
-      "sizes": "960x960",
-      "isSquare": true,
-      "isPng": false,
-      "isWebp": false,
-      "isJpg": true,
-      "width": 960,
-      "is512x512": false,
-      "is256x256": false,
-      "is192x192": false
+      "sizes": "960x960"
     },
     {
-      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/192.png",
+      "src": "/192.png",
       "type": "image/png",
-      "sizes": "192x192",
-      "isSquare": true,
-      "isPng": true,
-      "isWebp": false,
-      "isJpg": false,
-      "width": 192,
-      "is512x512": false,
-      "is256x256": false,
-      "is192x192": true
+      "sizes": "192x192"
     },
     {
-      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/256.png",
+      "src": "/256.png",
       "type": "image/png",
-      "sizes": "256x256",
-      "isSquare": true,
-      "isPng": true,
-      "isWebp": false,
-      "isJpg": false,
-      "width": 256,
-      "is512x512": false,
-      "is256x256": true,
-      "is192x192": false
+      "sizes": "256x256"
     },
     {
-      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/512.png",
+      "src": "/512.png",
       "type": "image/png",
-      "sizes": "512x512",
-      "isSquare": true,
-      "isPng": true,
-      "isWebp": false,
-      "isJpg": false,
-      "width": 512,
-      "is512x512": true,
-      "is256x256": false,
-      "is192x192": false
+      "sizes": "512x512"
     }
   ],
-  "description": "Chat App No Data",
   "lang": "en",
-  "categories": [
-    "security",
-    "social"
-  ]
+  "categories": ["security", "social"]
 }

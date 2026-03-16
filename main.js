@@ -1187,42 +1187,46 @@ setInterval(() => {
 // =============================================
 // SUPABASE AUTH + DISPLAY NAME (clean like SnookScore)
 // =============================================
+// =============================================
+// SUPABASE AUTH + DISPLAY NAME (safe version for Cloudflare Rocket Loader)
+// =============================================
 async function initSupabaseAuth() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
     currentUser = session.user;
     await loadDisplayName();
   } else {
-    document.getElementById('logoutButton').classList.add('hidden');
-    document.getElementById('loginButton').classList.remove('hidden');
+    const loginBtn = document.getElementById('loginButton');
+    const logoutBtn = document.getElementById('logoutButton');
+    if (loginBtn) loginBtn.classList.remove('hidden');
+    if (logoutBtn) logoutBtn.classList.add('hidden');
   }
 }
 
 async function loadDisplayName() {
   if (!currentUser) return;
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('display_name')
-    .eq('id', currentUser.id)
-    .single();
+  const { data, error } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
   if (data && data.display_name) {
     username = data.display_name;
     localStorage.setItem('username', username);
-    document.getElementById('logoutButton').classList.remove('hidden');
-    document.getElementById('loginButton').classList.add('hidden');
+    const loginBtn = document.getElementById('loginButton');
+    const logoutBtn = document.getElementById('logoutButton');
+    if (logoutBtn) logoutBtn.classList.remove('hidden');
+    if (loginBtn) loginBtn.classList.add('hidden');
   } else {
-    document.getElementById('displayNameModal').classList.add('active');
+    const displayModal = document.getElementById('displayNameModal');
+    if (displayModal) displayModal.classList.add('active');
   }
 }
 
 function openAuthModal() {
-  document.getElementById('authModal').classList.add('active');
-  document.getElementById('authError').textContent = '';
-  switchToSignIn();
+  const modal = document.getElementById('authModal');
+  if (modal) modal.classList.add('active');
 }
 
 function closeAuthModal() {
-  document.getElementById('authModal').classList.remove('active');
+  const modal = document.getElementById('authModal');
+  if (modal) modal.classList.remove('active');
 }
 
 function switchToSignIn() {
@@ -1243,9 +1247,9 @@ async function handleAuthSubmit() {
   const email = document.getElementById('emailInput').value.trim();
   const password = document.getElementById('passwordInput').value;
   const errorDiv = document.getElementById('authError');
-  errorDiv.textContent = '';
+  if (errorDiv) errorDiv.textContent = '';
   if (!email || !password) {
-    errorDiv.textContent = 'Please fill email and password';
+    if (errorDiv) errorDiv.textContent = 'Please fill email and password';
     return;
   }
   try {
@@ -1255,8 +1259,10 @@ async function handleAuthSubmit() {
     } else {
       result = await supabase.auth.signUp({ email, password });
       if (result.error) throw result.error;
-      errorDiv.style.color = 'green';
-      errorDiv.textContent = 'Account created! Check your email to confirm (then sign in).';
+      if (errorDiv) {
+        errorDiv.style.color = 'green';
+        errorDiv.textContent = 'Account created! Check your email to confirm.';
+      }
       return;
     }
     if (result.error) throw result.error;
@@ -1265,32 +1271,29 @@ async function handleAuthSubmit() {
     closeAuthModal();
     showStatusMessage('Logged in successfully!');
   } catch (err) {
-    errorDiv.textContent = err.message || 'Login failed';
+    if (errorDiv) errorDiv.textContent = err.message || 'Login failed';
   }
 }
 
 async function saveDisplayName() {
   if (!currentUser) return;
-  const displayNameInput = document.getElementById('displayNameInput').value.trim();
+  const name = document.getElementById('displayNameInput').value.trim();
   const errorDiv = document.getElementById('displayNameError');
-  errorDiv.textContent = '';
-  if (displayNameInput.length < 1 || displayNameInput.length > 20) {
-    errorDiv.textContent = 'Display name must be 1-20 characters';
+  if (errorDiv) errorDiv.textContent = '';
+  if (name.length < 1 || name.length > 20) {
+    if (errorDiv) errorDiv.textContent = '1-20 characters only';
     return;
   }
-  const { error } = await supabase
-    .from('profiles')
-    .upsert({ id: currentUser.id, display_name: displayNameInput });
+  const { error } = await supabase.from('profiles').upsert({ id: currentUser.id, display_name: name });
   if (error) {
-    errorDiv.textContent = error.message;
+    if (errorDiv) errorDiv.textContent = error.message;
     return;
   }
-  username = displayNameInput;
+  username = name;
   localStorage.setItem('username', username);
-  document.getElementById('displayNameModal').classList.remove('active');
-  document.getElementById('logoutButton').classList.remove('hidden');
-  document.getElementById('loginButton').classList.add('hidden');
-  showStatusMessage('Display name saved! You are ready to chat.');
+  const modal = document.getElementById('displayNameModal');
+  if (modal) modal.classList.remove('active');
+  showStatusMessage('Display name saved!');
 }
 
 async function logout() {
@@ -1298,14 +1301,16 @@ async function logout() {
   currentUser = null;
   username = '';
   localStorage.removeItem('username');
-  document.getElementById('logoutButton').classList.add('hidden');
-  document.getElementById('loginButton').classList.remove('hidden');
+  const loginBtn = document.getElementById('loginButton');
+  const logoutBtn = document.getElementById('logoutButton');
+  if (logoutBtn) logoutBtn.classList.add('hidden');
+  if (loginBtn) loginBtn.classList.remove('hidden');
   showStatusMessage('Logged out.');
   window.location.reload();
 }
 
-// Attach button listeners ONLY after the page is fully loaded
-document.addEventListener('DOMContentLoaded', () => {
+// Safe attachment (waits for Cloudflare Rocket Loader)
+window.addEventListener('load', () => {
   const loginBtn = document.getElementById('loginButton');
   const logoutBtn = document.getElementById('logoutButton');
   const signinTab = document.getElementById('signinTab');

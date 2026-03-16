@@ -1,9 +1,3 @@
-// === SUPABASE SETUP (exact same as SnookScore) ===
-const supabaseUrl = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
-const supabase = Supabase.createClient(supabaseUrl, supabaseAnonKey);
-
-// === NEW VARIABLES FOR SUPABASE ===
 let currentUser = null;
 let username = ''; // will be set from profiles.display_name
 let turnCredential = '';

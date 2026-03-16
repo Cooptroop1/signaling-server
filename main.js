@@ -1,4 +1,12 @@
-let turnUsername = '';
+// === SUPABASE SETUP (exact same as SnookScore) ===
+const supabaseUrl = 'https://YOUR-PROJECT.supabase.co';     // ← REPLACE WITH YOUR SUPABASE URL
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'; // ← REPLACE WITH YOUR ANON PUBLIC KEY
+
+const supabase = Supabase.createClient(supabaseUrl, supabaseAnonKey);
+
+// === NEW VARIABLES FOR SUPABASE ===
+let currentUser = null;
+let username = ''; // will be set from profiles.display_name
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
@@ -1183,18 +1191,147 @@ setInterval(() => {
   }
   console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
 }, 300000); // 5min
-// New: Claim username handler (in socket.onmessage or separate)
-document.getElementById('claimSubmitButton').onclick = async () => {
-  const name = document.getElementById('claimUsernameInput').value.trim();
-  const pass = document.getElementById('claimPasswordInput').value;
-  if (name && pass) {
-    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
+// =============================================
+// SUPABASE AUTH + DISPLAY NAME (clean like SnookScore)
+// =============================================
+
+async function initSupabaseAuth() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    currentUser = session.user;
+    await loadDisplayName();
+  } else {
+    document.getElementById('logoutButton').classList.add('hidden');
+    document.getElementById('loginButton').classList.remove('hidden');
   }
-};
-// New: Search user handler
-document.getElementById('searchSubmitButton').onclick = () => {
-  const name = document.getElementById('searchUsernameInput').value.trim();
-  if (name) {
-    socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
+}
+
+async function loadDisplayName() {
+  if (!currentUser) return;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('display_name')
+    .eq('id', currentUser.id)
+    .single();
+
+  if (data && data.display_name) {
+    username = data.display_name;
+    localStorage.setItem('username', username);
+    document.getElementById('logoutButton').classList.remove('hidden');
+    document.getElementById('loginButton').classList.add('hidden');
+  } else {
+    // No display name yet → show modal
+    document.getElementById('displayNameModal').classList.add('active');
   }
-};
+}
+
+function openAuthModal() {
+  document.getElementById('authModal').classList.add('active');
+  document.getElementById('authError').textContent = '';
+  switchToSignIn(); // default to Sign In tab
+}
+
+function closeAuthModal() {
+  document.getElementById('authModal').classList.remove('active');
+}
+
+function switchToSignIn() {
+  document.getElementById('authTitle').textContent = 'Sign In';
+  document.getElementById('authSubmitButton').textContent = 'Sign In';
+  document.getElementById('signinTab').classList.add('border-b-2', 'border-blue-600', 'text-blue-600');
+  document.getElementById('signupTab').classList.remove('border-b-2', 'border-blue-600', 'text-blue-600');
+}
+
+function switchToSignUp() {
+  document.getElementById('authTitle').textContent = 'Sign Up';
+  document.getElementById('authSubmitButton').textContent = 'Create Account';
+  document.getElementById('signupTab').classList.add('border-b-2', 'border-blue-600', 'text-blue-600');
+  document.getElementById('signinTab').classList.remove('border-b-2', 'border-blue-600', 'text-blue-600');
+}
+
+async function handleAuthSubmit() {
+  const email = document.getElementById('emailInput').value.trim();
+  const password = document.getElementById('passwordInput').value;
+  const errorDiv = document.getElementById('authError');
+  errorDiv.textContent = '';
+
+  if (!email || !password) {
+    errorDiv.textContent = 'Please fill email and password';
+    return;
+  }
+
+  try {
+    let result;
+    if (document.getElementById('authTitle').textContent === 'Sign In') {
+      result = await supabase.auth.signInWithPassword({ email, password });
+    } else {
+      result = await supabase.auth.signUp({ email, password });
+      if (result.error) throw result.error;
+      // After signup, user may need to confirm email (Supabase default)
+      errorDiv.style.color = 'green';
+      errorDiv.textContent = 'Account created! Check your email to confirm (then sign in).';
+      return;
+    }
+
+    if (result.error) throw result.error;
+
+    currentUser = result.data.user;
+    await loadDisplayName();
+    closeAuthModal();
+    showStatusMessage('Logged in successfully!');
+  } catch (err) {
+    errorDiv.textContent = err.message || 'Login failed';
+  }
+}
+
+async function saveDisplayName() {
+  if (!currentUser) return;
+  const displayNameInput = document.getElementById('displayNameInput').value.trim();
+  const errorDiv = document.getElementById('displayNameError');
+  errorDiv.textContent = '';
+
+  if (displayNameInput.length < 1 || displayNameInput.length > 20) {
+    errorDiv.textContent = 'Display name must be 1-20 characters';
+    return;
+  }
+
+  const { error } = await supabase
+    .from('profiles')
+    .upsert({ id: currentUser.id, display_name: displayNameInput });
+
+  if (error) {
+    errorDiv.textContent = error.message;
+    return;
+  }
+
+  username = displayNameInput;
+  localStorage.setItem('username', username);
+  document.getElementById('displayNameModal').classList.remove('active');
+  document.getElementById('logoutButton').classList.remove('hidden');
+  document.getElementById('loginButton').classList.add('hidden');
+  showStatusMessage('Display name saved! You are ready to chat.');
+}
+
+async function logout() {
+  await supabase.auth.signOut();
+  currentUser = null;
+  username = '';
+  localStorage.removeItem('username');
+  document.getElementById('logoutButton').classList.add('hidden');
+  document.getElementById('loginButton').classList.remove('hidden');
+  showStatusMessage('Logged out.');
+  window.location.reload(); // clean reset
+}
+
+// Attach button listeners (runs once when page loads)
+document.getElementById('loginButton').onclick = openAuthModal;
+document.getElementById('logoutButton').onclick = logout;
+
+document.getElementById('signinTab').onclick = switchToSignIn;
+document.getElementById('signupTab').onclick = switchToSignUp;
+document.getElementById('authSubmitButton').onclick = handleAuthSubmit;
+document.getElementById('authCancelButton').onclick = closeAuthModal;
+document.getElementById('saveDisplayNameButton').onclick = saveDisplayName;
+
+// Start Supabase on page load
+initSupabaseAuth();

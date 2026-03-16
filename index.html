@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Anonomoose Chat</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions; object-src 'none'; base-uri 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://*.supabase.co; object-src 'none'; base-uri 'self';">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
@@ -18,7 +18,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * {
       cursor: default;
@@ -749,13 +749,10 @@
         <button id="backButtonConnect" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
       </div>
       <div class="text-center mt-4 footer-buttons">
-        <button id="claimUsernameButton" class="text-blue-500 hover:underline hidden" aria-label="Claim a username">Claim Username</button>
-        <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
-        <button id="searchUserButton" class="text-blue-500 hover:underline" aria-label="Search for user">Search User</button>
-        <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log out">Log Out</button>
-        <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
-        <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
-      </div>
+  <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with Supabase">Login / Sign Up</button>
+  <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log out">Log Out</button>
+  <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
+  </div>
     </div>
     <div id="maxClientsContainer" class="hidden flex flex-col justify-center bg-black p-4 rounded-lg shadow-lg">
       <span class="text-white mb-2 font-bold">Max Users</span>
@@ -821,39 +818,7 @@
       <button id="closeTotpSecretButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-blue-600">Close</button>
     </div>
   </div>
-  <div id="claimUsernameModal" class="totp-modal" role="dialog" aria-label="Claim Username" tabindex="-1">
-    <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Claim Username</h2>
-      <p class="text-sm text-red-500 mb-2">Warning: Encryption keys are stored locally. On a new device, re-claim to update keys (old offline messages may be lost).</p>
-      <input id="claimUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Desired username (1-16 chars)" maxlength="16">
-      <input id="claimPasswordInput" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Password (min 8 chars)">
-      <div id="claimError" class="text-red-500 mb-2"></div>
-      <div id="claimSuccess" class="text-green-500 mb-2"></div>
-      <button id="claimSubmitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Claim</button>
-      <button id="claimCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
-    </div>
-  </div>
-  <div id="loginModal" class="totp-modal hidden" role="dialog" aria-label="Login" tabindex="-1">
-    <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Login</h2>
-      <input id="loginUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Username" maxlength="16">
-      <input id="loginPasswordInput" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Password">
-      <div id="loginError" class="text-red-500 mb-2"></div>
-      <div id="loginSuccess" class="text-green-500 mb-2"></div>
-      <button id="loginSubmitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Login</button>
-      <button id="loginCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
-    </div>
-  </div>
-  <div id="searchUserModal" class="totp-modal hidden" role="dialog" aria-label="Search User" tabindex="-1">
-    <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Search User</h2>
-      <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username" maxlength="16">
-      <div id="searchError" class="text-red-500 mb-2"></div>
-      <div id="searchResult" class="mb-2"></div>
-      <button id="searchSubmitButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Search</button>
-      <button id="searchCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
-    </div>
-  </div>
+  
   <div id="incomingConnectionModal" class="totp-modal hidden" role="dialog" aria-label="Incoming Connection Request" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Incoming Connection</h2>
@@ -862,6 +827,32 @@
       <button id="denyButton" class="bg-red-500 text-white px-4 py-2 rounded w-full hover:bg-red-600 mt-2">Deny</button>
     </div>
   </div>
+  <!-- NEW SUPABASE AUTH MODAL -->
+<div id="authModal" class="totp-modal" role="dialog" aria-label="Supabase Login">
+  <div class="totp-modal-content">
+    <h2 id="authTitle" class="text-xl font-bold mb-4 text-center">Sign In</h2>
+    <div class="flex mb-4 border-b">
+      <button id="signinTab" class="flex-1 py-3 text-blue-600 border-b-2 border-blue-600 font-medium">Sign In</button>
+      <button id="signupTab" class="flex-1 py-3 text-gray-500 font-medium">Sign Up</button>
+    </div>
+    <input id="emailInput" type="email" class="border border-gray-300 p-3 w-full mb-3 rounded-lg" placeholder="you@email.com">
+    <input id="passwordInput" type="password" class="border border-gray-300 p-3 w-full mb-4 rounded-lg" placeholder="Password (8+ characters)">
+    <div id="authError" class="text-sm text-center min-h-[24px] text-red-500"></div>
+    <button id="authSubmitButton" class="bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg w-full font-medium">Sign In</button>
+    <button id="authCancelButton" class="mt-4 text-gray-600 hover:text-gray-800 w-full py-2">Cancel</button>
+  </div>
+</div>
+
+<!-- NEW DISPLAY NAME MODAL -->
+<div id="displayNameModal" class="totp-modal" role="dialog" aria-label="Set Display Name">
+  <div class="totp-modal-content">
+    <h2 class="text-xl font-bold mb-4">Set Your Display Name</h2>
+    <p class="text-gray-600 mb-4 text-sm">How others will see you in chats</p>
+    <input id="displayNameInput" type="text" maxlength="20" class="border border-gray-300 p-3 w-full rounded-lg" placeholder="Display Name">
+    <div id="displayNameError" class="text-red-500 text-sm mb-3"></div>
+    <button id="saveDisplayNameButton" class="bg-green-500 text-white py-3 px-6 rounded-lg w-full">Save</button>
+  </div>
+</div>
   <script src="crypto.js"></script>
   <script src="utils.js"></script>
   <script src="main.js"></script>

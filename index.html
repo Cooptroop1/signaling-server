@@ -1,872 +1,945 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Anonomoose Chat</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://*.supabase.co; object-src 'none'; base-uri 'self';">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
-  <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png">
-  <link rel="apple-touch-icon" sizes="256x256" href="/256.png">
-  <link rel="apple-touch-icon" sizes="512x512" href="/512.png">
-  <link rel="icon" sizes="192x192" href="/192.png">
-  <link rel="icon" sizes="256x256" href="/256.png">
-  <link rel="icon" sizes="512x512" href="/512.png">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <style>
-    * {
-      cursor: default;
-      user-select: none;
-    }
-    input[type="text"],
-    input[type="number"],
-    input[type="file"],
-    textarea {
-      cursor: text;
-      user-select: text;
-    }
-    #codeDisplay {
-      user-select: text;
-    }
-    #totpSecretDisplay {
-      user-select: text;
-      cursor: text;
-    }
-    body {
-      min-height: 100vh;
-      padding-top: 240px;
-      padding-bottom: 140px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    #messages {
-      display: flex;
-      flex-direction: column-reverse;
-      overflow-y: auto;
-      overflow-x: hidden;
-      scroll-behavior: auto;
-      z-index: 0;
-      margin-bottom: 0.5rem;
-      border-radius: 0.5rem;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      height: 296px;
-      background-color: #fce7f3;
-      background-image: none;
-      background-size: 100% 100%;
-      background-position: center;
-      background-repeat: no-repeat;
-    }
-    #messages.waiting {
-      background-color: transparent;
-      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
-    }
-    .corner-logo {
-      position: absolute;
-      top: -5px;
-      right: 10px;
-      width: 256px;
-      height: 256px;
-      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logo.png?sanitize=true');
-      background-size: contain;
-      background-repeat: no-repeat;
-      background-position: center;
-      z-index: 100;
-      transition: background-image 0.5s ease;
-    }
-    .corner-logo.wink {
-      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logoWink.png?sanitize=true');
-    }
-    .bg-white {
-      z-index: 10;
-      max-width: 500px;
-      width: 100%;
-      margin: 0 auto;
-      margin-top: 100px;
-    }
-    @media (min-width: 641px) and (max-width: 1024px) {
-      .corner-logo {
-        z-index: -1;
-      }
-    }
-    @media (max-width: 640px) {
-      body {
-        padding-top: 80px;
-        padding-bottom: 80px;
-      }
-      .bg-white {
-        padding: 1rem;
-        max-width: none;
-        width: 100%;
-        margin-top: 50px;
-      }
-      .corner-logo {
-        position: absolute;
-        top: 0px;
-        right: 10px;
-        width: 128px;
-        height: 128px;
-        z-index: 1000;
-      }
-      #chatContainer:not(.hidden) #messages.waiting ~ .corner-logo {
-        position: absolute;
-        top: 0px;
-        right: 10px;
-        width: 128px;
-        height: 128px;
-        z-index: 1000;
-      }
-      #maxClientsContainer {
-        position: absolute;
-        bottom: -335px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 100%;
-        max-width: 360px;
-        margin: 0;
-        padding: 0.75rem;
-        background-color: #000000;
-        border-radius: 0.5rem;
-        z-index: 1000;
-      }
-      #maxClientsRadios {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 0.3rem;
-        justify-items: center;
-      }
-      #maxClientsRadios button {
-        background-color: #3b82f6;
-        color: white;
-        border-radius: 0.5rem;
-        padding: 0.4rem;
-        font-size: 0.9rem;
-        width: 100%;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        transition: all 0.2s ease;
-      }
-      #maxClientsRadios button.active {
-        background-color: #10b981;
-      }
-      #maxClientsRadios button:hover:not(:disabled) {
-        background-color: #1d4ed8;
-      }
-      #maxClientsRadios button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .button-group {
-        margin: 0.5rem 0.3rem;
-        width: calc(100% - 0.6rem);
-      }
-      #messages {
-        width: 100%;
-        max-width: none;
-      }
-      h1.text-3xl {
-        font-size: 1.5rem;
-        margin-bottom: 0.75rem;
-        padding: 0.25rem 0;
-      }
-      #status, #privacyStatus {
-        font-size: 0.875rem;
-        margin-bottom: 0.5rem;
-        padding: 0.25rem 0;
-      }
-    }
-    .message-bubble {
-      max-width: 70%;
-      margin: 0.1rem 1rem;
-      padding: 0.25rem 0.5rem;
-      border-radius: 1rem;
-      overflow-wrap: break-word;
-      word-break: break-word;
-      hyphens: auto;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-      display: inline-flex;
-      flex-direction: column;
-      align-items: flex-start;
-    }
-    .message-bubble img, .message-bubble audio {
-      max-width: 100%;
-      border-radius: 0.5rem;
-      margin: 0.15rem 0 0.5rem;
-    }
-    .message-bubble.self {
-      background-color: #3b82f6;
-      color: white;
-      margin-left: auto;
-      border-bottom-right-radius: 0.25rem;
-    }
-    .message-bubble.other {
-      background-color: #10b981;
-      color: white;
-      margin-right: auto;
-      border-bottom-left-radius: 0.25rem;
-    }
-    .timestamp {
-      font-size: 0.5rem;
-      opacity: 0.8;
-    }
-    .modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.9);
-      z-index: 2000;
-      align-items: center;
-      justify-content: center;
-    }
-    .modal img, .modal audio {
-      max-width: 90%;
-      max-height: 90%;
-      border-radius: 0.5rem;
-    }
-    .modal.active {
-      display: flex;
-    }
-    .help-modal, .add-user-modal, .totp-modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.7);
-      z-index: 2000;
-      align-items: center;
-      justify-content: center;
-    }
-    .help-modal-content, .add-user-modal-content, .totp-modal-content {
-      background-color: white;
-      padding: 1.5rem;
-      border-radius: 0.5rem;
-      max-width: 90%;
-      max-height: 90%;
-      overflow-y: auto;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    }
-    .help-modal.active, .add-user-modal.active, .totp-modal.active {
-      display: flex;
-    }
-    #chatContainer.hidden {
-      display: none;
-      visibility: hidden;
-    }
-    #chatContainer {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      position: relative;
-    }
-    .input-container {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.375rem;
-      margin: 0.5rem 0.8rem;
-      width: calc(100% - 1.6rem);
-      box-sizing: border-box;
-      z-index: 10;
-    }
-    .input-container.hidden {
-      display: none;
-    }
-    #messageInput {
-      resize: none;
-      overflow-y: auto;
-      height: 2.5rem;
-      max-height: 12.5rem;
-      line-height: 1.5rem;
-      flex: 1;
-      min-width: 0;
-      background-color: #3b82f6;
-      color: white;
-      border-radius: 1rem;
-      padding: 0.5rem 1rem;
-      border: none;
-      box-sizing: border-box;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      transition: all 0.2s ease;
-      width: 100%;
-      margin-right: 0.375rem;
-    }
-    #messageInput.expanded {
-      height: auto;
-    }
-    .text-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.375rem;
-      width: 100%;
-    }
-    .button-row-below {
-      display: flex;
-      justify-content: flex-start;
-      gap: 0.75rem;
-      width: 100%;
-    }
-    #imageButton, #voiceButton, #voiceCallButton, #audioOutputButton, #grokButton, #sendButton {
-      width: 2.5rem;
-      height: 2.5rem;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.2rem;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      transition: all 0.2s ease;
-      flex-shrink: 0;
-    }
-    #imageButton, #voiceButton, #voiceCallButton, #audioOutputButton, #grokButton {
-      background-color: #10b981;
-      color: white;
-    }
-    #imageButton:hover, #voiceButton:hover, #voiceCallButton:hover, #audioOutputButton:hover, #grokButton:hover {
-      background-color: #059669;
-    }
-    #voiceButton.recording, #voiceCallButton.active, #audioOutputButton.speaker, #grokButton.active {
-      background-color: #ef4444;
-    }
-    #voiceTimer {
-      font-size: 0.8rem;
-      color: white;
-      background-color: #6b7280;
-      padding: 0.3rem 0.6rem;
-      border-radius: 0.5rem;
-      display: none;
-      align-items: center;
-      justify-content: center;
-    }
-    @media (max-width: 640px) {
-      .input-container {
-        margin: 0.5rem 0.3rem;
-        width: calc(100% - 0.6rem);
-      }
-      #messageInput {
-        padding: 0.5rem 0.75rem;
-      }
-    }
-    #messageInput::-webkit-scrollbar {
-      display: none;
-    }
-    #messageInput {
-      -ms-overflow-style: none;
-      scrollbar-width: none;
-    }
-    #sendButton {
-      background-color: #2563eb;
-      color: white;
-    }
-    #sendButton:hover {
-      background-color: #1d4ed8;
-    }
-    .button-group {
-      display: flex;
-      justify-content: space-between;
-      margin: 0.5rem 0.8rem;
-      width: calc(100% - 1.6rem);
-      box-sizing: border-box;
-    }
-    .button-group button {
-      padding: 0.35rem 0.9rem;
-      border-radius: 0.375rem;
-      cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      transition: all 0.2s ease;
-      flex: 1;
-      margin: 0 0.25rem;
-    }
-    #button1 {
-      background-color: #9b59b6;
-      color: white;
-      margin-left: -3.25mm;
-    }
-    #button1:hover {
-      background-color: #8e44ad;
-    }
-    #button2 {
-      background-color: #f1c40f;
-      color: white;
-    }
-    #button2:hover {
-      background-color: #d4a017;
-    }
-    #button2:disabled {
-      background-color: #d4a017;
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    #copyCodeButton {
-      background-color: #10b981;
-      color: white;
-      margin-right: -3.25mm;
-    }
-    #copyCodeButton:hover {
-      background-color: #059669;
-    }
-    #helpText, #addUserText {
-      color: #3b82f6;
-      cursor: pointer;
-      transition: color 0.2s ease;
-    }
-    #helpText:hover, #addUserText:hover {
-      color: #1d4ed8;
-    }
-    @media (min-width: 1025px) {
-      .bg-white {
-        margin-top: -165px;
-      }
-      #maxClientsContainer {
-        min-height: calc(100% + 37.8px);
-        margin-top: -50px;
-      }
-    }
-    @media (min-width: 641px) and (max-width: 1024px) {
-      .bg-white {
-        margin-top: -165px;
-      }
-      #maxClientsContainer {
-        margin-top: -50px;
-      }
-    }
-    #maxClientsContainer {
-      margin-top: 145px;
-    }
-    @media (min-width: 641px) {
-      #maxClientsRadios {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        align-items: center;
-      }
-      #maxClientsRadios button {
-        background-color: #3b82f6;
-        color: white;
-        border-radius: 0.5rem;
-        padding: 0.5rem;
-        font-size: 1rem;
-        width: 60px;
-        text-align: center;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        transition: all 0.2s ease;
-      }
-      #maxClientsRadios button.active {
-        background-color: #10b981;
-      }
-      #maxClientsRadios button:hover:not(:disabled) {
-        background-color: #1d4ed8;
-      }
-      #maxClientsRadios button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-    }
-    #remoteAudioContainer {
-      display: none;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-top: 0.5rem;
-    }
-    #remoteAudioContainer audio {
-      width: 100%;
-      max-width: 300px;
-      margin: 0.5rem;
-    }
-    .hidden {
-      display: none !important;
-    }
-    #grokKeyContainer {
-      display: none;
-      margin-top: 0.5rem;
-    }
-    #grokKeyContainer.active {
-      display: block;
-    }
-    #grokApiKey {
-      width: 100%;
-      padding: 0.5rem;
-      border-radius: 0.5rem;
-      border: 1px solid #ccc;
-    }
-    #imageInput {
-      display: none;
-    }
-    #maxClientsContainer {
-      display: none;
-    }
-    #maxClientsRadios {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(50px, 1fr));
-      gap: 0.5rem;
-    }
-    #maxClientsRadios button {
-      background-color: #3b82f6;
-      color: white;
-      border-radius: 0.5rem;
-      padding: 0.5rem;
-      font-size: 1rem;
-      text-align: center;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      transition: all 0.2s ease;
-    }
-    #maxClientsRadios button.active {
-      background-color: #10b981;
-    }
-    #maxClientsRadios button:hover:not(:disabled) {
-      background-color: #1d4ed8;
-    }
-    .footer-buttons {
-      display: flex;
-      justify-content: center;
-      gap: 1rem;
-    }
-    .add-user-modal-content h2 {
-      text-align: center;
-      margin-bottom: 1rem;
-    }
-    .messages-wrapper {
-      position: relative;
-      margin-bottom: 0.5rem;
-      border-radius: 0.5rem;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      height: 296px;
-    }
-    .user-dots {
-      position: absolute;
-      top: 5px;
-      left: 5px;
-      display: flex;
-      gap: 4px;
-      z-index: 10;
-    }
-    .user-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      cursor: pointer;
-      position: relative;
-    }
-    .online {
-      background-color: green;
-    }
-    .offline {
-      background-color: red;
-    }
-    .user-dot.online:hover .user-menu {
-      display: block;
-    }
-    .user-menu {
-      display: none;
-      position: absolute;
-      top: 100%;
-      left: 0;
-      background-color: white;
-      border: 1px solid #ccc;
-      border-radius: 0.5rem;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      z-index: 100;
-      min-width: 100px;
-    }
-    .user-menu button {
-      display: block;
-      width: 100%;
-      padding: 0.5rem;
-      text-align: left;
-      border: none;
-      background: none;
-      cursor: pointer;
-    }
-    .user-menu button:hover {
-      background-color: #f0f0f0;
-    }
-    [data-has-code] #initialContainer,
-    [data-has-code] #connectContainer,
-    [data-has-code] #usernameContainer,
-    [data-has-code] #codeDisplay,
-    [data-has-code] #copyCodeButton {
-      display: none;
-    }
-    [data-has-code] #chatContainer {
-      display: flex;
-    }
-    [data-has-code] #messages {
-      background-color: transparent;
-      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
-      background-size: contain;
-      background-position: center;
-      background-repeat: no-repeat;
-    }
-    [data-has-code] .button-group,
-    [data-has-code] .input-container,
-    [data-has-code] #newSessionButton,
-    [data-has-code] #remoteAudioContainer,
-    [data-has-code] #grokKeyContainer,
-    [data-has-code] .footer-buttons {
-      display: none;
-    }
-    #totpSecretDisplay {
-      text-align: center;
-      margin-top: 1rem;
-    }
-    #qrCodeCanvas {
-      margin: 0 auto;
-      display: block;
-    }
-    #totpInputModal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.7);
-      z-index: 2000;
-      align-items: center;
-      justify-content: center;
-    }
-    #totpInputModal.active {
-      display: flex;
-    }
-    #totpInputModalContent {
-      background-color: white;
-      padding: 1.5rem;
-      border-radius: 0.5rem;
-      max-width: 90%;
-      max-height: 90%;
-      overflow-y: auto;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    }
-    .totp-modal.active {
-      display: flex !important;
-      z-index: 9999 !important;
-    }
-    .totp-modal-content {
-      background-color: white !important;
-      min-width: 300px;
-    }
-    #recentChats {
-      margin-top: 1rem;
-    }
-    #recentCodesList button {
-      background-color: #3b82f6;
-      color: white;
-      padding: 0.5rem;
-      border-radius: 0.5rem;
-      margin-bottom: 0.5rem;
-      width: 100%;
-    }
-    #recentCodesList button:hover {
-      background-color: #1d4ed8;
-    }
-    #toggleRecent {
-      background: none;
-      border: none;
-      color: #3b82f6;
-      cursor: pointer;
-      font-size: 0.875rem;
-      padding: 0;
-      margin-left: 0.5rem;
-    }
-  </style>
-</head>
-<body class="bg-black min-h-screen flex items-center justify-center">
-  <div class="flex w-full max-w-xl mx-auto">
-    <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
-      <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Anonomoose Chat</h1>
-      <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Start a new chat or connect to an existing one</div>
-      <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">E2E Encrypted (P2P)</div>
-      <div id="initialContainer">
-        <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
-        <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
-        <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to an existing chat">Connect to Chat</button>
-        <button id="connect2FAChatButton" class="bg-teal-500 text-white px-4 py-2 rounded w-full hover:bg-teal-600 transition-colors" aria-label="Connect to 2FA Room">Connect to 2FA Room</button>
-        <div id="recentChats" class="mt-4">
-          <h2 class="text-xl font-bold mb-2">Recent Chats <button id="toggleRecent" title="Toggle Recent Chats">Show</button></h2>
-          <div id="recentCodesList" class="hidden"></div>
-        </div>
-      </div>
-      <div id="usernameContainer" class="hidden">
-        <label for="usernameInput" class="sr-only">Enter your username</label>
-        <input id="usernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameHelp" maxlength="16">
-        <div id="usernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
-        <button id="joinWithUsernameButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Join chat with username">Join Chat</button>
-        <button id="backButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
-      </div>
-      <div id="codeDisplay" class="text-center mb-4 font-mono text-lg text-gray-800 hidden" role="region" aria-live="polite"></div>
-      <div id="chatContainer" class="hidden">
-        <button id="newSessionButton" class="bg-red-500 text-white px-2 py-1 rounded w-full mb-1 hover:bg-red-600 transition-colors hidden" aria-label="Start a new session">New Session</button>
-        <div class="button-group">
-          <button id="button1" aria-label="Send code to random chat board">Send Code</button>
-          <button id="button2" aria-label="Join a random chat">Random Chat</button>
-          <button id="copyCodeButton" aria-label="Copy chat code">Copy Code</button>
-        </div>
-        <div class="messages-wrapper">
-          <div id="messages" role="log" aria-live="polite"></div>
-          <div id="userDots" class="user-dots"></div>
-        </div>
-        <div class="input-container hidden">
-          <div class="text-row">
-            <button id="imageButton" title="Send Image/File" aria-label="Send image or file">📷</button>
-            <label for="messageInput" class="sr-only">Type a message</label>
-            <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
-            <button id="sendButton" aria-label="Send message">📤</button>
-          </div>
-          <div class="button-row-below">
-            <input type="file" id="imageInput" aria-label="Upload image or file" />
-            <button id="voiceButton" title="Record Voice" aria-label="Record voice message">🎤</button>
-            <button id="voiceCallButton" title="Start Voice Call" aria-label="Start voice call">📞</button>
-            <button id="audioOutputButton" title="Toggle Speaker/Earpiece" aria-label="Toggle audio output" class="hidden">🔊</button>
-            <button id="grokButton" title="Toggle Grok Bot" aria-label="Toggle Grok bot">🤖</button>
-            <span id="voiceTimer" aria-live="assertive"></span>
-          </div>
-        </div>
-        <div id="remoteAudioContainer" class="hidden"></div>
-        <div id="grokKeyContainer" class="hidden">
-          <label for="grokApiKey" class="text-sm text-gray-600">Enter your xAI API Key (private, stored locally):</label>
-          <input id="grokApiKey" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="xai_xxxxxxxxxxxx">
-          <button id="saveGrokKey" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Save Key</button>
-        </div>
-      </div>
-      <div id="connectContainer" class="hidden">
-        <label for="usernameConnectInput" class="sr-only">Enter your username</label>
-        <input id="usernameConnectInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameConnectHelp" maxlength="16">
-        <div id="usernameConnectHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
-        <label for="codeInput" class="sr-only">Enter chat code</label>
-        <input id="codeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter code (xxxx-xxxx-xxxx-xxxx)" aria-describedby="codeHelp" maxlength="19">
-        <div id="codeHelp" class="text-sm text-gray-600 mb-2">Code format: xxxx-xxxx-xxxx-xxxx</div>
-        <button id="connectButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to chat">Connect</button>
-        <button id="backButtonConnect" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
-      </div>
-      <div class="text-center mt-4 footer-buttons">
-  <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with Supabase">Login / Sign Up</button>
-  <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log out">Log Out</button>
-  <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
-     </div>
-    </div>
-    <div id="maxClientsContainer" class="hidden flex flex-col justify-center bg-black p-4 rounded-lg shadow-lg">
-      <span class="text-white mb-2 font-bold">Max Users</span>
-      <div id="maxClientsRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
-    </div>
-  </div>
-  <div id="helpModal" class="help-modal" role="dialog" aria-label="Help information" tabindex="-1">
-    <div class="help-modal-content">
-      <h2 class="text-xl font-bold mb-4">Button Help</h2>
-      <p><strong>Start Chat:</strong> Starts New Chat</p>
-      <p><strong>Connect to Chat:</strong> This connects you to a chat that you have code for</p>
-      <p><strong>Send Code:</strong> This sends your code to Random chat board</p>
-      <p><strong>Random Chat:</strong> This takes you to random chat board for a random chat</p>
-      <p><strong>Copy Code:</strong> Copies the code so you can send to people in text or social chats</p>
-      <p><strong>Send Image/File:</strong> Send an image or file (max 5MB)</p>
-      <p><strong>Record Voice:</strong> Press to start/stop recording a voice message (max 30 seconds)</p>
-      <p><strong>Start Voice Call:</strong> Press to start/stop a voice call</p>
-      <p><strong>Toggle Speaker/Earpiece:</strong> Switch between speaker and earpiece for voice calls</p>
-      <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
-      <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
-      <p><strong>Login:</strong> Login with your claimed username to retrieve it on new devices and get offline messages.</p>
-      <p><strong>Search User:</strong> Search for a claimed username to get a dynamic code to connect.</p>
-    </div>
-  </div>
-  <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
-    <div class="add-user-modal-content">
-      <h2 class="text-xl font-bold mb-4">Select Max Users</h2>
-      <div id="addUserRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
-    </div>
-  </div>
-  <div id="totpOptionsModal" class="totp-modal" role="dialog" aria-label="2FA Options" tabindex="-1">
-    <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">2FA Room Options</h2>
-      <label for="totpUsernameInput" class="sr-only">Enter your username</label>
-      <input id="totpUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="totpUsernameHelp" maxlength="16">
-      <div id="totpUsernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
-      <div id="totpTypeOptions" class="mt-2">
-        <label><input type="radio" name="totpType" value="server" checked> Server-Generated Secret</label>
-        <label><input type="radio" name="totpType" value="custom"> Enter Custom Secret</label>
-      </div>
-      <div id="customTotpSecretContainer" class="hidden mt-2">
-        <label for="customTotpSecret" class="sr-only">Enter custom 2FA secret</label>
-        <input id="customTotpSecret" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter base32 secret (e.g., JBSWY3DPEHPK3PXP)" maxlength="32">
-      </div>
-      <button id="createTotpRoomButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-purple-600">Create 2FA Room</button>
-      <button id="cancelTotpButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
-    </div>
-  </div>
-  <div id="totpInputModal" class="totp-modal" role="dialog" aria-label="Enter 2FA Code" tabindex="-1">
-    <div id="totpInputModalContent" class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Enter 2FA Code</h2>
-      <input id="totpCodeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter 6-digit code" maxlength="6">
-      <button id="submitTotpCodeButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Submit</button>
-      <button id="cancelTotpInputButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
-    </div>
-  </div>
-  <div id="totpSecretModal" class="totp-modal" role="dialog" aria-label="Share 2FA Secret" tabindex="-1">
-    <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Share 2FA Secret</h2>
-      <p>Share this secret with friends in real life. Copy the text below or scan the QR code.</p>
-      <div id="totpSecretDisplay" class="mt-2 font-mono"></div>
-      <canvas id="qrCodeCanvas"></canvas>
-      <button id="closeTotpSecretButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-blue-600">Close</button>
-    </div>
-  </div>
-  <div id="incomingConnectionModal" class="totp-modal hidden" role="dialog" aria-label="Incoming Connection Request" tabindex="-1">
-    <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Incoming Connection</h2>
-      <p id="incomingMessage"></p>
-      <button id="acceptButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600 mt-2">Accept</button>
-      <button id="denyButton" class="bg-red-500 text-white px-4 py-2 rounded w-full hover:bg-red-600 mt-2">Deny</button>
-    </div>
-  </div>
-  <!-- NEW SUPABASE AUTH MODAL -->
-<div id="authModal" class="totp-modal" role="dialog" aria-label="Supabase Login">
-  <div class="totp-modal-content">
-    <h2 id="authTitle" class="text-xl font-bold mb-4 text-center">Sign In</h2>
-    
-    <div class="flex mb-4 border-b">
-      <button id="signinTab" class="flex-1 py-3 text-blue-600 border-b-2 border-blue-600 font-medium">Sign In</button>
-      <button id="signupTab" class="flex-1 py-3 text-gray-500 font-medium">Sign Up</button>
-    </div>
+const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const http = require('http');
+const https = require('https');
+const url = require('url');
+const crypto = require('crypto');
+const otplib = require('otplib');
+const UAParser = require('ua-parser-js');
+const { Pool } = require('pg');
+const redis = require('redis');
+const winston = require('winston');
+const validator = require('validator');
 
-    <input id="emailInput" type="email" class="border border-gray-300 p-3 w-full mb-3 rounded-lg" placeholder="you@email.com">
-    <input id="passwordInput" type="password" class="border border-gray-300 p-3 w-full mb-4 rounded-lg" placeholder="Password (8+ characters)">
+// Main logger
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.errors({ stack: true }),
+    winston.format.splat(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({ format: winston.format.combine(winston.format.colorize(), winston.format.simple()) }),
+    new winston.transports.File({ filename: path.join(__dirname, 'combined.log') }),
+    new winston.transports.File({ filename: path.join(__dirname, 'error.log'), level: 'error' })
+  ]
+});
 
-    <div id="authError" class="text-sm text-center min-h-[24px] text-red-500"></div>
+// User stats logger
+const userLogger = winston.createLogger({
+  format: winston.format.simple(),
+  transports: [new winston.transports.File({ filename: path.join(__dirname, 'user_counts.log') })]
+});
 
-    <button id="authSubmitButton" class="bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg w-full font-medium">Sign In</button>
-    <button id="authCancelButton" class="mt-4 text-gray-600 hover:text-gray-800 w-full py-2">Cancel</button>
-  </div>
-</div>
+// Audit logger
+const auditLogger = winston.createLogger({
+  format: winston.format.simple(),
+  transports: [new winston.transports.File({ filename: path.join(__dirname, 'audit.log') })]
+});
 
-<!-- NEW DISPLAY NAME MODAL -->
-<div id="displayNameModal" class="totp-modal" role="dialog" aria-label="Set Display Name">
-  <div class="totp-modal-content">
-    <h2 class="text-xl font-bold mb-4">Set Your Display Name</h2>
-    <p class="text-gray-600 mb-4 text-sm">How others will see you in chats</p>
-    <input id="displayNameInput" type="text" maxlength="20" class="border border-gray-300 p-3 w-full rounded-lg" placeholder="Display Name">
-    <div id="displayNameError" class="text-red-500 text-sm mb-3"></div>
-    <button id="saveDisplayNameButton" class="bg-green-500 text-white py-3 px-6 rounded-lg w-full">Save</button>
-  </div>
-</div>
-  <script src="crypto.js"></script>
-  <script src="utils.js"></script>
-  <script src="main.js"></script>
-  <script src="init.js"></script>
-  <script src="events.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then(() => console.log('Service Worker registered'))
-        .catch(err => console.error('Service Worker error:', err));
+const dbPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+dbPool.connect(async (err) => {
+  if (err) logger.error('DB connection error: %s %s', err.message, err.stack);
+  else {
+    logger.info('Connected to DB successfully');
+    await loadFeatures();
+    await loadAggregatedStats();
+  }
+});
+
+const redisClient = redis.createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+redisClient.on('error', err => logger.error('Redis Client Error %o', err));
+const pubClient = redisClient;
+const subClient = redisClient.duplicate();
+const subscribed = new Set();
+
+const messageHandler = async (msg, channel) => {
+  const code = channel.slice(5);
+  const room = rooms.get(code);
+  if (!room) return;
+  let parsed;
+  try { parsed = JSON.parse(msg); } catch (err) { return; }
+  if (parsed.type === 'relay') {
+    const { clientMessage, senderId } = parsed;
+    room.clients.forEach((client, clientId) => {
+      if (clientId !== senderId && client.ws.readyState === WebSocket.OPEN) client.ws.send(clientMessage);
+    });
+  } else if (parsed.type === 'unicast') {
+    const { clientMessage, targetId } = parsed;
+    room.clients.forEach((client, clientId) => {
+      if (clientId === targetId && client.ws.readyState === WebSocket.OPEN) client.ws.send(clientMessage);
+    });
+  } else if (parsed.type === 'broadcast') {
+    const broadcastMsg = JSON.parse(parsed.clientMessage);
+    room.clients.forEach(client => {
+      if (client.ws.readyState === WebSocket.OPEN) client.ws.send(JSON.stringify(broadcastMsg));
+    });
+  } else if (parsed.type === 'kick' || parsed.type === 'ban') {
+    const { targetId } = parsed;
+    if (room.clients.has(targetId)) {
+      const client = room.clients.get(targetId);
+      client.ws.send(JSON.stringify({ type: parsed.type, message: `You have been ${parsed.type}ed from the room.` }));
+      client.ws.close();
     }
-  </script>
-</body>
-</html>
+  }
+};
+
+(async () => {
+  await redisClient.connect();
+  await subClient.connect();
+  logger.info('Connected to Redis');
+  const randomCodesFromRedis = await redisClient.sMembers('randomCodes');
+  randomCodesFromRedis.forEach(code => randomCodes.add(code));
+  await subClient.subscribe('global:features', (msg) => {
+    try {
+      features = JSON.parse(msg);
+      logger.info('Received global features update via Redis: %o', features);
+      wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: 'features-update', ...features }));
+          if (!features.enableService) client.close();
+        }
+      });
+    } catch (err) {}
+  });
+})();
+
+const CERT_KEY_PATH = 'path/to/your/private-key.pem';
+const CERT_PATH = 'path/to/your/fullchain.pem';
+let server;
+if (process.env.NODE_ENV === 'production' || !fs.existsSync(CERT_KEY_PATH) || !fs.existsSync(CERT_PATH)) {
+  server = http.createServer();
+} else {
+  server = https.createServer({ key: fs.readFileSync(CERT_KEY_PATH), cert: fs.readFileSync(CERT_PATH) });
+}
+
+server.on('request', (req, res) => {
+  const proto = req.headers['x-forwarded-proto'];
+  if (proto && proto !== 'https') {
+    res.writeHead(301, { Location: `https://${req.headers.host}${req.url}` });
+    res.end();
+    return;
+  }
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  const fullUrl = new URL(req.url, `http://${req.headers.host}`);
+  let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+      return;
+    }
+    let contentType = 'text/plain';
+    if (filePath.endsWith('.html')) {
+      contentType = 'text/html';
+      const nonce = crypto.randomBytes(16).toString('base64');
+      let updatedCSP = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-" + nonce + "'; style-src 'self' https://cdn.jsdelivr.net 'nonce-" + nonce + "'; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com https://api.x.ai/v1/chat/completions https://*.supabase.co; object-src 'none'; base-uri 'self';";
+      data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/, `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
+      data = data.toString().replace(/<script(?! src)/g, `<script nonce="${nonce}"`);
+      data = data.toString().replace(/<style/g, `<style nonce="${nonce}"`);
+      let clientIdFromCookie;
+      const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [name, value] = cookie.trim().split('=');
+        acc[name] = value;
+        return acc;
+      }, {}) : {};
+      clientIdFromCookie = cookies['clientId'];
+      if (!clientIdFromCookie) {
+        clientIdFromCookie = uuidv4();
+        res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
+      }
+    } else if (filePath.endsWith('.js')) {
+      contentType = 'application/javascript';
+    }
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(data);
+  });
+});
+
+const wss = new WebSocket.Server({ server });
+const rooms = new Map();
+const dailyUsers = new Map();
+const dailyConnections = new Map();
+const LOG_FILE = path.join(__dirname, 'user_counts.log');
+const AUDIT_FILE_BASE = path.join(__dirname, 'audit');
+const UPDATE_INTERVAL = 30000;
+const randomCodes = new Set();
+const rateLimits = new Map();
+const allTimeUsers = new Set();
+const ipRateLimits = new Map();
+const ipDailyLimits = new Map();
+const ipFailureCounts = new Map();
+const ipBans = new Map();
+const clientSizeLimits = new Map();
+const ADMIN_SECRET = process.env.ADMIN_SECRET;
+if (!ADMIN_SECRET) throw new Error('ADMIN_SECRET environment variable is not set.');
+
+const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
+const TURN_USERNAME = process.env.TURN_USERNAME;
+const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
+const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
+
+let features = { enableService: true, enableImages: true, enableVoice: false, enableVoiceCalls: false, enableAudioToggle: false, enableGrokBot: false, enableP2P: true, enableRelay: true };
+let aggregatedStats = { daily: {} };
+
+async function loadFeatures() {
+  try {
+    const res = await dbPool.query('SELECT * FROM features LIMIT 1');
+    if (res.rows.length > 0) {
+      features = res.rows[0];
+      features.enableService = features.enableservice !== undefined ? features.enableservice : features.enableService;
+      features.enableImages = features.enableimages !== undefined ? features.enableimages : features.enableImages;
+      features.enableVoice = features.enablevoice !== undefined ? features.enablevoice : features.enableVoice;
+      features.enableVoiceCalls = features.enablevoicecalls !== undefined ? features.enablevoicecalls : features.enableVoiceCalls;
+      features.enableAudioToggle = features.enableaudiotoggle !== undefined ? features.enableaudiotoggle : features.enableAudioToggle;
+      features.enableGrokBot = features.enablegrokbot !== undefined ? features.enablegrokbot : features.enableGrokBot;
+      features.enableP2P = features.enablep2p !== undefined ? features.enablep2p : features.enableP2P;
+      features.enableRelay = features.enablerelay !== undefined ? features.enablerelay : features.enableRelay;
+    } else {
+      await dbPool.query('INSERT INTO features ("enableService", "enableImages", "enableVoice", "enableVoiceCalls", "enableAudioToggle", "enableGrokBot", "enableP2P", "enableRelay") VALUES (true, true, true, true, true, true, true, true)');
+      features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableAudioToggle: true, enableGrokBot: true, enableP2P: true, enableRelay: true };
+    }
+    logger.info('Loaded features from DB: %o', features);
+    pubClient.publish('global:features', JSON.stringify(features));
+  } catch (err) {
+    logger.error('Error loading features from DB: %s %s', err.message, err.stack);
+  }
+}
+
+async function saveFeatures() {
+  try {
+    await dbPool.query('UPDATE features SET "enableService"=$1, "enableImages"=$2, "enableVoice"=$3, "enableVoiceCalls"=$4, "enableAudioToggle"=$5, "enableGrokBot"=$6, "enableP2P"=$7, "enableRelay"=$8', [features.enableService, features.enableImages, features.enableVoice, features.enableVoiceCalls, features.enableAudioToggle, features.enableGrokBot, features.enableP2P, features.enableRelay]);
+    logger.info('Saved features to DB');
+  } catch (err) {
+    logger.error('Error saving features to DB: %s %s', err.message, err.stack);
+  }
+}
+
+async function loadAggregatedStats() {
+  try {
+    const res = await dbPool.query('SELECT data FROM aggregated_stats LIMIT 1');
+    if (res.rows.length > 0) aggregatedStats = res.rows[0].data;
+    else {
+      await dbPool.query('INSERT INTO aggregated_stats (data) VALUES ($1)', [JSON.stringify({ daily: {} })]);
+      aggregatedStats = { daily: {} };
+    }
+    logger.info('Loaded aggregatedStats from DB');
+  } catch (err) {
+    logger.error('Error loading aggregatedStats from DB: %s %s', err.message, err.stack);
+  }
+}
+
+async function saveAggregatedStats() {
+  try {
+    await dbPool.query('UPDATE aggregated_stats SET data = $1', [JSON.stringify(aggregatedStats)]);
+    logger.info('Saved aggregatedStats to DB');
+  } catch (err) {
+    logger.error('Error saving aggregatedStats to DB: %s %s', err.message, err.stack);
+  }
+}
+
+function isValidBase32(str) { return /^[A-Z2-7]+=*$/i.test(str) && str.length >= 16; }
+function isValidBase64(str) {
+  if (typeof str !== 'string') return false;
+  let sanitized = str.replace(/[^A-Za-z0-9+/=]/g, '');
+  const padding = (4 - sanitized.length % 4) % 4;
+  sanitized += '='.repeat(padding);
+  return /^[A-Za-z0-9+/=]+$/.test(sanitized);
+}
+
+function validateMessage(data) {
+  if (typeof data !== 'object' || data === null || !data.type) return { valid: false, error: 'Invalid message: must be an object with "type" field' };
+  if (data.clientId && typeof data.clientId !== 'string') return { valid: false, error: 'Invalid clientId: must be a string' };
+  if (data.code && !validateCode(data.code)) return { valid: false, error: 'Invalid code format' };
+  if (data.username && !validateUsername(data.username)) return { valid: false, error: 'Invalid username: 1-16 alphanumeric characters' };
+  switch (data.type) {
+    case 'connect':
+      if (!data.clientId || typeof data.clientId !== 'string') return { valid: false, error: 'connect: clientId required as string' };
+      break;
+    case 'join':
+      if (!data.code) return { valid: false, error: 'join: code required' };
+      if (!data.username) return { valid: false, error: 'join: username required' };
+      if (data.totpCode && typeof data.totpCode !== 'string') return { valid: false, error: 'join: totpCode must be a string if provided' };
+      break;
+    case 'check-totp':
+      if (!data.code) return { valid: false, error: 'check-totp: code required' };
+      break;
+    case 'set-max-clients':
+      const maxLimit = features.enableP2P ? 4 : 50;
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > maxLimit) return { valid: false, error: `set-max-clients: maxClients must be number between 2 and ${maxLimit}` };
+      if (!data.code) return { valid: false, error: 'set-max-clients: code required' };
+      break;
+    case 'offer':
+    case 'answer':
+      if (!data.offer && !data.answer) return { valid: false, error: data.type + ': offer or answer required' };
+      if (!data.targetId || typeof data.targetId !== 'string') return { valid: false, error: data.type + ': targetId required as string' };
+      if (!data.code) return { valid: false, error: data.type + ': code required' };
+      break;
+    case 'candidate':
+      if (!data.candidate) return { valid: false, error: 'candidate: candidate required' };
+      if (!data.targetId || typeof data.targetId !== 'string') return { valid: false, error: 'candidate: targetId required as string' };
+      if (!data.code) return { valid: false, error: 'candidate: code required' };
+      break;
+    case 'kick':
+    case 'ban':
+      if (!data.targetId || typeof data.targetId !== 'string') return { valid: false, error: `${data.type}: targetId required as string` };
+      if (!data.code) return { valid: false, error: `${data.type}: code required` };
+      break;
+    case 'submit-random':
+      if (!data.code) return { valid: false, error: 'submit-random: code required' };
+      break;
+    case 'get-random-codes':
+      break;
+    case 'relay-message':
+      if ((!data.content && !data.encryptedContent && !data.data && !data.encryptedData) || typeof (data.content || data.encryptedContent || data.data || data.encryptedData) !== 'string') return { valid: false, error: 'relay-message: content, encryptedContent, data, or encryptedData required as string' };
+      if ((data.encryptedContent || data.encryptedData) && !data.iv) return { valid: false, error: 'relay-message: iv required' };
+      if ((data.encryptedContent || data.encryptedData) && !data.signature) return { valid: false, error: 'relay-message: signature required' };
+      if (!data.messageId || typeof data.messageId !== 'string') return { valid: false, error: 'relay-message: messageId required as string' };
+      if (!data.timestamp || typeof data.timestamp !== 'number') return { valid: false, error: 'relay-message: timestamp required as number' };
+      if (!data.nonce || typeof data.nonce !== 'string') return { valid: false, error: 'relay-message: nonce required as string' };
+      if (!data.code) return { valid: false, error: 'relay-message: code required' };
+      break;
+    case 'relay-image':
+    case 'relay-voice':
+    case 'relay-file':
+      if ((!data.data && !data.encryptedData) || !isValidBase64(data.data || data.encryptedData)) return { valid: false, error: data.type + ': invalid data or encryptedData (base64)' };
+      if (data.encryptedData && !data.iv) return { valid: false, error: data.type + ': iv required' };
+      if (data.encryptedData && !data.signature) return { valid: false, error: data.type + ': signature required' };
+      if (!data.messageId || typeof data.messageId !== 'string') return { valid: false, error: data.type + ': messageId required' };
+      if (!data.timestamp || typeof data.timestamp !== 'number') return { valid: false, error: data.type + ': timestamp required' };
+      if (!data.nonce || typeof data.nonce !== 'string') return { valid: false, error: data.type + ': nonce required' };
+      if (data.type === 'relay-file' && (!data.filename || typeof data.filename !== 'string')) return { valid: false, error: 'relay-file: filename required' };
+      if (!data.code) return { valid: false, error: data.type + ': code required' };
+      break;
+    case 'get-stats':
+    case 'get-features':
+    case 'toggle-feature':
+      if (!data.secret || typeof data.secret !== 'string') return { valid: false, error: data.type + ': secret required as string' };
+      break;
+    case 'export-stats-csv':
+    case 'export-logs-csv':
+    case 'clear-random-codes':
+      if (!data.secret || typeof data.secret !== 'string') return { valid: false, error: data.type + ': secret required as string' };
+      break;
+    case 'ping':
+    case 'pong':
+      break;
+    case 'set-totp':
+      if (!data.code) return { valid: false, error: 'set-totp: code required' };
+      if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) return { valid: false, error: 'set-totp: valid base32 secret required' };
+      break;
+    default:
+      return { valid: false, error: 'Unknown message type' };
+  }
+  return { valid: true };
+}
+
+if (fs.existsSync(LOG_FILE)) {
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
+  const lines = logContent.split('\n');
+  lines.forEach(line => {
+    const match = line.match(/Client: (\w+)/);
+    if (match) allTimeUsers.add(match[1]);
+  });
+  logger.info(`Loaded ${allTimeUsers.size} all-time unique users from log.`);
+}
+
+setInterval(async () => {
+  for (const code of [...randomCodes]) {
+    const clientsKey = `room:${code}:clients`;
+    const size = await redisClient.sCard(clientsKey);
+    if (size === 0) {
+      randomCodes.delete(code);
+      await redisClient.sRem('randomCodes', code);
+    }
+  }
+  broadcastRandomCodes();
+  logger.info('Auto-cleaned random codes.');
+}, 3600000);
+
+const pingInterval = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 50000);
+
+function checkAdminSecret(data, ws) {
+  if (data.secret === ADMIN_SECRET) return true;
+  else {
+    ws.send(JSON.stringify({ type: 'error', message: 'Invalid admin secret' }));
+    return false;
+  }
+}
+
+async function safeQuery(query, params, ws, errorMsg) {
+  try {
+    return await dbPool.query(query, params);
+  } catch (err) {
+    logger.error('DB error: %s %s', err.message, err.stack);
+    if (ws) ws.send(JSON.stringify({ type: 'error', message: errorMsg || 'Database error occurred.' }));
+    throw err;
+  }
+}
+
+async function forwardUnicast(code, targetId, message, fromId) {
+  const clientMessage = JSON.stringify(message);
+  pubClient.publish(`room:${code}`, JSON.stringify({ type: 'unicast', clientMessage, targetId, senderId: fromId }));
+  logger.info(`Published unicast ${message.type} from ${fromId} to ${targetId} for code: ${code}`);
+}
+
+function restrictLimit(map, key, increment, threshold, windowMs = 60000, logMsgPrefix) {
+  const now = Date.now();
+  const limit = map.get(key) || { value: 0, startTime: now };
+  if (now - limit.startTime >= windowMs) {
+    limit.value = 0;
+    limit.startTime = now;
+  }
+  limit.value += increment;
+  map.set(key, limit);
+  if (limit.value > threshold) {
+    logger.warn(`${logMsgPrefix} exceeded for ${key}: ${limit.value} in ${windowMs / 1000}s`);
+    userLogger.info(`${new Date().toISOString()} - ${logMsgPrefix} exceeded for ${key}: ${limit.value}`);
+    return false;
+  }
+  return true;
+}
+
+wss.on('connection', (ws, req) => {
+  const origin = req.headers.origin;
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    logger.warn(`Rejected connection from invalid origin: ${origin}`);
+    ws.close(1008, 'Invalid origin');
+    return;
+  }
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  const clientIp = req.headers['x-forwarded-for'] || ws._socket.remoteAddress;
+  const userAgent = req.headers['user-agent'] || 'unknown';
+  ws.userAgent = userAgent;
+  const hashedIp = hashIp(clientIp);
+  const hashedUa = hashUa(userAgent);
+  const compositeKey = hashedIp + ':' + hashedUa;
+  if (ipBans.has(compositeKey) && ipBans.get(compositeKey).expiry > Date.now()) {
+    ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
+    return;
+  }
+  let clientId, code, username;
+  ws.on('message', async (message) => {
+    if (!restrictLimit(rateLimits, ws.clientId || 'unknown', 1, 50, 60000, 'Rate limit')) {
+      ws.send(JSON.stringify({ type: 'error', message: 'Rate limit exceeded, please slow down.' }));
+      return;
+    }
+    try {
+      const data = JSON.parse(message);
+      const loggedData = { ...data };
+      if (loggedData.secret) loggedData.secret = '[REDACTED]';
+      logger.info('Received: %o', loggedData);
+      const validation = validateMessage(data);
+      if (!validation.valid) {
+        ws.send(JSON.stringify({ type: 'error', message: validation.error }));
+        incrementFailure(clientIp, ws.userAgent);
+        return;
+      }
+      if (!features.enableService && data.type !== 'connect') {
+        ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+        ws.close();
+        return;
+      }
+      if (data.type === 'connect') {
+        clientId = data.clientId || uuidv4();
+        ws.clientId = clientId;
+        logStats({ clientId, event: 'connect' });
+        ws.send(JSON.stringify({ type: 'connected', clientId }));
+        return;
+      }
+      if (data.type === 'join') {
+        if (!features.enableService) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Service has been disabled by admin.' }));
+          return;
+        }
+        code = data.code;
+        clientId = data.clientId;
+        username = data.username;
+        if (!validateUsername(username) || !validateCode(code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or code.' }));
+          return;
+        }
+        const roomKey = `room:${code}`;
+        const exists = await redisClient.exists(roomKey);
+        let roomState;
+        if (!exists) {
+          roomState = { initiator: clientId, maxClients: 2 };
+          await redisClient.set(roomKey, JSON.stringify(roomState), { EX: 86400 });
+        } else {
+          roomState = JSON.parse(await redisClient.get(roomKey));
+        }
+        const totpKey = `room:${code}:totp`;
+        const roomTotpSecret = await redisClient.get(totpKey);
+        if (roomTotpSecret && !data.totpCode) {
+          ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+          return;
+        }
+        if (roomTotpSecret && data.totpCode) {
+          const isValid = otplib.authenticator.check(data.totpCode, roomTotpSecret);
+          if (!isValid) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid TOTP code.', code: data.code }));
+            return;
+          }
+        }
+        let isReconnect = false;
+        const clientKey = `room:${code}:client:${clientId}`;
+        const existingUsername = await redisClient.get(clientKey);
+        if (existingUsername) {
+          if (existingUsername === username) isReconnect = true;
+          else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Username does not match existing clientId.', code: data.code }));
+            return;
+          }
+        } else {
+          const allClientKeys = await redisClient.keys(`room:${code}:client:*`);
+          if (allClientKeys.length > 0) {
+            const allUsernamesMap = await redisClient.mGet(allClientKeys);
+            const usernames = Object.values(allUsernamesMap);
+            if (usernames.includes(username)) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Username already taken in this room.', code: data.code }));
+              return;
+            }
+          }
+        }
+        const clientsKey = `room:${code}:clients`;
+        const multi = redisClient.multi();
+        multi.sAdd(clientsKey, clientId);
+        multi.sCard(clientsKey);
+        const [added, currentSize] = await multi.exec();
+        await redisClient.expire(clientsKey, 86400);
+        if (currentSize > roomState.maxClients) {
+          await redisClient.sRem(clientsKey, clientId);
+          ws.send(JSON.stringify({ type: 'error', message: 'Chat room is full.', code: data.code }));
+          return;
+        }
+        await redisClient.set(clientKey, username, { EX: 86400 });
+        if (!subscribed.has(code)) {
+          await subClient.subscribe(`room:${code}`, messageHandler);
+          subscribed.add(code);
+        }
+        if (!rooms.has(code)) {
+          rooms.set(code, { initiator: roomState.initiator, clients: new Map(), maxClients: roomState.maxClients });
+        }
+        const room = rooms.get(code);
+        room.clients.set(clientId, { ws, username });
+        ws.code = code;
+        ws.username = username;
+        const isInitiatorLocal = clientId === roomState.initiator;
+        const initiatorOnline = await redisClient.sIsMember(clientsKey, roomState.initiator);
+        if (!initiatorOnline && !isInitiatorLocal) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Chat room initiator is offline.', code: data.code }));
+          room.clients.delete(clientId);
+          await redisClient.sRem(clientsKey, clientId);
+          await redisClient.del(clientKey);
+          return;
+        }
+        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
+        logStats({ clientId, username, code, event: 'join', totalClients: currentSize });
+        if (room.clients.size > 0) {
+          room.clients.forEach((_, existingClientId) => {
+            if (existingClientId !== clientId) logStats({ clientId, targetId: existingClientId, code, event: 'webrtc-connection', totalClients: currentSize });
+          });
+        }
+        const totalClients = currentSize;
+        const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients };
+        pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
+        if (randomCodes.has(code) && clientId !== roomState.initiator) {
+          randomCodes.delete(code);
+          await redisClient.sRem('randomCodes', code);
+          broadcastRandomCodes();
+        }
+        return;
+      }
+      // All other message types (offer, candidate, relay, admin, etc.) are kept exactly as in your original file
+      if (data.type === 'check-totp') {
+        const totpSecret = await redisClient.get(`room:${data.code}:totp`);
+        if (totpSecret) ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
+        else ws.send(JSON.stringify({ type: 'totp-not-required', code: data.code }));
+        return;
+      }
+      if (data.type === 'set-max-clients') {
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
+          return;
+        }
+        if (data.clientId === rooms.get(data.code).initiator) {
+          const maxLimit = features.enableP2P ? 4 : 50;
+          const room = rooms.get(data.code);
+          room.maxClients = Math.min(data.maxClients, maxLimit);
+          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients }), { EX: 86400 });
+          const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
+          const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients };
+          pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(msg) }));
+          logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients });
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set max clients.', code: data.code }));
+        }
+        return;
+      }
+      if (data.type === 'set-totp') {
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
+          return;
+        }
+        if (data.clientId === rooms.get(data.code).initiator) {
+          await redisClient.set(`room:${data.code}:totp`, data.secret, { EX: 86400 });
+          const msg = { type: 'totp-enabled', code: data.code };
+          pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(msg) }));
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
+        }
+        return;
+      }
+      if (data.type === 'offer' || data.type === 'answer') {
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
+          return;
+        }
+        const fwdMsg = { type: data.type, ...(data.offer ? { offer: data.offer } : { answer: data.answer }), clientId: data.clientId, code: data.code };
+        await forwardUnicast(data.code, data.targetId, fwdMsg, data.clientId);
+        return;
+      }
+      if (data.type === 'candidate') {
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
+          return;
+        }
+        const fwdMsg = { type: 'candidate', candidate: data.candidate, clientId: data.clientId, code: data.code };
+        await forwardUnicast(data.code, data.targetId, fwdMsg, data.clientId);
+        return;
+      }
+      if (data.type === 'kick' || data.type === 'ban') {
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
+          return;
+        }
+        if (data.clientId === rooms.get(data.code).initiator) {
+          pubClient.publish(`room:${data.code}`, JSON.stringify({ type: data.type, targetId: data.targetId, senderId: data.clientId }));
+          logStats({ clientId: data.targetId, code: data.code, event: data.type });
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can kick/ban.', code: data.code }));
+        }
+        return;
+      }
+      if (data.type === 'submit-random') {
+        if (!restrictLimit(ipRateLimits, `${hashedIp}:submit-random`, 1, 5, 60000, 'Submit rate limit')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Submit rate limit exceeded (5/min). Please wait.', code: data.code }));
+          return;
+        }
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
+          return;
+        }
+        const size = await redisClient.sCard(`room:${data.code}:clients`);
+        if (size === 0) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Cannot submit empty room code.', code: data.code }));
+          return;
+        }
+        if (rooms.get(data.code)?.initiator === data.clientId) {
+          const added = await redisClient.sAdd('randomCodes', data.code);
+          if (added) {
+            randomCodes.add(data.code);
+            broadcastRandomCodes();
+          }
+        } else {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can submit to random board.', code: data.code }));
+        }
+        return;
+      }
+      if (data.type === 'get-random-codes') {
+        const codes = await redisClient.sMembers('randomCodes');
+        ws.send(JSON.stringify({ type: 'random-codes', codes }));
+        return;
+      }
+      if (data.type === 'remove-random-code') {
+        if (randomCodes.has(data.code)) {
+          await redisClient.sRem('randomCodes', data.code);
+          randomCodes.delete(data.code);
+          broadcastRandomCodes();
+        }
+        return;
+      }
+      if (data.type === 'clear-random-codes') {
+        if (!checkAdminSecret(data, ws)) return;
+        await redisClient.del('randomCodes');
+        randomCodes.clear();
+        broadcastRandomCodes();
+        ws.send(JSON.stringify({ type: 'random-codes-cleared' }));
+        return;
+      }
+      if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') {
+        if (data.type === 'relay-image' && !features.enableImages) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Image messages are disabled.', code: data.code }));
+          return;
+        }
+        if (data.type === 'relay-voice' && !features.enableVoice) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
+          return;
+        }
+        const payloadKey = data.content || data.encryptedContent || data.data || data.encryptedData;
+        if (payloadKey && (typeof payloadKey !== 'string' || (data.encryptedContent || data.encryptedData || data.type !== 'relay-message') && !isValidBase64(payloadKey))) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid payload format.', code: data.code }));
+          return;
+        }
+        const payloadSize = payloadKey ? (payloadKey.length * 3 / 4) : 0;
+        if (!restrictLimit(clientSizeLimits, data.clientId, payloadSize, 1048576, 60000, 'Size limit')) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Message size limit exceeded (1MB/min total).', code: data.code }));
+          return;
+        }
+        if (payloadKey && payloadKey.length > 9333333) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Payload too large (max 5MB).', code: data.code }));
+          return;
+        }
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Chat room not found.', code: data.code }));
+          return;
+        }
+        const room = rooms.get(data.code);
+        const senderId = data.clientId;
+        if (!room.clients.has(senderId)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'You are not in this chat room.', code: data.code }));
+          return;
+        }
+        const noncesKey = `room:${data.code}:nonces`;
+        const existingTs = await redisClient.hGet(noncesKey, data.nonce);
+        if (existingTs) return;
+        const now = Date.now();
+        if (Math.abs(now - data.timestamp) > 300000) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid message timestamp.', code: data.code }));
+          return;
+        }
+        await redisClient.hSet(noncesKey, data.nonce, data.timestamp);
+        await redisClient.expire(noncesKey, 86400);
+        const mime = data.mime ? validator.escape(validator.trim(data.mime)) : undefined;
+        const clientMessageObj = {
+          type: data.type.replace('relay-', ''),
+          messageId: data.messageId,
+          username: room.clients.get(senderId).username,
+          content: data.content,
+          encryptedContent: data.encryptedContent,
+          data: data.data,
+          encryptedData: data.encryptedData,
+          filename: data.filename,
+          timestamp: data.timestamp,
+          iv: data.iv,
+          signature: data.signature,
+          nonce: data.nonce,
+          mime: mime
+        };
+        const clientJson = JSON.stringify(clientMessageObj);
+        const pubObj = { type: 'relay', messageType: data.type, clientMessage: clientJson, senderId: senderId };
+        pubClient.publish(`room:${data.code}`, JSON.stringify(pubObj));
+        return;
+      }
+      if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature' || data.type === 'export-stats-csv' || data.type === 'export-logs-csv' || data.type === 'clear-random-codes' || data.type === 'ping' || data.type === 'pong') {
+        if (data.type === 'get-stats' || data.type === 'get-features' || data.type === 'toggle-feature' || data.type === 'export-stats-csv' || data.type === 'export-logs-csv' || data.type === 'clear-random-codes') {
+          if (!checkAdminSecret(data, ws)) return;
+        }
+        if (data.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
+      }
+    } catch (error) {
+      logger.error('Error processing message: %s %s', error.message, error.stack);
+      ws.send(JSON.stringify({ type: 'error', message: 'Server error, please try again. Check server logs.' }));
+      incrementFailure(clientIp, ws.userAgent);
+    }
+  });
+  ws.on('close', async () => {
+    if (ws.code && rooms.has(ws.code)) {
+      const code = ws.code;
+      const roomKey = `room:${code}`;
+      const clientsKey = `${roomKey}:clients`;
+      await redisClient.sRem(clientsKey, ws.clientId);
+      await redisClient.del(`${roomKey}:client:${ws.clientId}`);
+      if (rooms.has(code)) rooms.get(code).clients.delete(ws.clientId);
+      rateLimits.delete(ws.clientId);
+      const isInitiator = ws.clientId === rooms.get(code)?.initiator;
+      const totalClients = await redisClient.sCard(clientsKey);
+      logStats({ clientId: ws.clientId, code: ws.code, event: 'close', totalClients, isInitiator });
+      const disconnectedMsg = { type: 'client-disconnected', clientId: ws.clientId, totalClients, isInitiator };
+      pubClient.publish(roomKey, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(disconnectedMsg) }));
+      if (totalClients === 0) {
+        rooms.delete(code);
+        await redisClient.del(roomKey);
+        await redisClient.del(`${roomKey}:totp`);
+        await redisClient.del(`${roomKey}:nonces`);
+        if (subscribed.has(code)) {
+          await subClient.unsubscribe(`room:${code}`);
+          subscribed.delete(code);
+        }
+      } else if (isInitiator) {
+        const newInitiator = await redisClient.sRandMember(clientsKey);
+        if (newInitiator) {
+          rooms.get(code).initiator = newInitiator;
+          await redisClient.set(roomKey, JSON.stringify({ initiator: newInitiator, maxClients: rooms.get(code).maxClients }), { EX: 86400 });
+        }
+      }
+    }
+  });
+});
+
+function incrementFailure(ip, ua) {
+  const hashedIp = hashIp(ip);
+  const hashedUa = hashUa(ua);
+  const key = hashedIp + ':' + hashedUa;
+  const failure = ipFailureCounts.get(key) || { count: 0, banLevel: 0 };
+  failure.count += 1;
+  ipFailureCounts.set(key, failure);
+  if (failure.count % 5 === 0) {
+    logger.warn(`High failure rate for key ${key}: ${failure.count} failures`);
+    auditLogger.info(`${new Date().toISOString()} - High failure anomaly for key ${key}: ${failure.count} failures`);
+  }
+  if (failure.count >= 10) {
+    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+    failure.banLevel = Math.min(failure.banLevel + 1, 2);
+    const duration = banDurations[failure.banLevel];
+    const expiry = Date.now() + duration;
+    ipBans.set(key, { expiry, banLevel: failure.banLevel });
+    const timestamp = new Date().toISOString();
+    const banLogEntry = `${timestamp} - Key Banned: ${key}, Duration: ${duration / 60000} minutes, Ban Level: ${failure.banLevel}`;
+    userLogger.info(banLogEntry);
+    logger.warn(`Key ${key} banned until ${new Date(expiry).toISOString()} at ban level ${failure.banLevel} (${duration / 60000} minutes)`);
+    ipFailureCounts.delete(key);
+  }
+}
+
+function validateUsername(username) {
+  const regex = /^[a-zA-Z0-9]{1,16}$/;
+  return username && regex.test(username);
+}
+
+function validateCode(code) {
+  const regex = /^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/;
+  return code && regex.test(code);
+}
+
+function logStats(data) {
+  const timestamp = new Date().toISOString();
+  const day = timestamp.slice(0, 10);
+  const stats = {
+    clientId: validator.escape(data.clientId || ''),
+    username: data.username ? validator.escape(crypto.createHmac('sha256', IP_SALT).update(data.username).digest('hex')) : '',
+    targetId: validator.escape(data.targetId || ''),
+    code: validator.escape(data.code || ''),
+    event: validator.escape(data.event || ''),
+    totalClients: data.totalClients || 0,
+    isInitiator: data.isInitiator || false,
+    timestamp,
+    day
+  };
+  if (data.event === 'connect' || data.event === 'join' || data.event === 'webrtc-connection') {
+    if (!dailyUsers.has(day)) dailyUsers.set(day, new Set());
+    if (!dailyConnections.has(day)) dailyConnections.set(day, new Set());
+    dailyUsers.get(day).add(stats.clientId);
+    allTimeUsers.add(stats.clientId);
+    if (data.event === 'webrtc-connection' && data.targetId) {
+      dailyUsers.get(day).add(stats.targetId);
+      allTimeUsers.add(stats.targetId);
+      const connectionKey = `${stats.clientId}-${stats.targetId}-${stats.code}`;
+      dailyConnections.get(day).add(connectionKey);
+    }
+  }
+  const logEntry = `${timestamp} - Client: ${stats.clientId}, Event: ${stats.event}, Code: ${stats.code}, Username: ${stats.username}, TotalClients: ${stats.totalClients}, IsInitiator: ${stats.isInitiator}`;
+  userLogger.info(logEntry);
+}
+
+function updateLogFile() {
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  const userCount = dailyUsers.get(day)?.size || 0;
+  const connectionCount = dailyConnections.get(day)?.size || 0;
+  const allTimeUserCount = allTimeUsers.size;
+  const logEntry = `${now.toISOString()} - Day: ${day}, Unique Users: ${userCount}, WebRTC Connections: ${connectionCount}, All-Time Unique Users: ${allTimeUserCount}`;
+  userLogger.info(logEntry);
+  logger.info(`Updated ${LOG_FILE} with ${userCount} unique users, ${connectionCount} WebRTC connections, and ${allTimeUserCount} all-time unique users for ${day}`);
+  if (!aggregatedStats.daily) aggregatedStats.daily = {};
+  aggregatedStats.daily[day] = { users: userCount, connections: connectionCount };
+  saveAggregatedStats();
+}
+
+userLogger.info('');
+updateLogFile();
+setInterval(updateLogFile, UPDATE_INTERVAL);
+
+function computeAggregate(days) {
+  const now = new Date();
+  let users = 0, connections = 0;
+  for (let i = 0; i < days; i++) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    if (aggregatedStats.daily[key]) {
+      users += aggregatedStats.daily[key].users;
+      connections += aggregatedStats.daily[key].connections;
+    }
+  }
+  return { users, connections };
+}
+
+function generateStatsCSV() {
+  let csv = 'Period,Users,Connections\n';
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  csv += `Daily,${dailyUsers.get(day)?.size || 0},${dailyConnections.get(day)?.size || 0}\n`;
+  const weekly = computeAggregate(7);
+  csv += `Weekly,${weekly.users},${weekly.connections}\n`;
+  const monthly = computeAggregate(30);
+  csv += `Monthly,${monthly.users},${monthly.connections}\n`;
+  const yearly = computeAggregate(365);
+  csv += `Yearly,${yearly.users},${yearly.connections}\n`;
+  csv += `All-Time,${allTimeUsers.size},N/A\n`;
+  return csv;
+}
+
+function generateLogsCSV() {
+  let csv = 'Timestamp,Event\n';
+  const logContent = fs.readFileSync(LOG_FILE, 'utf8');
+  logContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  const auditContent = fs.readFileSync(`${AUDIT_FILE_BASE}.log`, 'utf8');
+  auditContent.split('\n').forEach(line => {
+    if (line.trim()) csv += `${line}\n`;
+  });
+  return csv;
+}
+
+async function broadcastRandomCodes() {
+  const codes = await redisClient.sMembers('randomCodes');
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: 'random-codes', codes }));
+    }
+  });
+  logger.info(`Broadcasted random codes to all clients: ${codes}`);
+}
+
+function hashIp(ip) {
+  return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');
+}
+
+function hashUa(ua) {
+  if (!ua) return crypto.createHmac('sha256', IP_SALT).update('unknown').digest('hex');
+  const parser = new UAParser(ua);
+  const result = parser.getResult();
+  const normalized = `${result.browser.name || 'unknown'} ${result.browser.major || ''} ${result.os.name || 'unknown'} ${result.os.version ? result.os.version.split('.')[0] : ''}`.trim();
+  return crypto.createHmac('sha256', IP_SALT).update(normalized || 'unknown').digest('hex');
+}
+
+server.listen(process.env.PORT || 10000, () => {
+  logger.info(`Signaling and relay server running on port ${process.env.PORT || 10000}`);
+});

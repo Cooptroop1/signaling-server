@@ -858,12 +858,5 @@
   <script src="main.js"></script>
   <script src="init.js"></script>
   <script src="events.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then(() => console.log('Service Worker registered'))
-        .catch(err => console.error('Service Worker error:', err));
-    }
-  </script>
 </body>
 </html>

@@ -1187,7 +1187,6 @@ setInterval(() => {
 // =============================================
 // SUPABASE AUTH + DISPLAY NAME (clean like SnookScore)
 // =============================================
-
 async function initSupabaseAuth() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
@@ -1206,14 +1205,12 @@ async function loadDisplayName() {
     .select('display_name')
     .eq('id', currentUser.id)
     .single();
-
   if (data && data.display_name) {
     username = data.display_name;
     localStorage.setItem('username', username);
     document.getElementById('logoutButton').classList.remove('hidden');
     document.getElementById('loginButton').classList.add('hidden');
   } else {
-    // No display name yet → show modal
     document.getElementById('displayNameModal').classList.add('active');
   }
 }
@@ -1221,7 +1218,7 @@ async function loadDisplayName() {
 function openAuthModal() {
   document.getElementById('authModal').classList.add('active');
   document.getElementById('authError').textContent = '';
-  switchToSignIn(); // default to Sign In tab
+  switchToSignIn();
 }
 
 function closeAuthModal() {
@@ -1247,12 +1244,10 @@ async function handleAuthSubmit() {
   const password = document.getElementById('passwordInput').value;
   const errorDiv = document.getElementById('authError');
   errorDiv.textContent = '';
-
   if (!email || !password) {
     errorDiv.textContent = 'Please fill email and password';
     return;
   }
-
   try {
     let result;
     if (document.getElementById('authTitle').textContent === 'Sign In') {
@@ -1260,14 +1255,11 @@ async function handleAuthSubmit() {
     } else {
       result = await supabase.auth.signUp({ email, password });
       if (result.error) throw result.error;
-      // After signup, user may need to confirm email (Supabase default)
       errorDiv.style.color = 'green';
       errorDiv.textContent = 'Account created! Check your email to confirm (then sign in).';
       return;
     }
-
     if (result.error) throw result.error;
-
     currentUser = result.data.user;
     await loadDisplayName();
     closeAuthModal();
@@ -1282,21 +1274,17 @@ async function saveDisplayName() {
   const displayNameInput = document.getElementById('displayNameInput').value.trim();
   const errorDiv = document.getElementById('displayNameError');
   errorDiv.textContent = '';
-
   if (displayNameInput.length < 1 || displayNameInput.length > 20) {
     errorDiv.textContent = 'Display name must be 1-20 characters';
     return;
   }
-
   const { error } = await supabase
     .from('profiles')
     .upsert({ id: currentUser.id, display_name: displayNameInput });
-
   if (error) {
     errorDiv.textContent = error.message;
     return;
   }
-
   username = displayNameInput;
   localStorage.setItem('username', username);
   document.getElementById('displayNameModal').classList.remove('active');
@@ -1313,18 +1301,26 @@ async function logout() {
   document.getElementById('logoutButton').classList.add('hidden');
   document.getElementById('loginButton').classList.remove('hidden');
   showStatusMessage('Logged out.');
-  window.location.reload(); // clean reset
+  window.location.reload();
 }
 
-// Attach button listeners (runs once when page loads)
-document.getElementById('loginButton').onclick = openAuthModal;
-document.getElementById('logoutButton').onclick = logout;
+// Attach button listeners ONLY after the page is fully loaded
+document.addEventListener('DOMContentLoaded', () => {
+  const loginBtn = document.getElementById('loginButton');
+  const logoutBtn = document.getElementById('logoutButton');
+  const signinTab = document.getElementById('signinTab');
+  const signupTab = document.getElementById('signupTab');
+  const authSubmit = document.getElementById('authSubmitButton');
+  const authCancel = document.getElementById('authCancelButton');
+  const saveDisplay = document.getElementById('saveDisplayNameButton');
 
-document.getElementById('signinTab').onclick = switchToSignIn;
-document.getElementById('signupTab').onclick = switchToSignUp;
-document.getElementById('authSubmitButton').onclick = handleAuthSubmit;
-document.getElementById('authCancelButton').onclick = closeAuthModal;
-document.getElementById('saveDisplayNameButton').onclick = saveDisplayName;
+  if (loginBtn) loginBtn.onclick = openAuthModal;
+  if (logoutBtn) logoutBtn.onclick = logout;
+  if (signinTab) signinTab.onclick = switchToSignIn;
+  if (signupTab) signupTab.onclick = switchToSignUp;
+  if (authSubmit) authSubmit.onclick = handleAuthSubmit;
+  if (authCancel) authCancel.onclick = closeAuthModal;
+  if (saveDisplay) saveDisplay.onclick = saveDisplayName;
 
-// Start Supabase on page load
-initSupabaseAuth();
+  initSupabaseAuth();
+});

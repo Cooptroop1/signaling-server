@@ -1,5 +1,4 @@
-let currentUser = null;
-let username = ''; // will be set from profiles.display_name
+let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
@@ -774,7 +773,14 @@ async function renegotiate(targetId) {
   }
 }
 function sendMessageViaSocket(type, additionalData, isRelay = false) {
-  const message = { type: isRelay ? `relay-${type}` : type, ...additionalData, code, clientId };
+  if (!token || refreshingToken) {
+    console.log('Token missing or refresh in progress, queuing message');
+    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
+    signalingQueue.get('global').push({ type: isRelay ? `relay-${type}` : type, additionalData });
+    if (!refreshingToken) refreshAccessToken();
+    return;
+  }
+  const message = { type: isRelay ? `relay-${type}` : type, ...additionalData, code, clientId, token };
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
   } else {
@@ -1177,140 +1183,18 @@ setInterval(() => {
   }
   console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
 }, 300000); // 5min
-// =============================================
-// SUPABASE AUTH + DISPLAY NAME (Rocket Loader safe)
-// =============================================
-async function initSupabaseAuth() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) {
-    currentUser = session.user;
-    await loadDisplayName();
-  } else {
-    const loginBtn = document.getElementById('loginButton');
-    if (loginBtn) loginBtn.classList.remove('hidden');
+// New: Claim username handler (in socket.onmessage or separate)
+document.getElementById('claimSubmitButton').onclick = async () => {
+  const name = document.getElementById('claimUsernameInput').value.trim();
+  const pass = document.getElementById('claimPasswordInput').value;
+  if (name && pass) {
+    socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, clientId, token }));
   }
-}
-
-async function loadDisplayName() {
-  if (!currentUser) return;
-  const { data } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
-  if (data && data.display_name) {
-    username = data.display_name;
-    localStorage.setItem('username', username);
-    const logoutBtn = document.getElementById('logoutButton');
-    const loginBtn = document.getElementById('loginButton');
-    if (logoutBtn) logoutBtn.classList.remove('hidden');
-    if (loginBtn) loginBtn.classList.add('hidden');
-  } else {
-    const modal = document.getElementById('displayNameModal');
-    if (modal) modal.classList.add('active');
+};
+// New: Search user handler
+document.getElementById('searchSubmitButton').onclick = () => {
+  const name = document.getElementById('searchUsernameInput').value.trim();
+  if (name) {
+    socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
   }
-}
-
-function openAuthModal() {
-  const modal = document.getElementById('authModal');
-  if (modal) modal.classList.add('active');
-}
-
-function closeAuthModal() {
-  const modal = document.getElementById('authModal');
-  if (modal) modal.classList.remove('active');
-}
-
-function switchToSignIn() {
-  document.getElementById('authTitle').textContent = 'Sign In';
-  document.getElementById('authSubmitButton').textContent = 'Sign In';
-  document.getElementById('signinTab').classList.add('border-b-2', 'border-blue-600', 'text-blue-600');
-  document.getElementById('signupTab').classList.remove('border-b-2', 'border-blue-600', 'text-blue-600');
-}
-
-function switchToSignUp() {
-  document.getElementById('authTitle').textContent = 'Sign Up';
-  document.getElementById('authSubmitButton').textContent = 'Create Account';
-  document.getElementById('signupTab').classList.add('border-b-2', 'border-blue-600', 'text-blue-600');
-  document.getElementById('signinTab').classList.remove('border-b-2', 'border-blue-600', 'text-blue-600');
-}
-
-async function handleAuthSubmit() {
-  const email = document.getElementById('emailInput').value.trim();
-  const password = document.getElementById('passwordInput').value;
-  const errorDiv = document.getElementById('authError');
-  if (errorDiv) errorDiv.textContent = '';
-  if (!email || !password) {
-    if (errorDiv) errorDiv.textContent = 'Please fill email and password';
-    return;
-  }
-  try {
-    let result;
-    if (document.getElementById('authTitle').textContent === 'Sign In') {
-      result = await supabase.auth.signInWithPassword({ email, password });
-    } else {
-      result = await supabase.auth.signUp({ email, password });
-      if (result.error) throw result.error;
-      if (errorDiv) errorDiv.textContent = 'Account created! Check email to confirm.';
-      return;
-    }
-    if (result.error) throw result.error;
-    currentUser = result.data.user;
-    await loadDisplayName();
-    closeAuthModal();
-    showStatusMessage('Logged in successfully!');
-  } catch (err) {
-    if (errorDiv) errorDiv.textContent = err.message || 'Login failed';
-  }
-}
-
-async function saveDisplayName() {
-  if (!currentUser) return;
-  const name = document.getElementById('displayNameInput').value.trim();
-  const errorDiv = document.getElementById('displayNameError');
-  if (errorDiv) errorDiv.textContent = '';
-  if (name.length < 1 || name.length > 20) {
-    if (errorDiv) errorDiv.textContent = '1-20 characters only';
-    return;
-  }
-  const { error } = await supabase.from('profiles').upsert({ id: currentUser.id, display_name: name });
-  if (error) {
-    if (errorDiv) errorDiv.textContent = error.message;
-    return;
-  }
-  username = name;
-  localStorage.setItem('username', username);
-  const modal = document.getElementById('displayNameModal');
-  if (modal) modal.classList.remove('active');
-  showStatusMessage('Display name saved!');
-}
-
-async function logout() {
-  await supabase.auth.signOut();
-  currentUser = null;
-  username = '';
-  localStorage.removeItem('username');
-  const loginBtn = document.getElementById('loginButton');
-  const logoutBtn = document.getElementById('logoutButton');
-  if (logoutBtn) logoutBtn.classList.add('hidden');
-  if (loginBtn) loginBtn.classList.remove('hidden');
-  showStatusMessage('Logged out.');
-  window.location.reload();
-}
-
-// Safe attachment for Cloudflare Rocket Loader
-setTimeout(() => {
-  const loginBtn = document.getElementById('loginButton');
-  const logoutBtn = document.getElementById('logoutButton');
-  const signinTab = document.getElementById('signinTab');
-  const signupTab = document.getElementById('signupTab');
-  const authSubmit = document.getElementById('authSubmitButton');
-  const authCancel = document.getElementById('authCancelButton');
-  const saveDisplay = document.getElementById('saveDisplayNameButton');
-
-  if (loginBtn) loginBtn.onclick = openAuthModal;
-  if (logoutBtn) logoutBtn.onclick = logout;
-  if (signinTab) signinTab.onclick = switchToSignIn;
-  if (signupTab) signupTab.onclick = switchToSignUp;
-  if (authSubmit) authSubmit.onclick = handleAuthSubmit;
-  if (authCancel) authCancel.onclick = closeAuthModal;
-  if (saveDisplay) saveDisplay.onclick = saveDisplayName;
-
-  initSupabaseAuth();
-}, 800);
+};

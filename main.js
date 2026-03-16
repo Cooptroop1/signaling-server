@@ -1185,10 +1185,7 @@ setInterval(() => {
   console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
 }, 300000); // 5min
 // =============================================
-// SUPABASE AUTH + DISPLAY NAME (clean like SnookScore)
-// =============================================
-// =============================================
-// SUPABASE AUTH + DISPLAY NAME (safe version for Cloudflare Rocket Loader)
+// SUPABASE AUTH + DISPLAY NAME (Rocket Loader safe)
 // =============================================
 async function initSupabaseAuth() {
   const { data: { session } } = await supabase.auth.getSession();
@@ -1197,25 +1194,23 @@ async function initSupabaseAuth() {
     await loadDisplayName();
   } else {
     const loginBtn = document.getElementById('loginButton');
-    const logoutBtn = document.getElementById('logoutButton');
     if (loginBtn) loginBtn.classList.remove('hidden');
-    if (logoutBtn) logoutBtn.classList.add('hidden');
   }
 }
 
 async function loadDisplayName() {
   if (!currentUser) return;
-  const { data, error } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
+  const { data } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
   if (data && data.display_name) {
     username = data.display_name;
     localStorage.setItem('username', username);
-    const loginBtn = document.getElementById('loginButton');
     const logoutBtn = document.getElementById('logoutButton');
+    const loginBtn = document.getElementById('loginButton');
     if (logoutBtn) logoutBtn.classList.remove('hidden');
     if (loginBtn) loginBtn.classList.add('hidden');
   } else {
-    const displayModal = document.getElementById('displayNameModal');
-    if (displayModal) displayModal.classList.add('active');
+    const modal = document.getElementById('displayNameModal');
+    if (modal) modal.classList.add('active');
   }
 }
 
@@ -1259,10 +1254,7 @@ async function handleAuthSubmit() {
     } else {
       result = await supabase.auth.signUp({ email, password });
       if (result.error) throw result.error;
-      if (errorDiv) {
-        errorDiv.style.color = 'green';
-        errorDiv.textContent = 'Account created! Check your email to confirm.';
-      }
+      if (errorDiv) errorDiv.textContent = 'Account created! Check email to confirm.';
       return;
     }
     if (result.error) throw result.error;
@@ -1309,8 +1301,8 @@ async function logout() {
   window.location.reload();
 }
 
-// Safe attachment (waits for Cloudflare Rocket Loader)
-window.addEventListener('load', () => {
+// Safe attachment for Cloudflare Rocket Loader
+setTimeout(() => {
   const loginBtn = document.getElementById('loginButton');
   const logoutBtn = document.getElementById('logoutButton');
   const signinTab = document.getElementById('signinTab');
@@ -1328,4 +1320,4 @@ window.addEventListener('load', () => {
   if (saveDisplay) saveDisplay.onclick = saveDisplayName;
 
   initSupabaseAuth();
-});
+}, 800);

@@ -781,14 +781,7 @@ async function renegotiate(targetId) {
   }
 }
 function sendMessageViaSocket(type, additionalData, isRelay = false) {
-  if (!token || refreshingToken) {
-    console.log('Token missing or refresh in progress, queuing message');
-    if (!signalingQueue.has('global')) signalingQueue.set('global', []);
-    signalingQueue.get('global').push({ type: isRelay ? `relay-${type}` : type, additionalData });
-    if (!refreshingToken) refreshAccessToken();
-    return;
-  }
-  const message = { type: isRelay ? `relay-${type}` : type, ...additionalData, code, clientId, token };
+  const message = { type: isRelay ? `relay-${type}` : type, ...additionalData, code, clientId };
   if (socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
   } else {

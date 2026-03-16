@@ -345,9 +345,6 @@ function validateMessage(data) {
   if (typeof data !== 'object' || data === null || !data.type) {
     return { valid: false, error: 'Invalid message: must be an object with "type" field' };
   }
-  if (data.token && typeof data.token !== 'string') {
-    return { valid: false, error: 'Invalid token: must be a string' };
-  }
   if (data.clientId && typeof data.clientId !== 'string') {
     return { valid: false, error: 'Invalid clientId: must be a string' };
   }
@@ -361,50 +358,6 @@ function validateMessage(data) {
     case 'connect':
       if (!data.clientId || typeof data.clientId !== 'string') {
         return { valid: false, error: 'connect: clientId required as string' };
-      }
-      break;
-    case 'refresh-token':
-      if (!data.refreshToken || typeof data.refreshToken !== 'string') {
-        return { valid: false, error: 'refresh-token: refreshToken required as string' };
-      }
-      break;
-    case 'public-key':
-      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
-        return { valid: false, error: 'public-key: invalid publicKey format or length' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'public-key: code required' };
-      }
-      break;
-    case 'encrypted-room-key':
-      if (!data.encryptedKey || !isValidBase64(data.encryptedKey)) {
-        return { valid: false, error: 'encrypted-room-key: invalid encryptedKey format' };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'encrypted-room-key: invalid iv' };
-      }
-      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
-        return { valid: false, error: 'encrypted-room-key: invalid publicKey format or length' };
-      }
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: 'encrypted-room-key: targetId required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'encrypted-room-key: code required' };
-      }
-      break;
-    case 'new-room-key':
-      if (!data.encrypted || !isValidBase64(data.encrypted)) {
-        return { valid: false, error: 'new-room-key: invalid encrypted' };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'new-room-key: invalid iv' };
-      }
-      if (!data.targetId || typeof data.targetId !== 'string') {
-        return { valid: false, error: 'new-room-key: targetId required as string' };
-      }
-      if (!data.code) {
-        return { valid: false, error: 'new-room-key: code required' };
       }
       break;
     case 'join':
@@ -555,58 +508,6 @@ function validateMessage(data) {
       if (!data.secret || typeof data.secret !== 'string' || !isValidBase32(data.secret)) {
         return { valid: false, error: 'set-totp: valid base32 secret required' };
       }
-      break;
-    case 'register-username':
-      if (!data.username) {
-        return { valid: false, error: 'register-username: username required' };
-      }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-        return { valid: false, error: 'register-username: password required as string (min 8 chars)' };
-      }
-      if (data.public_key && !isValidBase64(data.public_key)) {
-        return { valid: false, error: 'register-username: invalid public_key (base64)' };
-      }
-      break;
-    case 'login-username':
-      if (!data.username) {
-        return { valid: false, error: 'login-username: username required' };
-      }
-      if (!data.password || typeof data.password !== 'string' || data.password.length < 8) {
-        return { valid: false, error: 'login-username: password required as string (min 8 chars)' };
-      }
-      // Updated: Allow public_key in login for key update
-      if (data.public_key && !isValidBase64(data.public_key)) {
-        return { valid: false, error: 'login-username: invalid public_key (base64)' };
-      }
-      break;
-    case 'find-user':
-      if (!data.username) {
-        return { valid: false, error: 'find-user: username required' };
-      }
-      break;
-    case 'send-offline-message':
-      if (!data.to_username) {
-        return { valid: false, error: 'send-offline-message: to_username required' };
-      }
-      if (!data.encrypted || !isValidBase64(data.encrypted)) {
-        return { valid: false, error: 'send-offline-message: invalid encrypted (base64)' };
-      }
-      if (!data.iv || !isValidBase64(data.iv)) {
-        return { valid: false, error: 'send-offline-message: invalid iv (base64)' };
-      }
-      if (!data.ephemeral_public || !isValidBase64(data.ephemeral_public)) {
-        return { valid: false, error: 'send-offline-message: invalid ephemeral_public (base64)' };
-      }
-      if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: 'send-offline-message: messageId required as string' };
-      }
-      break;
-    case 'confirm-offline-message':
-      if (!data.messageId || typeof data.messageId !== 'string') {
-        return { valid: false, error: 'confirm-offline-message: messageId required as string' };
-      }
-      break;
-    case 'logout':
       break;
     default:
       return { valid: false, error: 'Unknown message type' };

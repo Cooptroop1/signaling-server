@@ -925,14 +925,14 @@
   <script src="init.js"></script>
   <script src="events.js"></script>
 <script>
-// === SUPABASE CONFIG — SAFE VERSION ===
+// === SUPABASE CONFIG — CLEAN & WORKING ===
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
-window.addEventListener('load', () => {
+document.addEventListener('DOMContentLoaded', () => {
   const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // Open modals (safe)
+  // === OPEN MODALS ===
   const openSignUp = document.getElementById('openSignUpBtn');
   const openLogin = document.getElementById('openLoginBtn');
   const openSearch = document.getElementById('openSearchBtn');
@@ -944,6 +944,7 @@ window.addEventListener('load', () => {
       modal.classList.add('active');
     }
   });
+
   if (openLogin) openLogin.addEventListener('click', () => {
     const modal = document.getElementById('supabaseLoginModal');
     if (modal) {
@@ -951,6 +952,7 @@ window.addEventListener('load', () => {
       modal.classList.add('active');
     }
   });
+
   if (openSearch) openSearch.addEventListener('click', () => {
     const modal = document.getElementById('supabaseSearchModal');
     if (modal) {
@@ -959,7 +961,7 @@ window.addEventListener('load', () => {
     }
   });
 
-  // Cancel buttons
+  // === CANCEL BUTTONS ===
   const cancelSignUp = document.getElementById('modalSignUpCancel');
   const cancelLogin = document.getElementById('modalLoginCancel');
   const cancelSearch = document.getElementById('modalSearchCancel');
@@ -977,9 +979,9 @@ window.addEventListener('load', () => {
     if (modal) modal.classList.add('hidden');
   });
 
-  // Sign Up
-  const signupBtn = document.getElementById('modalSignUpSubmit');
-  if (signupBtn) signupBtn.addEventListener('click', async () => {
+  // === SIGN UP ===
+  const signupSubmit = document.getElementById('modalSignUpSubmit');
+  if (signupSubmit) signupSubmit.addEventListener('click', async () => {
     const email = document.getElementById('modalSignUpEmail').value.trim();
     const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
     const password = document.getElementById('modalSignUpPassword').value.trim();
@@ -995,15 +997,12 @@ window.addEventListener('load', () => {
 
     alert('✅ Account created! Now login.');
     const modal = document.getElementById('supabaseSignUpModal');
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.classList.remove('active');
-    }
+    if (modal) modal.classList.add('hidden');
   });
 
-  // Login
-  const loginBtn = document.getElementById('modalLoginSubmit');
-  if (loginBtn) loginBtn.addEventListener('click', async () => {
+  // === LOGIN ===
+  const loginSubmit = document.getElementById('modalLoginSubmit');
+  if (loginSubmit) loginSubmit.addEventListener('click', async () => {
     const email = document.getElementById('modalLoginEmail').value.trim();
     const password = document.getElementById('modalLoginPassword').value.trim();
     if (!email || !password) return alert('Email and password required');
@@ -1012,15 +1011,12 @@ window.addEventListener('load', () => {
     if (error) return alert(error.message);
 
     const modal = document.getElementById('supabaseLoginModal');
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.classList.remove('active');
-    }
+    if (modal) modal.classList.add('hidden');
   });
 
-  // Search User with online/offline status
-  const searchBtn = document.getElementById('modalSearchSubmit');
-  if (searchBtn) searchBtn.addEventListener('click', async () => {
+  // === SEARCH USER WITH ONLINE/OFFLINE ===
+  const searchSubmit = document.getElementById('modalSearchSubmit');
+  if (searchSubmit) searchSubmit.addEventListener('click', async () => {
     const name = document.getElementById('searchDisplayName').value.trim();
     if (!name) return alert('Enter a display name');
 
@@ -1042,14 +1038,14 @@ window.addEventListener('load', () => {
     `;
   });
 
-  // Sign Out
+  // === SIGN OUT ===
   const signOutBtn = document.getElementById('signOutBtn');
   if (signOutBtn) signOutBtn.addEventListener('click', async () => {
     await supabaseClient.auth.signOut();
     location.reload();
   });
 
-  // Show logged-in state
+  // === LOGGED IN STATE ===
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
     const authLinks = document.getElementById('authLinks');
     const userInfo = document.getElementById('userInfo');

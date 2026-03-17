@@ -925,32 +925,39 @@
   <script src="init.js"></script>
   <script src="events.js"></script>
 <script>
-// === SUPABASE CONFIG ===
+// === SUPABASE CONFIG — SAFE VERSION ===
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
 window.addEventListener('load', () => {
+  if (!window.supabase) {
+    console.error('Supabase CDN not loaded — refresh the page');
+    return;
+  }
+
   const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // Update last_seen every 30 seconds when logged in
+  // Update last_seen every 30 seconds (for online status)
   setInterval(async () => {
-    const { data: session } = await supabaseClient.auth.getSession();
-    if (session?.session?.user) {
-      await supabaseClient.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', session.session.user.id);
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session?.user) {
+      await supabaseClient.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', session.user.id);
     }
   }, 30000);
 
-  // Open modals (unchanged)
+  // Open modals
   document.getElementById('openSignUpBtn').addEventListener('click', () => {
     const modal = document.getElementById('supabaseSignUpModal');
     modal.classList.remove('hidden');
     modal.classList.add('active');
   });
+
   document.getElementById('openLoginBtn').addEventListener('click', () => {
     const modal = document.getElementById('supabaseLoginModal');
     modal.classList.remove('hidden');
     modal.classList.add('active');
   });
+
   document.getElementById('openSearchBtn').addEventListener('click', () => {
     const modal = document.getElementById('supabaseSearchModal');
     modal.classList.remove('hidden');
@@ -958,13 +965,58 @@ window.addEventListener('load', () => {
   });
 
   // Cancel buttons
-  document.getElementById('modalSignUpCancel').addEventListener('click', () => document.getElementById('supabaseSignUpModal').classList.add('hidden'));
-  document.getElementById('modalLoginCancel').addEventListener('click', () => document.getElementById('supabaseLoginModal').classList.add('hidden'));
-  document.getElementById('modalSearchCancel').addEventListener('click', () => document.getElementById('supabaseSearchModal').classList.add('hidden'));
+  document.getElementById('modalSignUpCancel').addEventListener('click', () => {
+    const modal = document.getElementById('supabaseSignUpModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+  });
+  document.getElementById('modalLoginCancel').addEventListener('click', () => {
+    const modal = document.getElementById('supabaseLoginModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+  });
+  document.getElementById('modalSearchCancel').addEventListener('click', () => {
+    const modal = document.getElementById('supabaseSearchModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+  });
 
-  // Sign Up, Login, Sign Out (same as before — unchanged)
+  // Sign Up
+  document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
+    const email = document.getElementById('modalSignUpEmail').value.trim();
+    const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
+    const password = document.getElementById('modalSignUpPassword').value.trim();
+    if (!email || !displayName || !password) return alert('All fields required');
 
-  // Search User WITH online/offline status
+    const { data: existing } = await supabaseClient.from('profiles').select('id').eq('display_name', displayName).single();
+    if (existing) return alert('❌ Display name already taken.');
+
+    const { data, error } = await supabaseClient.auth.signUp({ email, password });
+    if (error) return alert(error.message);
+
+    await supabaseClient.from('profiles').upsert({ id: data.user.id, display_name: displayName, updated_at: new Date().toISOString() });
+
+    alert('✅ Account created! Now login.');
+    const modal = document.getElementById('supabaseSignUpModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+  });
+
+  // Login
+  document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
+    const email = document.getElementById('modalLoginEmail').value.trim();
+    const password = document.getElementById('modalLoginPassword').value.trim();
+    if (!email || !password) return alert('Email and password required');
+
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) return alert(error.message);
+
+    const modal = document.getElementById('supabaseLoginModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+  });
+
+  // Search User with online/offline status
   document.getElementById('modalSearchSubmit').addEventListener('click', async () => {
     const name = document.getElementById('searchDisplayName').value.trim();
     if (!name) return alert('Enter a display name');
@@ -977,17 +1029,23 @@ window.addEventListener('load', () => {
       return;
     }
 
-    const isOnline = data.last_seen && (Date.now() - new Date(data.last_seen).getTime() < 120000); // 2 minutes
+    const isOnline = data.last_seen && (Date.now() - new Date(data.last_seen).getTime() < 120000);
     const status = isOnline ? '🟢 Online' : '🔴 Offline';
 
     resultDiv.innerHTML = `
       <p class="text-lg font-medium">${data.display_name}</p>
       <p class="text-sm">${status}</p>
-      <button onclick="window.location.href='?connect=' + encodeURIComponent(name)" class="bg-green-500 text-white px-4 py-2 rounded mt-3">Connect</button>
+      <button onclick="window.location = '?connect=' + encodeURIComponent(name)" class="bg-green-500 text-white px-4 py-2 rounded mt-3">Connect to this user</button>
     `;
   });
 
-  // Logged-in state (unchanged)
+  // Sign Out
+  document.getElementById('signOutBtn').addEventListener('click', async () => {
+    await supabaseClient.auth.signOut();
+    location.reload();
+  });
+
+  // Show logged-in state + hide links
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
     const authLinks = document.getElementById('authLinks');
     const userInfo = document.getElementById('userInfo');

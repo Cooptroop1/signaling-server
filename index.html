@@ -771,14 +771,16 @@
         <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
-
-                        <!-- SUPABASE AUTH — Simple text links like your old system (only on start page) -->
+            <!-- SUPABASE AUTH — Simple text links like your old system (only on start page) -->
       <div id="supabaseAuthFooter" class="text-center mt-4">
-        <button id="openSignUpBtn" class="text-blue-500 hover:underline text-lg">Sign Up</button>
-        <span class="text-gray-400 mx-3">•</span>
-        <button id="openLoginBtn" class="text-blue-500 hover:underline text-lg">Login</button>
+        <!-- Login/Sign Up links (hidden when logged in) -->
+        <div id="authLinks">
+          <button id="openSignUpBtn" class="text-blue-500 hover:underline text-lg">Sign Up</button>
+          <span class="text-gray-400 mx-3">•</span>
+          <button id="openLoginBtn" class="text-blue-500 hover:underline text-lg">Login</button>
+        </div>
         
-        <!-- Logged in state -->
+        <!-- Logged in state (always visible when logged in) -->
         <div id="userInfo" class="hidden mt-4 text-center">
           <span id="userDisplayName" class="text-lg text-gray-700 block mb-3 font-medium"></span>
           <button id="signOutBtn" class="text-red-500 hover:underline text-lg">Sign Out</button>
@@ -952,7 +954,7 @@ document.getElementById('modalLoginCancel').addEventListener('click', () => {
   modal.classList.remove('active');
 });
 
-// Sign Up WITH duplicate check
+// Sign Up
 document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
   const email = document.getElementById('modalSignUpEmail').value.trim();
   const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
@@ -960,22 +962,13 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
 
   if (!email || !displayName || !password) return alert('All fields required');
 
-  const { data: existingName } = await supabaseClient
-    .from('profiles')
-    .select('id')
-    .eq('display_name', displayName)
-    .single();
-
+  const { data: existingName } = await supabaseClient.from('profiles').select('id').eq('display_name', displayName).single();
   if (existingName) return alert('❌ Display name already taken. Choose another.');
 
   const { data, error } = await supabaseClient.auth.signUp({ email, password });
   if (error) return alert(error.message);
 
-  await supabaseClient.from('profiles').upsert({
-    id: data.user.id,
-    display_name: displayName,
-    updated_at: new Date().toISOString()
-  });
+  await supabaseClient.from('profiles').upsert({ id: data.user.id, display_name: displayName, updated_at: new Date().toISOString() });
 
   alert('✅ Account created! Now login.');
   const modal = document.getElementById('supabaseSignUpModal');
@@ -1003,20 +996,20 @@ document.getElementById('signOutBtn').addEventListener('click', async () => {
   location.reload();
 });
 
-// Show logged-in state + HIDE the Sign Up/Login links when logged in
+// Show logged-in state + hide only the Sign Up/Login links
 supabaseClient.auth.onAuthStateChange(async (event, session) => {
   const userInfo = document.getElementById('userInfo');
   const nameSpan = document.getElementById('userDisplayName');
-  const authFooter = document.getElementById('supabaseAuthFooter');
+  const authLinks = document.getElementById('authLinks');
 
   if (session?.user) {
     const { data } = await supabaseClient.from('profiles').select('display_name').eq('id', session.user.id).single();
     nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
     userInfo.classList.remove('hidden');
-    authFooter.style.display = 'none';           // ← hides the two links
+    authLinks.style.display = 'none';           // ← hides only the two links
   } else {
     userInfo.classList.add('hidden');
-    authFooter.style.display = 'block';          // ← shows the two links again
+    authLinks.style.display = 'block';          // ← shows the two links again
   }
 });
 </script>

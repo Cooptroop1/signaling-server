@@ -616,10 +616,15 @@
     [data-has-code] .footer-buttons {
       display: none;
     }
-    /* Hide Supabase auth footer on username, connect, and chat screens */
-#usernameContainer ~ #supabaseAuthFooter,
-#connectContainer ~ #supabaseAuthFooter,
-#chatContainer ~ #supabaseAuthFooter,
+    /* Supabase auth footer — ONLY visible on the initial start screen */
+#supabaseAuthFooter {
+  display: block;
+}
+
+/* Hide on username screen, connect screen, active chat, and when data-has-code is active */
+#usernameContainer:not(.hidden) ~ #supabaseAuthFooter,
+#connectContainer:not(.hidden) ~ #supabaseAuthFooter,
+#chatContainer:not(.hidden) ~ #supabaseAuthFooter,
 [data-has-code] #supabaseAuthFooter {
   display: none !important;
 }

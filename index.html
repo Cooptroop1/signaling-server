@@ -1011,19 +1011,6 @@ window.addEventListener('load', () => {
       authLinks.style.display = 'block';
     }
   });
-
-  // Protect old username entry screen (blocks registered names)
-  document.getElementById('joinWithUsernameButton').addEventListener('click', async () => {
-    const username = document.getElementById('usernameInput').value.trim();
-    if (!username) return alert('Please enter a username');
-
-    const { data: existing } = await supabaseClient.from('profiles').select('id').eq('display_name', username).single();
-    if (existing) {
-      alert('❌ This display name is already registered. Please Login with that account instead.');
-      return;
-    }
-    // If free, old code continues normally
-  });
 });
 </script>
 </body>

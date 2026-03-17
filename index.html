@@ -616,6 +616,13 @@
     [data-has-code] .footer-buttons {
       display: none;
     }
+    /* Hide Supabase auth footer on username, connect, and chat screens */
+#usernameContainer ~ #supabaseAuthFooter,
+#connectContainer ~ #supabaseAuthFooter,
+#chatContainer ~ #supabaseAuthFooter,
+[data-has-code] #supabaseAuthFooter {
+  display: none !important;
+}
     #totpSecretDisplay {
       text-align: center;
       margin-top: 1rem;
@@ -760,8 +767,8 @@
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
 
-            <!-- SUPABASE AUTH — Clean footer buttons (click opens modal) -->
-      <div class="text-center mt-4">
+                  <!-- SUPABASE AUTH — Only visible on start page -->
+      <div id="supabaseAuthFooter" class="text-center mt-4">
         <button id="openSignUpBtn" class="bg-purple-500 text-white px-6 py-3 rounded w-full mb-3 hover:bg-purple-600 text-lg font-bold">Sign Up</button>
         <button id="openLoginBtn" class="bg-blue-500 text-white px-6 py-3 rounded w-full hover:bg-blue-600 text-lg font-bold">Login</button>
         

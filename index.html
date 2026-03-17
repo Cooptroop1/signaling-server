@@ -748,14 +748,11 @@
         <button id="connectButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to chat">Connect</button>
         <button id="backButtonConnect" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
       </div>
-      <div class="text-center mt-4 footer-buttons">
-        <button id="claimUsernameButton" class="text-blue-500 hover:underline hidden" aria-label="Claim a username">Claim Username</button>
-        <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
-        <button id="searchUserButton" class="text-blue-500 hover:underline" aria-label="Search for user">Search User</button>
-        <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log out">Log Out</button>
-        <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
-        <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
-      </div>
+    <div class="text-center mt-4 footer-buttons">
+  <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login / Sign Up">Login / Sign Up</button>
+  <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log Out">Log Out</button>
+  <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
+    </div>
     </div>
     <div id="maxClientsContainer" class="hidden flex flex-col justify-center bg-black p-4 rounded-lg shadow-lg">
       <span class="text-white mb-2 font-bold">Max Users</span>
@@ -862,6 +859,32 @@
       <button id="denyButton" class="bg-red-500 text-white px-4 py-2 rounded w-full hover:bg-red-600 mt-2">Deny</button>
     </div>
   </div>
+  <!-- NEW SUPABASE LOGIN MODAL -->
+<div id="authModal" class="totp-modal" role="dialog" aria-label="Login / Sign Up">
+  <div class="totp-modal-content">
+    <h2 id="authTitle" class="text-xl font-bold mb-4 text-center">Sign In</h2>
+    <div class="flex mb-4 border-b">
+      <button id="signinTab" class="flex-1 py-3 text-blue-600 border-b-2 border-blue-600 font-medium">Sign In</button>
+      <button id="signupTab" class="flex-1 py-3 text-gray-500 font-medium">Sign Up</button>
+    </div>
+    <input id="emailInput" type="email" class="border border-gray-300 p-3 w-full mb-3 rounded-lg" placeholder="you@email.com">
+    <input id="passwordInput" type="password" class="border border-gray-300 p-3 w-full mb-4 rounded-lg" placeholder="Password (8+ characters)">
+    <div id="authError" class="text-sm text-center min-h-[24px] text-red-500"></div>
+    <button id="authSubmitButton" class="bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg w-full font-medium">Sign In</button>
+    <button id="authCancelButton" class="mt-4 text-gray-600 hover:text-gray-800 w-full py-2">Cancel</button>
+  </div>
+</div>
+
+<!-- NEW DISPLAY NAME MODAL -->
+<div id="displayNameModal" class="totp-modal" role="dialog" aria-label="Set Display Name">
+  <div class="totp-modal-content">
+    <h2 class="text-xl font-bold mb-4">Set Your Display Name</h2>
+    <p class="text-gray-600 mb-4 text-sm">How others will see you in chats (optional)</p>
+    <input id="displayNameInput" type="text" maxlength="20" class="border border-gray-300 p-3 w-full rounded-lg" placeholder="Display Name">
+    <div id="displayNameError" class="text-red-500 text-sm mb-3"></div>
+    <button id="saveDisplayNameButton" class="bg-green-500 text-white py-3 px-6 rounded-lg w-full">Save (or skip)</button>
+  </div>
+</div>
   <script src="crypto.js"></script>
   <script src="utils.js"></script>
   <script src="main.js"></script>

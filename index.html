@@ -760,18 +760,15 @@
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
 
-      <!-- SUPABASE EMAIL + DISPLAY NAME + PASSWORD (exact footer spot) -->
+            <!-- SUPABASE AUTH — Clean footer buttons (click opens modal) -->
       <div class="text-center mt-4">
-        <input id="authEmail" type="email" placeholder="Email" class="border border-gray-300 p-2 w-full mb-2 rounded text-center">
-        <input id="authDisplayName" type="text" placeholder="Display Name (1-16 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded text-center" maxlength="16">
-        <input id="authPassword" type="password" placeholder="Password (min 6 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded text-center">
+        <button id="openSignUpBtn" class="bg-purple-500 text-white px-6 py-3 rounded w-full mb-3 hover:bg-purple-600 text-lg font-bold">Sign Up</button>
+        <button id="openLoginBtn" class="bg-blue-500 text-white px-6 py-3 rounded w-full hover:bg-blue-600 text-lg font-bold">Login</button>
         
-        <button id="supabaseSignUpBtn" class="bg-green-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-green-600">Sign Up</button>
-        <button id="supabaseLoginBtn" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Login</button>
-        
-        <div id="userInfo" class="hidden mt-3 text-center">
-          <span id="userDisplayName" class="text-sm text-gray-700 block mb-2 font-medium"></span>
-          <button id="signOutBtn" class="text-red-500 hover:underline">Sign Out</button>
+        <!-- Logged in state -->
+        <div id="userInfo" class="hidden mt-4 text-center">
+          <span id="userDisplayName" class="text-lg text-gray-700 block mb-3 font-medium"></span>
+          <button id="signOutBtn" class="text-red-500 hover:underline text-lg">Sign Out</button>
         </div>
       </div>
     </div> <!-- ← THIS CLOSES THE WHITE CARD (bg-white) -->
@@ -881,7 +878,28 @@
       <button id="denyButton" class="bg-red-500 text-white px-4 py-2 rounded w-full hover:bg-red-600 mt-2">Deny</button>
     </div>
   </div>
-  
+    <!-- SUPABASE SIGN UP MODAL -->
+  <div id="supabaseSignUpModal" class="totp-modal hidden" role="dialog" aria-label="Sign Up" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Create Account</h2>
+      <input id="modalSignUpEmail" type="email" placeholder="Email" class="border border-gray-300 p-3 w-full mb-3 rounded">
+      <input id="modalSignUpDisplayName" type="text" placeholder="Display Name (1-16 chars)" class="border border-gray-300 p-3 w-full mb-3 rounded" maxlength="16">
+      <input id="modalSignUpPassword" type="password" placeholder="Password (min 6 chars)" class="border border-gray-300 p-3 w-full mb-4 rounded">
+      <button id="modalSignUpSubmit" class="bg-green-500 text-white px-4 py-3 rounded w-full mb-2">Create Account</button>
+      <button id="modalSignUpCancel" class="bg-gray-500 text-white px-4 py-3 rounded w-full">Cancel</button>
+    </div>
+  </div>
+
+  <!-- SUPABASE LOGIN MODAL -->
+  <div id="supabaseLoginModal" class="totp-modal hidden" role="dialog" aria-label="Login" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Login</h2>
+      <input id="modalLoginEmail" type="email" placeholder="Email" class="border border-gray-300 p-3 w-full mb-3 rounded">
+      <input id="modalLoginPassword" type="password" placeholder="Password" class="border border-gray-300 p-3 w-full mb-4 rounded">
+      <button id="modalLoginSubmit" class="bg-blue-500 text-white px-4 py-3 rounded w-full mb-2">Login</button>
+      <button id="modalLoginCancel" class="bg-gray-500 text-white px-4 py-3 rounded w-full">Cancel</button>
+    </div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="crypto.js"></script>
   <script src="utils.js"></script>
@@ -889,84 +907,80 @@
   <script src="init.js"></script>
   <script src="events.js"></script>
 <script>
-// === SUPABASE CONFIG — YOUR REAL VALUES ===
+// === SUPABASE CONFIG ===
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Open modals
+document.getElementById('openSignUpBtn').addEventListener('click', () => {
+  document.getElementById('supabaseSignUpModal').classList.remove('hidden');
+  document.getElementById('supabaseSignUpModal').classList.add('active');
+});
+
+document.getElementById('openLoginBtn').addEventListener('click', () => {
+  document.getElementById('supabaseLoginModal').classList.remove('hidden');
+  document.getElementById('supabaseLoginModal').classList.add('active');
+});
+
+// Cancel modals
+document.getElementById('modalSignUpCancel').addEventListener('click', () => document.getElementById('supabaseSignUpModal').classList.add('hidden'));
+document.getElementById('modalLoginCancel').addEventListener('click', () => document.getElementById('supabaseLoginModal').classList.add('hidden'));
+
 // Sign Up
-async function signUp() {
-  const email = document.getElementById('authEmail').value.trim();
-  const displayName = document.getElementById('authDisplayName').value.trim();
-  const password = document.getElementById('authPassword').value.trim();
+document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
+  const email = document.getElementById('modalSignUpEmail').value.trim();
+  const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
+  const password = document.getElementById('modalSignUpPassword').value.trim();
 
   if (!email || !displayName || !password) return alert('All fields required');
 
-  const { data: authData, error: authError } = await supabaseClient.auth.signUp({ email, password });
-  if (authError) return alert('Signup error: ' + authError.message);
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) return alert(error.message);
 
-  console.log('✅ Auth signup success, user ID:', authData.user?.id);
-
-  // Save to profiles table
-  const { error: profileError } = await supabaseClient.from('profiles').upsert({
-    id: authData.user.id,
+  await supabaseClient.from('profiles').upsert({
+    id: data.user.id,
     display_name: displayName,
     updated_at: new Date().toISOString()
   });
 
-  if (profileError) {
-    console.error('❌ Profile save failed:', profileError);
-    alert('Account created but display name save failed: ' + profileError.message);
-  } else {
-    console.log('✅ Display name saved to profiles table');
-    alert('✅ Account created! Now click Login with the same details.');
-  }
-}
+  alert('✅ Account created! Now login.');
+  document.getElementById('supabaseSignUpModal').classList.add('hidden');
+});
 
 // Login
-async function login() {
-  const email = document.getElementById('authEmail').value.trim();
-  const password = document.getElementById('authPassword').value.trim();
+document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
+  const email = document.getElementById('modalLoginEmail').value.trim();
+  const password = document.getElementById('modalLoginPassword').value.trim();
   if (!email || !password) return alert('Email and password required');
 
   const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if (error) return alert('Login error: ' + error.message);
-  alert('✅ Logged in!');
-}
+  if (error) return alert(error.message);
+
+  document.getElementById('supabaseLoginModal').classList.add('hidden');
+});
 
 // Sign Out
-async function signOut() {
+document.getElementById('signOutBtn').addEventListener('click', async () => {
   await supabaseClient.auth.signOut();
   location.reload();
-}
+});
 
-// Show display name after login
+// Show logged in state + display name
 supabaseClient.auth.onAuthStateChange(async (event, session) => {
   const userInfo = document.getElementById('userInfo');
   const nameSpan = document.getElementById('userDisplayName');
 
   if (session?.user) {
-    const { data } = await supabaseClient
-      .from('profiles')
-      .select('display_name')
-      .eq('id', session.user.id)
-      .single();
-
-    nameSpan.textContent = data?.display_name 
-      ? `Logged in as ${data.display_name}` 
-      : `Logged in as ${session.user.email}`;
+    const { data } = await supabaseClient.from('profiles').select('display_name').eq('id', session.user.id).single();
+    nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
     userInfo.classList.remove('hidden');
   } else {
     userInfo.classList.add('hidden');
   }
 });
-
-// Button listeners
-document.getElementById('supabaseSignUpBtn').addEventListener('click', signUp);
-document.getElementById('supabaseLoginBtn').addEventListener('click', login);
-document.getElementById('signOutBtn').addEventListener('click', signOut);
 </script>
 </body>
 </html>

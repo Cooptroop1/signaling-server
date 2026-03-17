@@ -914,103 +914,103 @@
       <button id="modalLoginSubmit" class="bg-blue-500 text-white px-4 py-3 rounded w-full mb-2">Login</button>
       <button id="modalLoginCancel" class="bg-gray-500 text-white px-4 py-3 rounded w-full">Cancel</button>
     </div>
-  <script>
-// === SUPABASE CONFIG — FINAL STABLE VERSION ===
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="crypto.js"></script>
+  <script src="utils.js"></script>
+  <script src="main.js"></script>
+  <script src="init.js"></script>
+  <script src="events.js"></script>
+<script>
+// === SUPABASE CONFIG ===
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
-// Wait for the Supabase library to fully load
-window.addEventListener('load', () => {
-  if (!window.supabase) {
-    console.error('Supabase CDN failed to load — refresh the page');
-    return;
+const { createClient } = supabase;
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Open modals
+document.getElementById('openSignUpBtn').addEventListener('click', () => {
+  const modal = document.getElementById('supabaseSignUpModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('active');
+});
+
+document.getElementById('openLoginBtn').addEventListener('click', () => {
+  const modal = document.getElementById('supabaseLoginModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('active');
+});
+
+// Cancel buttons
+document.getElementById('modalSignUpCancel').addEventListener('click', () => {
+  const modal = document.getElementById('supabaseSignUpModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
+});
+document.getElementById('modalLoginCancel').addEventListener('click', () => {
+  const modal = document.getElementById('supabaseLoginModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
+});
+
+// Sign Up
+document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
+  const email = document.getElementById('modalSignUpEmail').value.trim();
+  const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
+  const password = document.getElementById('modalSignUpPassword').value.trim();
+
+  if (!email || !displayName || !password) return alert('All fields required');
+
+  const { data: existingName } = await supabaseClient.from('profiles').select('id').eq('display_name', displayName).single();
+  if (existingName) return alert('❌ Display name already taken. Choose another.');
+
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) return alert(error.message);
+
+  await supabaseClient.from('profiles').upsert({ id: data.user.id, display_name: displayName, updated_at: new Date().toISOString() });
+
+  alert('✅ Account created! Now login.');
+  const modal = document.getElementById('supabaseSignUpModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
+});
+
+// Login
+document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
+  const email = document.getElementById('modalLoginEmail').value.trim();
+  const password = document.getElementById('modalLoginPassword').value.trim();
+  if (!email || !password) return alert('Email and password required');
+
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) return alert(error.message);
+
+  const modal = document.getElementById('supabaseLoginModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
+});
+
+// Sign Out
+document.getElementById('signOutBtn').addEventListener('click', async () => {
+  await supabaseClient.auth.signOut();
+  location.reload();
+});
+
+// Show logged-in state + hide only the Sign Up/Login links
+supabaseClient.auth.onAuthStateChange(async (event, session) => {
+  const userInfo = document.getElementById('userInfo');
+  const nameSpan = document.getElementById('userDisplayName');
+  const authLinks = document.getElementById('authLinks');
+
+  if (session?.user) {
+    const { data } = await supabaseClient.from('profiles').select('display_name').eq('id', session.user.id).single();
+    nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
+    userInfo.classList.remove('hidden');
+    authLinks.style.display = 'none';           // ← hides only the two links
+  } else {
+    userInfo.classList.add('hidden');
+    authLinks.style.display = 'block';          // ← shows the two links again
   }
-
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  // Open modals
-  document.getElementById('openSignUpBtn').addEventListener('click', () => {
-    const modal = document.getElementById('supabaseSignUpModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('active');
-  });
-
-  document.getElementById('openLoginBtn').addEventListener('click', () => {
-    const modal = document.getElementById('supabaseLoginModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('active');
-  });
-
-  // Cancel buttons
-  document.getElementById('modalSignUpCancel').addEventListener('click', () => {
-    const modal = document.getElementById('supabaseSignUpModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('active');
-  });
-  document.getElementById('modalLoginCancel').addEventListener('click', () => {
-    const modal = document.getElementById('supabaseLoginModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('active');
-  });
-
-  // Sign Up WITH duplicate check
-  document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
-    const email = document.getElementById('modalSignUpEmail').value.trim();
-    const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
-    const password = document.getElementById('modalSignUpPassword').value.trim();
-
-    if (!email || !displayName || !password) return alert('All fields required');
-
-    const { data: existing } = await supabaseClient.from('profiles').select('id').eq('display_name', displayName).single();
-    if (existing) return alert('❌ Display name already taken.');
-
-    const { data, error } = await supabaseClient.auth.signUp({ email, password });
-    if (error) return alert(error.message);
-
-    await supabaseClient.from('profiles').upsert({ id: data.user.id, display_name: displayName, updated_at: new Date().toISOString() });
-
-    alert('✅ Account created! Now login.');
-    const modal = document.getElementById('supabaseSignUpModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('active');
-  });
-
-  // Login
-  document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
-    const email = document.getElementById('modalLoginEmail').value.trim();
-    const password = document.getElementById('modalLoginPassword').value.trim();
-    if (!email || !password) return alert('Email and password required');
-
-    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (error) return alert(error.message);
-
-    const modal = document.getElementById('supabaseLoginModal');
-    modal.classList.add('hidden');
-    modal.classList.remove('active');
-  });
-
-  // Sign Out
-  document.getElementById('signOutBtn').addEventListener('click', async () => {
-    await supabaseClient.auth.signOut();
-    location.reload();
-  });
-
-  // Show logged-in state + hide links when logged in
-  supabaseClient.auth.onAuthStateChange(async (event, session) => {
-    const authLinks = document.getElementById('authLinks');
-    const userInfo = document.getElementById('userInfo');
-    const nameSpan = document.getElementById('userDisplayName');
-
-    if (session?.user) {
-      const { data } = await supabaseClient.from('profiles').select('display_name').eq('id', session.user.id).single();
-      nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
-      userInfo.classList.remove('hidden');
-      authLinks.style.display = 'none';
-    } else {
-      userInfo.classList.add('hidden');
-      authLinks.style.display = 'block';
-    }
-  });
 });
 </script>
 </body>

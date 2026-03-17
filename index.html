@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Anonomoose Chat</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai/v1/chat/completions https://raw.githubusercontent.com; object-src 'none'; base-uri 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai/v1/chat/completions https://raw.githubusercontent.com https://*.supabase.co; object-src 'none'; base-uri 'self'; frame-src https://*.supabase.co;">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
@@ -485,6 +485,9 @@
     .hidden {
       display: none !important;
     }
+    .legacy-auth {
+      display: none !important;
+    }
     #grokKeyContainer {
       display: none;
       margin-top: 0.5rem;
@@ -748,7 +751,8 @@
         <button id="connectButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Connect to chat">Connect</button>
         <button id="backButtonConnect" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
       </div>
-      <div class="text-center mt-4 footer-buttons">
+            <!-- OLD LEGACY AUTH (hidden - code still 100% there) -->
+      <div class="text-center mt-4 footer-buttons legacy-auth">
         <button id="claimUsernameButton" class="text-blue-500 hover:underline hidden" aria-label="Claim a username">Claim Username</button>
         <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
         <button id="searchUserButton" class="text-blue-500 hover:underline" aria-label="Search for user">Search User</button>
@@ -756,7 +760,19 @@
         <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
-    </div>
+
+            <!-- NEW SUPABASE AUTH (exact footer spot) -->
+      <div class="text-center mt-4">
+        <button id="googleLoginBtn" class="bg-red-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-red-600 transition-colors">Sign in with Google</button>
+        <button id="emailMagicBtn" class="bg-purple-500 text-white px-4 py-2 rounded w-full hover:bg-purple-600 transition-colors">Sign in with Magic Link</button>
+       
+        <div id="userInfo" class="hidden mt-3 text-center">
+          <span id="userEmail" class="text-sm text-gray-700 block mb-2"></span>
+          <button id="signOutBtn" class="text-red-500 hover:underline">Sign Out</button>
+        </div>
+      </div>
+    </div> <!-- ← THIS CLOSES THE WHITE CARD (bg-white) -->
+
     <div id="maxClientsContainer" class="hidden flex flex-col justify-center bg-black p-4 rounded-lg shadow-lg">
       <span class="text-white mb-2 font-bold">Max Users</span>
       <div id="maxClientsRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
@@ -821,7 +837,7 @@
       <button id="closeTotpSecretButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-blue-600">Close</button>
     </div>
   </div>
-  <div id="claimUsernameModal" class="totp-modal" role="dialog" aria-label="Claim Username" tabindex="-1">
+    <div id="claimUsernameModal" class="totp-modal legacy-auth" role="dialog" aria-label="Claim Username" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Claim Username</h2>
       <p class="text-sm text-red-500 mb-2">Warning: Encryption keys are stored locally. On a new device, re-claim to update keys (old offline messages may be lost).</p>
@@ -833,7 +849,7 @@
       <button id="claimCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-  <div id="loginModal" class="totp-modal hidden" role="dialog" aria-label="Login" tabindex="-1">
+    <div id="loginModal" class="totp-modal hidden legacy-auth" role="dialog" aria-label="Login" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Login</h2>
       <input id="loginUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Username" maxlength="16">
@@ -844,7 +860,7 @@
       <button id="loginCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-  <div id="searchUserModal" class="totp-modal hidden" role="dialog" aria-label="Search User" tabindex="-1">
+    <div id="searchUserModal" class="totp-modal hidden legacy-auth" role="dialog" aria-label="Search User" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Search User</h2>
       <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username" maxlength="16">
@@ -862,10 +878,62 @@
       <button id="denyButton" class="bg-red-500 text-white px-4 py-2 rounded w-full hover:bg-red-600 mt-2">Deny</button>
     </div>
   </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="crypto.js"></script>
   <script src="utils.js"></script>
   <script src="main.js"></script>
   <script src="init.js"></script>
   <script src="events.js"></script>
+<script>
+// === SUPABASE CONFIG — REPLACE THESE WITH YOUR REAL VALUES ===
+const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';           // ← your real URL
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'; // ← your real anon key
+
+const { createClient } = supabase;
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Auth functions
+async function signInWithGoogle() {
+  await supabaseClient.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin }
+  });
+}
+
+async function signInWithMagicLink() {
+  const email = prompt("Enter your email address:");
+  if (!email) return;
+  const { error } = await supabaseClient.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.origin }
+  });
+  if (error) alert(error.message);
+  else alert("✅ Magic link sent! Check your email.");
+}
+
+async function signOut() {
+  await supabaseClient.auth.signOut();
+  location.reload();
+}
+
+// Auth state listener
+supabaseClient.auth.onAuthStateChange((event, session) => {
+  const userInfo = document.getElementById('userInfo');
+  const emailSpan = document.getElementById('userEmail');
+  
+  if (session?.user) {
+    emailSpan.textContent = `Logged in as ${session.user.email}`;
+    userInfo.classList.remove('hidden');
+  } else {
+    userInfo.classList.add('hidden');
+  }
+});
+
+// Button listeners
+document.getElementById('googleLoginBtn').addEventListener('click', signInWithGoogle);
+document.getElementById('emailMagicBtn').addEventListener('click', signInWithMagicLink);
+document.getElementById('signOutBtn').addEventListener('click', signOut);
+</script>
 </body>
 </html>

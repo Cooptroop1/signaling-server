@@ -1,3 +1,11 @@
+// === SUPABASE SETUP (optional login only) ===
+const supabaseUrl = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
+const supabase = Supabase.createClient(supabaseUrl, supabaseAnonKey);
+
+// === NEW VARIABLES (optional) ===
+let currentUser = null;
+let displayName = localStorage.getItem('username') || ''; // fallback to existing username
 let turnUsername = '';
 let turnCredential = '';
 let localStream = null;

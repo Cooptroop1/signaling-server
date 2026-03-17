@@ -1339,3 +1339,114 @@ document.getElementById('searchSubmitButton').onclick = () => {
     socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
   }
 };
+// === OPTIONAL SUPABASE LOGIN (does NOT affect tokens/connecting) ===
+const supabase = Supabase.createClient(
+  'https://crgmcdpmmxtrcocfbsac.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs'
+);
+
+let currentUser = null;
+let displayName = localStorage.getItem('username') || '';
+
+async function initSupabaseLogin() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    currentUser = session.user;
+    const { data } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
+    if (data && data.display_name) {
+      displayName = data.display_name;
+      localStorage.setItem('username', displayName);
+      document.getElementById('logoutButton')?.classList.remove('hidden');
+      document.getElementById('loginButton')?.classList.add('hidden');
+    } else {
+      document.getElementById('displayNameModal')?.classList.remove('hidden');
+    }
+  }
+}
+
+function openLoginModal() {
+  document.getElementById('authModal')?.classList.remove('hidden');
+}
+
+function closeLoginModal() {
+  document.getElementById('authModal')?.classList.add('hidden');
+}
+
+async function handleLoginSubmit() {
+  const email = document.getElementById('emailInput').value.trim();
+  const password = document.getElementById('passwordInput').value;
+  const errorDiv = document.getElementById('authError');
+  errorDiv.textContent = '';
+  if (!email || !password) {
+    errorDiv.textContent = 'Fill email and password';
+    return;
+  }
+  try {
+    let result;
+    if (document.getElementById('authTitle').textContent === 'Sign In') {
+      result = await supabase.auth.signInWithPassword({ email, password });
+    } else {
+      result = await supabase.auth.signUp({ email, password });
+      if (result.error) throw result.error;
+      errorDiv.textContent = 'Account created! Check email to confirm.';
+      return;
+    }
+    if (result.error) throw result.error;
+    currentUser = result.data.user;
+    closeLoginModal();
+    const { data } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
+    if (data && data.display_name) {
+      displayName = data.display_name;
+      localStorage.setItem('username', displayName);
+      document.getElementById('logoutButton')?.classList.remove('hidden');
+      document.getElementById('loginButton')?.classList.add('hidden');
+    } else {
+      document.getElementById('displayNameModal')?.classList.remove('hidden');
+    }
+    showStatusMessage('Logged in!');
+  } catch (err) {
+    errorDiv.textContent = err.message || 'Login failed';
+  }
+}
+
+async function saveDisplayName() {
+  const name = document.getElementById('displayNameInput').value.trim();
+  const errorDiv = document.getElementById('displayNameError');
+  errorDiv.textContent = '';
+  if (name.length < 1 || name.length > 20) {
+    errorDiv.textContent = '1-20 chars';
+    return;
+  }
+  const { error } = await supabase.from('profiles').upsert({ id: currentUser.id, display_name: name });
+  if (error) {
+    errorDiv.textContent = error.message;
+    return;
+  }
+  displayName = name;
+  localStorage.setItem('username', name);
+  document.getElementById('displayNameModal')?.classList.add('hidden');
+  showStatusMessage('Name saved!');
+}
+
+async function logout() {
+  await supabase.auth.signOut();
+  currentUser = null;
+  displayName = localStorage.getItem('username') || '';
+  document.getElementById('logoutButton')?.classList.add('hidden');
+  document.getElementById('loginButton')?.classList.remove('hidden');
+  showStatusMessage('Logged out');
+}
+
+// Attach listeners safely
+window.addEventListener('load', () => {
+  const loginBtn = document.getElementById('loginButton');
+  if (loginBtn) loginBtn.onclick = openLoginModal;
+  const logoutBtn = document.getElementById('logoutButton');
+  if (logoutBtn) logoutBtn.onclick = logout;
+  const authSubmit = document.getElementById('authSubmitButton');
+  if (authSubmit) authSubmit.onclick = handleLoginSubmit;
+  const saveName = document.getElementById('saveDisplayNameButton');
+  if (saveName) saveName.onclick = saveDisplayName;
+
+  initSupabaseLogin(); // check if already logged in
+});

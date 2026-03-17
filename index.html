@@ -919,7 +919,7 @@
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
-const { createClient } = supabase;
+const { createClient } = window.supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Open modals
@@ -1006,7 +1006,7 @@ supabaseClient.auth.onAuthStateChange(async (event, session) => {
   }
 });
 
-// Protect old username entry screen (blocks registered names)
+// Protect old username entry screen
 document.getElementById('joinWithUsernameButton').addEventListener('click', async () => {
   const username = document.getElementById('usernameInput').value.trim();
   if (!username) return alert('Please enter a username');

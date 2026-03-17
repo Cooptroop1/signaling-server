@@ -919,8 +919,7 @@
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
-const { createClient } = window.supabase;
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Open modals
 document.getElementById('openSignUpBtn').addEventListener('click', () => {

@@ -2,7 +2,6 @@
 const supabaseUrl = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
 const supabase = Supabase.createClient(supabaseUrl, supabaseAnonKey);
-
 // === NEW VARIABLES (optional) ===
 let currentUser = null;
 let displayName = localStorage.getItem('username') || ''; // fallback to existing username
@@ -1189,7 +1188,9 @@ setInterval(() => {
       processedNonces.delete(nonce);
     }
   }
-  // === OPTIONAL SUPABASE LOGIN HANDLERS ===
+  console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
+}, 300000); // 5min
+// === OPTIONAL SUPABASE LOGIN HANDLERS ===
 async function initSupabaseAuth() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) {
@@ -1200,7 +1201,6 @@ async function initSupabaseAuth() {
     if (loginBtn) loginBtn.classList.remove('hidden');
   }
 }
-
 async function loadDisplayName() {
   if (!currentUser) return;
   const { data } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
@@ -1216,31 +1216,26 @@ async function loadDisplayName() {
     if (modal) modal.classList.add('active');
   }
 }
-
 function openAuthModal() {
   const modal = document.getElementById('authModal');
   if (modal) modal.classList.add('active');
 }
-
 function closeAuthModal() {
   const modal = document.getElementById('authModal');
   if (modal) modal.classList.remove('active');
 }
-
 function switchToSignIn() {
   document.getElementById('authTitle').textContent = 'Sign In';
   document.getElementById('authSubmitButton').textContent = 'Sign In';
   document.getElementById('signinTab').classList.add('border-b-2', 'border-blue-600', 'text-blue-600');
   document.getElementById('signupTab').classList.remove('border-b-2', 'border-blue-600', 'text-blue-600');
 }
-
 function switchToSignUp() {
   document.getElementById('authTitle').textContent = 'Sign Up';
   document.getElementById('authSubmitButton').textContent = 'Create Account';
   document.getElementById('signupTab').classList.add('border-b-2', 'border-blue-600', 'text-blue-600');
   document.getElementById('signinTab').classList.remove('border-b-2', 'border-blue-600', 'text-blue-600');
 }
-
 async function handleAuthSubmit() {
   const email = document.getElementById('emailInput').value.trim();
   const password = document.getElementById('passwordInput').value;
@@ -1269,7 +1264,6 @@ async function handleAuthSubmit() {
     if (errorDiv) errorDiv.textContent = err.message || 'Login failed';
   }
 }
-
 async function saveDisplayName() {
   if (!currentUser) return;
   const name = document.getElementById('displayNameInput').value.trim();
@@ -1290,7 +1284,6 @@ async function saveDisplayName() {
   if (modal) modal.classList.remove('active');
   showStatusMessage('Display name saved!');
 }
-
 async function logout() {
   await supabase.auth.signOut();
   currentUser = null;
@@ -1301,7 +1294,6 @@ async function logout() {
   if (loginBtn) loginBtn.classList.remove('hidden');
   showStatusMessage('Logged out.');
 }
-
 // Safe button listeners (wait for DOM)
 setTimeout(() => {
   const loginBtn = document.getElementById('loginButton');
@@ -1311,7 +1303,6 @@ setTimeout(() => {
   const authSubmit = document.getElementById('authSubmitButton');
   const authCancel = document.getElementById('authCancelButton');
   const saveDisplay = document.getElementById('saveDisplayNameButton');
-
   if (loginBtn) loginBtn.onclick = openAuthModal;
   if (logoutBtn) logoutBtn.onclick = logout;
   if (signinTab) signinTab.onclick = switchToSignIn;
@@ -1319,11 +1310,8 @@ setTimeout(() => {
   if (authSubmit) authSubmit.onclick = handleAuthSubmit;
   if (authCancel) authCancel.onclick = closeAuthModal;
   if (saveDisplay) saveDisplay.onclick = saveDisplayName;
-
   initSupabaseAuth();
 }, 800); // small delay for safety
-  console.log(`Cleaned processedNonces, remaining: ${processedNonces.size}`);
-}, 300000); // 5min
 // New: Claim username handler (in socket.onmessage or separate)
 document.getElementById('claimSubmitButton').onclick = async () => {
   const name = document.getElementById('claimUsernameInput').value.trim();
@@ -1339,106 +1327,3 @@ document.getElementById('searchSubmitButton').onclick = () => {
     socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
   }
 };
-
-async function initSupabaseLogin() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) {
-    currentUser = session.user;
-    const { data } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
-    if (data && data.display_name) {
-      displayName = data.display_name;
-      localStorage.setItem('username', displayName);
-      document.getElementById('logoutButton')?.classList.remove('hidden');
-      document.getElementById('loginButton')?.classList.add('hidden');
-    } else {
-      document.getElementById('displayNameModal')?.classList.remove('hidden');
-    }
-  }
-}
-
-function openLoginModal() {
-  document.getElementById('authModal')?.classList.remove('hidden');
-}
-
-function closeLoginModal() {
-  document.getElementById('authModal')?.classList.add('hidden');
-}
-
-async function handleLoginSubmit() {
-  const email = document.getElementById('emailInput').value.trim();
-  const password = document.getElementById('passwordInput').value;
-  const errorDiv = document.getElementById('authError');
-  errorDiv.textContent = '';
-  if (!email || !password) {
-    errorDiv.textContent = 'Fill email and password';
-    return;
-  }
-  try {
-    let result;
-    if (document.getElementById('authTitle').textContent === 'Sign In') {
-      result = await supabase.auth.signInWithPassword({ email, password });
-    } else {
-      result = await supabase.auth.signUp({ email, password });
-      if (result.error) throw result.error;
-      errorDiv.textContent = 'Account created! Check email to confirm.';
-      return;
-    }
-    if (result.error) throw result.error;
-    currentUser = result.data.user;
-    closeLoginModal();
-    const { data } = await supabase.from('profiles').select('display_name').eq('id', currentUser.id).single();
-    if (data && data.display_name) {
-      displayName = data.display_name;
-      localStorage.setItem('username', displayName);
-      document.getElementById('logoutButton')?.classList.remove('hidden');
-      document.getElementById('loginButton')?.classList.add('hidden');
-    } else {
-      document.getElementById('displayNameModal')?.classList.remove('hidden');
-    }
-    showStatusMessage('Logged in!');
-  } catch (err) {
-    errorDiv.textContent = err.message || 'Login failed';
-  }
-}
-
-async function saveDisplayName() {
-  const name = document.getElementById('displayNameInput').value.trim();
-  const errorDiv = document.getElementById('displayNameError');
-  errorDiv.textContent = '';
-  if (name.length < 1 || name.length > 20) {
-    errorDiv.textContent = '1-20 chars';
-    return;
-  }
-  const { error } = await supabase.from('profiles').upsert({ id: currentUser.id, display_name: name });
-  if (error) {
-    errorDiv.textContent = error.message;
-    return;
-  }
-  displayName = name;
-  localStorage.setItem('username', name);
-  document.getElementById('displayNameModal')?.classList.add('hidden');
-  showStatusMessage('Name saved!');
-}
-
-async function logout() {
-  await supabase.auth.signOut();
-  currentUser = null;
-  displayName = localStorage.getItem('username') || '';
-  document.getElementById('logoutButton')?.classList.add('hidden');
-  document.getElementById('loginButton')?.classList.remove('hidden');
-  showStatusMessage('Logged out');
-}
-
-// Attach listeners safely
-window.addEventListener('load', () => {
-  const loginBtn = document.getElementById('loginButton');
-  if (loginBtn) loginBtn.onclick = openLoginModal;
-  const logoutBtn = document.getElementById('logoutButton');
-  if (logoutBtn) logoutBtn.onclick = logout;
-  const authSubmit = document.getElementById('authSubmitButton');
-  if (authSubmit) authSubmit.onclick = handleLoginSubmit;
-  const saveName = document.getElementById('saveDisplayNameButton');
-  if (saveName) saveName.onclick = saveDisplayName;
-
-  initSupabaseLogin(); // check if already logged in
-});

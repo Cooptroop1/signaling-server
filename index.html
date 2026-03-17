@@ -925,7 +925,7 @@
   <script src="init.js"></script>
   <script src="events.js"></script>
 <script>
-// === SUPABASE CONFIG — CLEAN & WORKING ===
+// === SUPABASE CONFIG — SAFE & STABLE ===
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
@@ -933,11 +933,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   // === OPEN MODALS ===
-  const openSignUp = document.getElementById('openSignUpBtn');
-  const openLogin = document.getElementById('openLoginBtn');
-  const openSearch = document.getElementById('openSearchBtn');
+  const openSignUpBtn = document.getElementById('openSignUpBtn');
+  const openLoginBtn = document.getElementById('openLoginBtn');
+  const openSearchBtn = document.getElementById('openSearchBtn');
 
-  if (openSignUp) openSignUp.addEventListener('click', () => {
+  if (openSignUpBtn) openSignUpBtn.addEventListener('click', () => {
     const modal = document.getElementById('supabaseSignUpModal');
     if (modal) {
       modal.classList.remove('hidden');
@@ -945,7 +945,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  if (openLogin) openLogin.addEventListener('click', () => {
+  if (openLoginBtn) openLoginBtn.addEventListener('click', () => {
     const modal = document.getElementById('supabaseLoginModal');
     if (modal) {
       modal.classList.remove('hidden');
@@ -953,7 +953,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  if (openSearch) openSearch.addEventListener('click', () => {
+  if (openSearchBtn) openSearchBtn.addEventListener('click', () => {
     const modal = document.getElementById('supabaseSearchModal');
     if (modal) {
       modal.classList.remove('hidden');
@@ -980,8 +980,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // === SIGN UP ===
-  const signupSubmit = document.getElementById('modalSignUpSubmit');
-  if (signupSubmit) signupSubmit.addEventListener('click', async () => {
+  const signUpSubmit = document.getElementById('modalSignUpSubmit');
+  if (signUpSubmit) signUpSubmit.addEventListener('click', async () => {
     const email = document.getElementById('modalSignUpEmail').value.trim();
     const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
     const password = document.getElementById('modalSignUpPassword').value.trim();

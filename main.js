@@ -1339,11 +1339,6 @@ document.getElementById('searchSubmitButton').onclick = () => {
     socket.send(JSON.stringify({ type: 'find-user', username: name, clientId, token }));
   }
 };
-// === OPTIONAL SUPABASE LOGIN (does NOT affect tokens/connecting) ===
-const supabase = Supabase.createClient(
-  'https://crgmcdpmmxtrcocfbsac.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs'
-);
 
 let currentUser = null;
 let displayName = localStorage.getItem('username') || '';

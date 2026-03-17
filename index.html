@@ -761,17 +761,17 @@
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
 
-                  <!-- NEW SUPABASE AUTH — Classic Email + Password (exact footer spot) -->
+                        <!-- SUPABASE EMAIL + PASSWORD + DISPLAY NAME (links to your profiles table) -->
       <div class="text-center mt-4">
-        <input id="authEmail" type="email" placeholder="Your Email" class="border border-gray-300 p-2 w-full mb-2 rounded text-center">
-        <input id="authPassword" type="password" placeholder="Password (min 6 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded text-center">
+        <input id="authEmail" type="email" placeholder="Email" class="border border-gray-300 p-2 w-full mb-2 rounded">
+        <input id="authDisplayName" type="text" placeholder="Display Name (1-16 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded" maxlength="16">
+        <input id="authPassword" type="password" placeholder="Password (min 6 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded">
         
         <button id="supabaseSignUpBtn" class="bg-green-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-green-600">Sign Up</button>
         <button id="supabaseLoginBtn" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Login</button>
         
-        <!-- After login this shows -->
         <div id="userInfo" class="hidden mt-3 text-center">
-          <span id="userEmail" class="text-sm text-gray-700 block mb-2"></span>
+          <span id="userDisplayName" class="text-sm text-gray-700 block mb-2 font-medium"></span>
           <button id="signOutBtn" class="text-red-500 hover:underline">Sign Out</button>
         </div>
       </div>
@@ -892,44 +892,64 @@
 <script>
 // === SUPABASE CONFIG — YOUR REAL VALUES ===
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';  // ← your real publishable key
+const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Auth functions
+// Sign Up + create profile row
 async function signUp() {
   const email = document.getElementById('authEmail').value.trim();
+  const displayName = document.getElementById('authDisplayName').value.trim();
   const password = document.getElementById('authPassword').value.trim();
-  if (!email || !password) return alert('Please fill email and password');
-  
+
+  if (!email || !displayName || !password) return alert('All fields required');
+
   const { data, error } = await supabaseClient.auth.signUp({ email, password });
-  if (error) alert(error.message);
-  else alert('✅ Sign up successful! (Check email if confirmation is required)');
+  if (error) return alert(error.message);
+
+  // Save display_name to your profiles table
+  await supabaseClient.from('profiles').upsert({
+    id: data.user.id,
+    display_name: displayName,
+    updated_at: new Date().toISOString()
+  });
+
+  alert('✅ Account created! Now login with the same email/password.');
 }
 
+// Login
 async function login() {
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPassword').value.trim();
-  if (!email || !password) return alert('Please fill email and password');
-  
-  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if (error) alert(error.message);
-  else alert('✅ Logged in successfully!');
+  if (!email || !password) return alert('Email and password required');
+
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) return alert(error.message);
+  alert('✅ Logged in!');
 }
 
+// Sign Out
 async function signOut() {
   await supabaseClient.auth.signOut();
   location.reload();
 }
 
-// Auth state listener
-supabaseClient.auth.onAuthStateChange((event, session) => {
+// Show display_name after login
+supabaseClient.auth.onAuthStateChange(async (event, session) => {
   const userInfo = document.getElementById('userInfo');
-  const emailSpan = document.getElementById('userEmail');
-  
+  const nameSpan = document.getElementById('userDisplayName');
+
   if (session?.user) {
-    emailSpan.textContent = `Logged in as ${session.user.email}`;
+    const { data } = await supabaseClient
+      .from('profiles')
+      .select('display_name')
+      .eq('id', session.user.id)
+      .single();
+
+    nameSpan.textContent = data?.display_name 
+      ? `Logged in as ${data.display_name}` 
+      : `Logged in as ${session.user.email}`;
     userInfo.classList.remove('hidden');
   } else {
     userInfo.classList.add('hidden');

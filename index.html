@@ -915,13 +915,14 @@
       <button id="modalLoginCancel" class="bg-gray-500 text-white px-4 py-3 rounded w-full">Cancel</button>
     </div>
   <script>
-// === SUPABASE CONFIG ===
+// === SUPABASE CONFIG — FINAL STABLE VERSION ===
 const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 
-document.addEventListener('DOMContentLoaded', () => {
+// Wait for the Supabase library to fully load
+window.addEventListener('load', () => {
   if (!window.supabase) {
-    console.error('Supabase library not loaded yet — refresh the page');
+    console.error('Supabase CDN failed to load — refresh the page');
     return;
   }
 
@@ -1011,7 +1012,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Protect old username entry screen
+  // Protect old username entry screen (blocks registered names)
   document.getElementById('joinWithUsernameButton').addEventListener('click', async () => {
     const username = document.getElementById('usernameInput').value.trim();
     if (!username) return alert('Please enter a username');

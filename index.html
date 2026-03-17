@@ -922,7 +922,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// === OPEN MODALS (unchanged) ===
+// Open modals
 document.getElementById('openSignUpBtn').addEventListener('click', () => {
   const modal = document.getElementById('supabaseSignUpModal');
   modal.classList.remove('hidden');
@@ -947,7 +947,7 @@ document.getElementById('modalLoginCancel').addEventListener('click', () => {
   modal.classList.remove('active');
 });
 
-// === SIGN UP & LOGIN (unchanged) ===
+// Sign Up WITH duplicate check
 document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
   const email = document.getElementById('modalSignUpEmail').value.trim();
   const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
@@ -964,9 +964,12 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
   await supabaseClient.from('profiles').upsert({ id: data.user.id, display_name: displayName, updated_at: new Date().toISOString() });
 
   alert('✅ Account created! Now login.');
-  document.getElementById('supabaseSignUpModal').classList.add('hidden');
+  const modal = document.getElementById('supabaseSignUpModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
 });
 
+// Login
 document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
   const email = document.getElementById('modalLoginEmail').value.trim();
   const password = document.getElementById('modalLoginPassword').value.trim();
@@ -975,52 +978,45 @@ document.getElementById('modalLoginSubmit').addEventListener('click', async () =
   const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error) return alert(error.message);
 
-  document.getElementById('supabaseLoginModal').classList.add('hidden');
+  const modal = document.getElementById('supabaseLoginModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
 });
 
-// === SIGN OUT ===
+// Sign Out
 document.getElementById('signOutBtn').addEventListener('click', async () => {
   await supabaseClient.auth.signOut();
   location.reload();
 });
 
-// === HIDE LOGIN/SIGNUP LINKS WHEN LOGGED IN ===
-supabaseClient.auth.onAuthStateChange((event, session) => {
+// Show logged-in state + hide links when logged in
+supabaseClient.auth.onAuthStateChange(async (event, session) => {
   const authLinks = document.getElementById('authLinks');
   const userInfo = document.getElementById('userInfo');
   const nameSpan = document.getElementById('userDisplayName');
 
   if (session?.user) {
-    authLinks.style.display = 'none';
     const { data } = await supabaseClient.from('profiles').select('display_name').eq('id', session.user.id).single();
     nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
     userInfo.classList.remove('hidden');
+    authLinks.style.display = 'none';
   } else {
-    authLinks.style.display = 'block';
     userInfo.classList.add('hidden');
+    authLinks.style.display = 'block';
   }
 });
 
-// === NEW: PROTECT OLD USERNAME ENTRY SCREEN ===
+// Protect old username entry screen (blocks registered names)
 document.getElementById('joinWithUsernameButton').addEventListener('click', async () => {
   const username = document.getElementById('usernameInput').value.trim();
-
   if (!username) return alert('Please enter a username');
 
-  // Check if this name is already registered in Supabase
-  const { data: existing } = await supabaseClient
-    .from('profiles')
-    .select('id')
-    .eq('display_name', username)
-    .single();
-
+  const { data: existing } = await supabaseClient.from('profiles').select('id').eq('display_name', username).single();
   if (existing) {
-    alert('❌ This display name is already registered. Please Signup if you want a perminate name');
-    return; // STOP — do not let them join with this name
+    alert('❌ This display name is already registered. Please Login with that account instead.');
+    return;
   }
-
-  // If name is free, continue with old flow
-  // (your existing code will run normally)
+  // If free, old code continues normally
 });
 </script>
 </body>

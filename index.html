@@ -916,18 +916,29 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Open modals
 document.getElementById('openSignUpBtn').addEventListener('click', () => {
-  document.getElementById('supabaseSignUpModal').classList.remove('hidden');
-  document.getElementById('supabaseSignUpModal').classList.add('active');
+  const modal = document.getElementById('supabaseSignUpModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('active');
 });
 
 document.getElementById('openLoginBtn').addEventListener('click', () => {
-  document.getElementById('supabaseLoginModal').classList.remove('hidden');
-  document.getElementById('supabaseLoginModal').classList.add('active');
+  const modal = document.getElementById('supabaseLoginModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('active');
 });
 
-// Cancel modals
-document.getElementById('modalSignUpCancel').addEventListener('click', () => document.getElementById('supabaseSignUpModal').classList.add('hidden'));
-document.getElementById('modalLoginCancel').addEventListener('click', () => document.getElementById('supabaseLoginModal').classList.add('hidden'));
+// Cancel buttons
+document.getElementById('modalSignUpCancel').addEventListener('click', () => {
+  const modal = document.getElementById('supabaseSignUpModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
+});
+
+document.getElementById('modalLoginCancel').addEventListener('click', () => {
+  const modal = document.getElementById('supabaseLoginModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
+});
 
 // Sign Up
 document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
@@ -947,7 +958,9 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
   });
 
   alert('✅ Account created! Now login.');
-  document.getElementById('supabaseSignUpModal').classList.add('hidden');
+  const modal = document.getElementById('supabaseSignUpModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
 });
 
 // Login
@@ -959,7 +972,9 @@ document.getElementById('modalLoginSubmit').addEventListener('click', async () =
   const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error) return alert(error.message);
 
-  document.getElementById('supabaseLoginModal').classList.add('hidden');
+  const modal = document.getElementById('supabaseLoginModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('active');
 });
 
 // Sign Out
@@ -968,7 +983,7 @@ document.getElementById('signOutBtn').addEventListener('click', async () => {
   location.reload();
 });
 
-// Show logged in state + display name
+// Show logged-in state
 supabaseClient.auth.onAuthStateChange(async (event, session) => {
   const userInfo = document.getElementById('userInfo');
   const nameSpan = document.getElementById('userDisplayName');

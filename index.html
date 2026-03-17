@@ -772,10 +772,11 @@
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
 
-                  <!-- SUPABASE AUTH — Only visible on start page -->
+                        <!-- SUPABASE AUTH — Simple text links like your old system (only on start page) -->
       <div id="supabaseAuthFooter" class="text-center mt-4">
-        <button id="openSignUpBtn" class="bg-purple-500 text-white px-6 py-3 rounded w-full mb-3 hover:bg-purple-600 text-lg font-bold">Sign Up</button>
-        <button id="openLoginBtn" class="bg-blue-500 text-white px-6 py-3 rounded w-full hover:bg-blue-600 text-lg font-bold">Login</button>
+        <button id="openSignUpBtn" class="text-blue-500 hover:underline text-lg">Sign Up</button>
+        <span class="text-gray-400 mx-3">•</span>
+        <button id="openLoginBtn" class="text-blue-500 hover:underline text-lg">Login</button>
         
         <!-- Logged in state -->
         <div id="userInfo" class="hidden mt-4 text-center">
@@ -926,7 +927,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Open modals
+// Open modals (same as before)
 document.getElementById('openSignUpBtn').addEventListener('click', () => {
   const modal = document.getElementById('supabaseSignUpModal');
   modal.classList.remove('hidden');
@@ -939,20 +940,19 @@ document.getElementById('openLoginBtn').addEventListener('click', () => {
   modal.classList.add('active');
 });
 
-// Cancel buttons
+// Cancel buttons (same as before)
 document.getElementById('modalSignUpCancel').addEventListener('click', () => {
   const modal = document.getElementById('supabaseSignUpModal');
   modal.classList.add('hidden');
   modal.classList.remove('active');
 });
-
 document.getElementById('modalLoginCancel').addEventListener('click', () => {
   const modal = document.getElementById('supabaseLoginModal');
   modal.classList.add('hidden');
   modal.classList.remove('active');
 });
 
-// Sign Up
+// Sign Up WITH duplicate check
 document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
   const email = document.getElementById('modalSignUpEmail').value.trim();
   const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
@@ -960,9 +960,20 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
 
   if (!email || !displayName || !password) return alert('All fields required');
 
+  // Check if display name already exists
+  const { data: existingName } = await supabaseClient
+    .from('profiles')
+    .select('id')
+    .eq('display_name', displayName)
+    .single();
+
+  if (existingName) return alert('❌ Display name already taken. Choose another.');
+
+  // Create account
   const { data, error } = await supabaseClient.auth.signUp({ email, password });
   if (error) return alert(error.message);
 
+  // Save profile
   await supabaseClient.from('profiles').upsert({
     id: data.user.id,
     display_name: displayName,
@@ -975,7 +986,7 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
   modal.classList.remove('active');
 });
 
-// Login
+// Login (same as before)
 document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
   const email = document.getElementById('modalLoginEmail').value.trim();
   const password = document.getElementById('modalLoginPassword').value.trim();

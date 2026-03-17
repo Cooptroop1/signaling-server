@@ -760,11 +760,11 @@
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
 
-                        <!-- SUPABASE EMAIL + PASSWORD + DISPLAY NAME (links to your profiles table) -->
+      <!-- SUPABASE EMAIL + DISPLAY NAME + PASSWORD (exact footer spot) -->
       <div class="text-center mt-4">
-        <input id="authEmail" type="email" placeholder="Email" class="border border-gray-300 p-2 w-full mb-2 rounded">
-        <input id="authDisplayName" type="text" placeholder="Display Name (1-16 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded" maxlength="16">
-        <input id="authPassword" type="password" placeholder="Password (min 6 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded">
+        <input id="authEmail" type="email" placeholder="Email" class="border border-gray-300 p-2 w-full mb-2 rounded text-center">
+        <input id="authDisplayName" type="text" placeholder="Display Name (1-16 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded text-center" maxlength="16">
+        <input id="authPassword" type="password" placeholder="Password (min 6 chars)" class="border border-gray-300 p-2 w-full mb-2 rounded text-center">
         
         <button id="supabaseSignUpBtn" class="bg-green-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-green-600">Sign Up</button>
         <button id="supabaseLoginBtn" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Login</button>
@@ -896,7 +896,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Sign Up + create profile row
+// Sign Up
 async function signUp() {
   const email = document.getElementById('authEmail').value.trim();
   const displayName = document.getElementById('authDisplayName').value.trim();
@@ -904,17 +904,25 @@ async function signUp() {
 
   if (!email || !displayName || !password) return alert('All fields required');
 
-  const { data, error } = await supabaseClient.auth.signUp({ email, password });
-  if (error) return alert(error.message);
+  const { data: authData, error: authError } = await supabaseClient.auth.signUp({ email, password });
+  if (authError) return alert('Signup error: ' + authError.message);
 
-  // Save display_name to your profiles table
-  await supabaseClient.from('profiles').upsert({
-    id: data.user.id,
+  console.log('✅ Auth signup success, user ID:', authData.user?.id);
+
+  // Save to profiles table
+  const { error: profileError } = await supabaseClient.from('profiles').upsert({
+    id: authData.user.id,
     display_name: displayName,
     updated_at: new Date().toISOString()
   });
 
-  alert('✅ Account created! Now login with the same email/password.');
+  if (profileError) {
+    console.error('❌ Profile save failed:', profileError);
+    alert('Account created but display name save failed: ' + profileError.message);
+  } else {
+    console.log('✅ Display name saved to profiles table');
+    alert('✅ Account created! Now click Login with the same details.');
+  }
 }
 
 // Login
@@ -924,7 +932,7 @@ async function login() {
   if (!email || !password) return alert('Email and password required');
 
   const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if (error) return alert(error.message);
+  if (error) return alert('Login error: ' + error.message);
   alert('✅ Logged in!');
 }
 
@@ -934,7 +942,7 @@ async function signOut() {
   location.reload();
 }
 
-// Show display_name after login
+// Show display name after login
 supabaseClient.auth.onAuthStateChange(async (event, session) => {
   const userInfo = document.getElementById('userInfo');
   const nameSpan = document.getElementById('userDisplayName');

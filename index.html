@@ -67,21 +67,21 @@
       background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
     }
     .corner-logo {
-      position: absolute;
-      top: -5px;
-      right: 10px;
-      width: 256px;
-      height: 256px;
-      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logo.png?sanitize=true');
-      background-size: contain;
-      background-repeat: no-repeat;
-      background-position: center;
-      z-index: 100;
-      transition: background-image 0.5s ease;
-    }
+  position: absolute;
+  top: -5px;
+  right: 10px;
+  width: 256px;
+  height: 256px;
+  background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logo.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  z-index: 100;
+  transition: background-image 0.5s ease;
+}
     .corner-logo.wink {
-      background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logoWink.png?sanitize=true');
-    }
+  background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logoWink.png');
+}
     .bg-white {
       z-index: 10;
       max-width: 500px;
@@ -680,6 +680,7 @@
   </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
+  <div id="cornerLogo" class="corner-logo"></div>   <!-- ADD THIS LINE HERE -->
   <div class="flex w-full max-w-xl mx-auto">
     <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
       <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Anonomoose Chat</h1>

@@ -927,7 +927,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UrBj5d9i7t3JFGWCsw8Elg_1FukHVhd';
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Open modals (same as before)
+// Open modals
 document.getElementById('openSignUpBtn').addEventListener('click', () => {
   const modal = document.getElementById('supabaseSignUpModal');
   modal.classList.remove('hidden');
@@ -940,7 +940,7 @@ document.getElementById('openLoginBtn').addEventListener('click', () => {
   modal.classList.add('active');
 });
 
-// Cancel buttons (same as before)
+// Cancel buttons
 document.getElementById('modalSignUpCancel').addEventListener('click', () => {
   const modal = document.getElementById('supabaseSignUpModal');
   modal.classList.add('hidden');
@@ -960,7 +960,6 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
 
   if (!email || !displayName || !password) return alert('All fields required');
 
-  // Check if display name already exists
   const { data: existingName } = await supabaseClient
     .from('profiles')
     .select('id')
@@ -969,11 +968,9 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
 
   if (existingName) return alert('❌ Display name already taken. Choose another.');
 
-  // Create account
   const { data, error } = await supabaseClient.auth.signUp({ email, password });
   if (error) return alert(error.message);
 
-  // Save profile
   await supabaseClient.from('profiles').upsert({
     id: data.user.id,
     display_name: displayName,
@@ -986,7 +983,7 @@ document.getElementById('modalSignUpSubmit').addEventListener('click', async () 
   modal.classList.remove('active');
 });
 
-// Login (same as before)
+// Login
 document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
   const email = document.getElementById('modalLoginEmail').value.trim();
   const password = document.getElementById('modalLoginPassword').value.trim();
@@ -1006,17 +1003,20 @@ document.getElementById('signOutBtn').addEventListener('click', async () => {
   location.reload();
 });
 
-// Show logged-in state
+// Show logged-in state + HIDE the Sign Up/Login links when logged in
 supabaseClient.auth.onAuthStateChange(async (event, session) => {
   const userInfo = document.getElementById('userInfo');
   const nameSpan = document.getElementById('userDisplayName');
+  const authFooter = document.getElementById('supabaseAuthFooter');
 
   if (session?.user) {
     const { data } = await supabaseClient.from('profiles').select('display_name').eq('id', session.user.id).single();
     nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
     userInfo.classList.remove('hidden');
+    authFooter.style.display = 'none';           // ← hides the two links
   } else {
     userInfo.classList.add('hidden');
+    authFooter.style.display = 'block';          // ← shows the two links again
   }
 });
 </script>

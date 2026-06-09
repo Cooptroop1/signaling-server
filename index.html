@@ -1,116 +1,187 @@
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anonomoose Chat</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+  <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
+  <link rel="manifest" href="/manifest.json">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* Your existing styles (kept exactly as you had them) */
+    * { cursor: default; user-select: none; }
+    input[type="text"], input[type="number"], input[type="file"], textarea { cursor: text; user-select: text; }
+    body { min-height: 100vh; padding-top: 240px; padding-bottom: 140px; display: flex; justify-content: center; align-items: center; }
+    #messages { display: flex; flex-direction: column-reverse; overflow-y: auto; height: 296px; background-color: #fce7f3; border-radius: 0.5rem; }
+    .corner-logo { position: absolute; top: -5px; right: 10px; width: 256px; height: 256px; background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logo.png'); background-size: contain; z-index: 100; }
+    .bg-white { max-width: 500px; width: 100%; margin: 0 auto; margin-top: 100px; }
+    .message-bubble { max-width: 70%; margin: 0.1rem 1rem; padding: 0.25rem 0.5rem; border-radius: 1rem; }
+    .message-bubble.self { background-color: #3b82f6; color: white; margin-left: auto; }
+    .message-bubble.other { background-color: #10b981; color: white; margin-right: auto; }
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); z-index: 2000; align-items: center; justify-content: center; }
+    .modal.active { display: flex; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body class="bg-black min-h-screen flex items-center justify-center">
+  <div id="cornerLogo" class="corner-logo"></div>
 
-<!-- ==================== SUPABASE CONFIG ==================== -->
-<script>
-  // === CORRECT SUPABASE CONFIG ===
-  const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
+  <div class="flex w-full max-w-xl mx-auto">
+    <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
+      <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Anonomoose Chat</h1>
+      <div id="status" class="text-center mb-4 text-gray-600">Start a new chat or connect to an existing one</div>
 
-  const { createClient } = supabase;
-  const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      <!-- Initial Container -->
+      <div id="initialContainer">
+        <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2">Start Chat</button>
+        <button id="connectToggleButton" class="bg-green-500 text-white px-4 py-2 rounded w-full">Connect to Chat</button>
+      </div>
 
-  // ==================== MODAL CONTROLS ====================
-  // Open Sign Up Modal
-  document.getElementById('openSignUpBtn').addEventListener('click', () => {
-    const modal = document.getElementById('supabaseSignUpModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('active');
-  });
+      <!-- Username Container -->
+      <div id="usernameContainer" class="hidden">
+        <input id="usernameInput" type="text" class="border p-2 w-full mb-2 rounded" placeholder="Enter your username" maxlength="16">
+        <button id="joinWithUsernameButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full">Join Chat</button>
+        <button id="backButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2">Back</button>
+      </div>
 
-  // Open Login Modal
-  document.getElementById('openLoginBtn').addEventListener('click', () => {
-    const modal = document.getElementById('supabaseLoginModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('active');
-  });
+      <!-- Chat Container -->
+      <div id="chatContainer" class="hidden">
+        <div id="messages"></div>
+        <div class="input-container">
+          <textarea id="messageInput" placeholder="Type a message..." class="border p-2 w-full rounded"></textarea>
+          <button id="sendButton" class="bg-blue-500 text-white px-4 py-2 rounded">Send</button>
+        </div>
+      </div>
 
-  // Cancel buttons
-  document.getElementById('modalSignUpCancel').addEventListener('click', () => {
-    document.getElementById('supabaseSignUpModal').classList.add('hidden');
-    document.getElementById('supabaseSignUpModal').classList.remove('active');
-  });
+      <!-- SUPABASE AUTH FOOTER -->
+      <div id="supabaseAuthFooter" class="text-center mt-4">
+        <div id="authLinks">
+          <button id="openSignUpBtn" class="text-blue-500 hover:underline text-lg">Sign Up</button>
+          <span class="text-gray-400 mx-3">•</span>
+          <button id="openLoginBtn" class="text-blue-500 hover:underline text-lg">Login</button>
+        </div>
+        <div id="userInfo" class="hidden mt-4">
+          <span id="userDisplayName" class="text-lg text-gray-700 block mb-3 font-medium"></span>
+          <button id="signOutBtn" class="text-red-500 hover:underline text-lg">Sign Out</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  document.getElementById('modalLoginCancel').addEventListener('click', () => {
-    document.getElementById('supabaseLoginModal').classList.add('hidden');
-    document.getElementById('supabaseLoginModal').classList.remove('active');
-  });
+  <!-- SUPABASE SIGN UP MODAL -->
+  <div id="supabaseSignUpModal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[2000]">
+    <div class="bg-white p-6 rounded-lg w-full max-w-md">
+      <h2 class="text-xl font-bold mb-4">Create Account</h2>
+      <input id="modalSignUpEmail" type="email" placeholder="Email" class="border p-3 w-full mb-3 rounded">
+      <input id="modalSignUpDisplayName" type="text" placeholder="Display Name" class="border p-3 w-full mb-3 rounded" maxlength="16">
+      <input id="modalSignUpPassword" type="password" placeholder="Password" class="border p-3 w-full mb-4 rounded">
+      <button id="modalSignUpSubmit" class="bg-green-500 text-white px-4 py-3 rounded w-full mb-2">Create Account</button>
+      <button id="modalSignUpCancel" class="bg-gray-500 text-white px-4 py-3 rounded w-full">Cancel</button>
+    </div>
+  </div>
 
-  // ==================== SIGN UP ====================
-  document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
-    const email = document.getElementById('modalSignUpEmail').value.trim();
-    const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
-    const password = document.getElementById('modalSignUpPassword').value.trim();
+  <!-- SUPABASE LOGIN MODAL -->
+  <div id="supabaseLoginModal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[2000]">
+    <div class="bg-white p-6 rounded-lg w-full max-w-md">
+      <h2 class="text-xl font-bold mb-4">Login</h2>
+      <input id="modalLoginEmail" type="email" placeholder="Email" class="border p-3 w-full mb-3 rounded">
+      <input id="modalLoginPassword" type="password" placeholder="Password" class="border p-3 w-full mb-4 rounded">
+      <button id="modalLoginSubmit" class="bg-blue-500 text-white px-4 py-3 rounded w-full mb-2">Login</button>
+      <button id="modalLoginCancel" class="bg-gray-500 text-white px-4 py-3 rounded w-full">Cancel</button>
+    </div>
+  </div>
 
-    if (!email || !displayName || !password) {
-      return alert('All fields are required');
-    }
+  <!-- ==================== SUPABASE SCRIPT ==================== -->
+  <script>
+    const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
 
-    // Check if display name is already taken
-    const { data: existing } = await supabaseClient
-      .from('profiles')
-      .select('id')
-      .eq('display_name', displayName)
-      .single();
+    const { createClient } = supabase;
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    if (existing) {
-      return alert('❌ Display name already taken. Please choose another.');
-    }
-
-    // Create auth user
-    const { data, error } = await supabaseClient.auth.signUp({ email, password });
-    if (error) return alert(error.message);
-
-    // Create profile
-    await supabaseClient.from('profiles').insert({
-      id: data.user.id,
-      display_name: displayName,
-      updated_at: new Date().toISOString()
+    // Modal Controls
+    document.getElementById('openSignUpBtn').addEventListener('click', () => {
+      document.getElementById('supabaseSignUpModal').classList.remove('hidden');
+      document.getElementById('supabaseSignUpModal').classList.add('active');
     });
 
-    alert('✅ Account created! Please check your email to confirm, then login.');
-    document.getElementById('supabaseSignUpModal').classList.add('hidden');
-    document.getElementById('supabaseSignUpModal').classList.remove('active');
-  });
+    document.getElementById('openLoginBtn').addEventListener('click', () => {
+      document.getElementById('supabaseLoginModal').classList.remove('hidden');
+      document.getElementById('supabaseLoginModal').classList.add('active');
+    });
 
-  // ==================== LOGIN ====================
-  document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
-    const email = document.getElementById('modalLoginEmail').value.trim();
-    const password = document.getElementById('modalLoginPassword').value.trim();
+    document.getElementById('modalSignUpCancel').addEventListener('click', () => {
+      document.getElementById('supabaseSignUpModal').classList.add('hidden');
+      document.getElementById('supabaseSignUpModal').classList.remove('active');
+    });
 
-    if (!email || !password) return alert('Email and password are required');
+    document.getElementById('modalLoginCancel').addEventListener('click', () => {
+      document.getElementById('supabaseLoginModal').classList.add('hidden');
+      document.getElementById('supabaseLoginModal').classList.remove('active');
+    });
 
-    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (error) return alert(error.message);
+    // Sign Up
+    document.getElementById('modalSignUpSubmit').addEventListener('click', async () => {
+      const email = document.getElementById('modalSignUpEmail').value.trim();
+      const displayName = document.getElementById('modalSignUpDisplayName').value.trim();
+      const password = document.getElementById('modalSignUpPassword').value.trim();
 
-    document.getElementById('supabaseLoginModal').classList.add('hidden');
-    document.getElementById('supabaseLoginModal').classList.remove('active');
-  });
+      if (!email || !displayName || !password) return alert('All fields are required');
 
-  // ==================== SIGN OUT ====================
-  document.getElementById('signOutBtn').addEventListener('click', async () => {
-    await supabaseClient.auth.signOut();
-    location.reload();
-  });
+      const { data: existing } = await supabaseClient.from('profiles').select('id').eq('display_name', displayName).single();
+      if (existing) return alert('Display name already taken');
 
-  // ==================== AUTH STATE LISTENER ====================
-  supabaseClient.auth.onAuthStateChange(async (event, session) => {
-    const userInfo = document.getElementById('userInfo');
-    const nameSpan = document.getElementById('userDisplayName');
-    const authLinks = document.getElementById('authLinks');
+      const { data, error } = await supabaseClient.auth.signUp({ email, password });
+      if (error) return alert(error.message);
 
-    if (session?.user) {
-      const { data } = await supabaseClient
-        .from('profiles')
-        .select('display_name')
-        .eq('id', session.user.id)
-        .single();
+      await supabaseClient.from('profiles').insert({
+        id: data.user.id,
+        display_name: displayName,
+        updated_at: new Date().toISOString()
+      });
 
-      nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
-      userInfo.classList.remove('hidden');
-      authLinks.style.display = 'none';
-    } else {
-      userInfo.classList.add('hidden');
-      authLinks.style.display = 'block';
-    }
-  });
-</script>
+      alert('Account created! Please check your email and then login.');
+      document.getElementById('supabaseSignUpModal').classList.add('hidden');
+      document.getElementById('supabaseSignUpModal').classList.remove('active');
+    });
+
+    // Login
+    document.getElementById('modalLoginSubmit').addEventListener('click', async () => {
+      const email = document.getElementById('modalLoginEmail').value.trim();
+      const password = document.getElementById('modalLoginPassword').value.trim();
+
+      if (!email || !password) return alert('Email and password required');
+
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) return alert(error.message);
+
+      document.getElementById('supabaseLoginModal').classList.add('hidden');
+      document.getElementById('supabaseLoginModal').classList.remove('active');
+    });
+
+    // Sign Out
+    document.getElementById('signOutBtn').addEventListener('click', async () => {
+      await supabaseClient.auth.signOut();
+      location.reload();
+    });
+
+    // Auth State
+    supabaseClient.auth.onAuthStateChange(async (event, session) => {
+      const userInfo = document.getElementById('userInfo');
+      const nameSpan = document.getElementById('userDisplayName');
+      const authLinks = document.getElementById('authLinks');
+
+      if (session?.user) {
+        const { data } = await supabaseClient.from('profiles').select('display_name').eq('id', session.user.id).single();
+        nameSpan.textContent = `Logged in as ${data?.display_name || session.user.email}`;
+        userInfo.classList.remove('hidden');
+        if (authLinks) authLinks.style.display = 'none';
+      } else {
+        userInfo.classList.add('hidden');
+        if (authLinks) authLinks.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

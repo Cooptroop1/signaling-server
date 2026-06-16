@@ -1,5 +1,28 @@
 // Add this new function at the top
 function detectImageMime(base64) {
+
+// === NEW SUPABASE AUTH (added here) ===
+async function supabaseLogin(email, password) {
+  const { data, error } = await window.supabase.auth.signInWithPassword({ email, password });
+  if (error) { showStatusMessage('Login failed: ' + error.message); return false; }
+  username = data.user.user_metadata?.username || email.split('@')[0];
+  localStorage.setItem('username', username);
+  clientId = data.user.id;
+  token = data.session.access_token;
+  refreshToken = data.session.refresh_token;
+  showStatusMessage(`✅ Logged in as ${username}`);
+  document.getElementById('loginModal').classList.remove('active');
+  socket.send(JSON.stringify({ type: 'connect', clientId })); // continue normal flow
+  return true;
+}
+
+async function supabaseSignUp(email, password, chosenUsername) {
+  const { error } = await window.supabase.auth.signUp({
+    email, password, options: { data: { username: chosenUsername } }
+  });
+  if (error) return showStatusMessage(error.message);
+  showStatusMessage('Check your email to confirm signup, then login.');
+}
   try {
     const bin = atob(base64);
     const arr = new Uint8Array(bin.length);
@@ -1259,19 +1282,21 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('loginModal').classList.add('active');
   });
   document.getElementById('loginSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    const name = document.getElementById('loginUsernameInput').value.trim();
-    const pass = document.getElementById('loginPasswordInput').value;
-    if (name && pass) {
-      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-    }
-  };
+  const email = document.getElementById('loginUsernameInput').value.trim();
+  const pass = document.getElementById('loginPasswordInput').value;
+  supabaseLogin(email, pass);
+};
   document.getElementById('loginCancelButton').onclick = () => {
-    document.getElementById('loginModal').classList.remove('active');
-  };
+  document.getElementById('loginModal').classList.remove('active');
+};
+
+// New signup button (add this after loginCancelButton)
+document.getElementById('supabaseSignupBtn').onclick = () => {   // you will add this button in HTML next
+  const email = document.getElementById('loginUsernameInput').value.trim();
+  const pass = document.getElementById('loginPasswordInput').value;
+  const name = prompt('Choose a username (1-16 alphanum):') || '';
+  if (name) supabaseSignUp(email, pass, name);
+};
   document.getElementById('searchUserButton').addEventListener('click', () => {
     document.getElementById('searchUserModal').classList.add('active');
   });

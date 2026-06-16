@@ -1016,5 +1016,12 @@
     }
   });
 </script>
+<!-- SUPABASE AUTH - PASTE THIS BEFORE </body> -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';           // ← CHANGE THIS
+  const SUPABASE_ANON_KEY = 'eyJ...paste your full anon key here...'; // ← CHANGE THIS
+  window.supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</script>
 </body>
 </html>

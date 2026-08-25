@@ -169,36 +169,39 @@ async function deriveSharedKey(privateKey, publicKey) {
   }
 }
 
-async function encryptRaw(key, data) {
+async function encryptRaw(key, data, aad) {
   try {
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
     const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    const encrypted = await window.crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      encoded
-    );
-    const result = {
+    const params = { name: 'AES-GCM', iv };
+    if (aad) {
+      params.additionalData = typeof aad === 'string' ? new TextEncoder().encode(aad) : aad;
+    }
+    const encrypted = await window.crypto.subtle.encrypt(params, key, encoded);
+    return {
       encrypted: arrayBufferToBase64(encrypted),
       iv: arrayBufferToBase64(iv)
     };
-    return result;
   } catch (error) {
     console.error('encryptRaw error:', error);
     throw new Error('Raw encryption failed');
   }
 }
 
-async function decryptRaw(key, encrypted, iv) {
+async function decryptRaw(key, encrypted, iv, aad) {
   try {
+    const params = { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) };
+    if (aad) {
+      params.additionalData = typeof aad === 'string' ? new TextEncoder().encode(aad) : aad;
+    }
     const decoded = await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
+      params,
       key,
       base64ToArrayBuffer(encrypted)
     );
     return new TextDecoder().decode(decoded);
   } catch (error) {
-    console.error('decryptRaw error:', error, 'Encrypted:', encrypted, 'IV:', iv);
+    console.error('decryptRaw error');
     throw new Error('Raw decryption failed');
   }
 }
@@ -302,11 +305,14 @@ function normalizeRecoveryPhrase(phrase) {
 
 function openKeyDb() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(ANONOMOOSE_KEY_DB, 1);
+    const req = indexedDB.open(ANONOMOOSE_KEY_DB, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(ANONOMOOSE_KEY_STORE)) {
         db.createObjectStore(ANONOMOOSE_KEY_STORE);
+      }
+      if (!db.objectStoreNames.contains('dr')) {
+        db.createObjectStore('dr');
       }
     };
     req.onsuccess = () => resolve(req.result);

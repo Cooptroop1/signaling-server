@@ -70,6 +70,11 @@ dbPool.connect(async (err) => {
   } else {
     logger.info('Connected to DB successfully');
     await dbPool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_public_key TEXT');
+    try {
+      await dbPool.query('ALTER TABLE offline_messages ALTER COLUMN from_user_id DROP NOT NULL');
+    } catch (e) {
+      logger.warn('Could not relax offline_messages.from_user_id: %s', e.message);
+    }
     await loadFeatures();
     await loadAggregatedStats();
   }
@@ -96,7 +101,6 @@ const messageHandler = async (msg, channel) => {
   const code = channel.slice(5); // 'room:' prefix
   const room = rooms.get(code);
   if (!room) {
-    logger.warn(`No room found for channel ${channel}`);
     return;
   }
   let parsed;
@@ -167,6 +171,19 @@ const messageHandler = async (msg, channel) => {
     }
   });
   logger.info('Subscribed to global:features channel');
+  await subClient.subscribe('inbox', (msg) => {
+    try {
+      const parsed = JSON.parse(msg);
+      wss.clients.forEach(client => {
+        if (client.clientId === parsed.targetClientId && client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(parsed.payload));
+        }
+      });
+    } catch (err) {
+      logger.error('Invalid inbox message: %o', err);
+    }
+  });
+  logger.info('Subscribed to inbox channel');
 })();
 const CERT_KEY_PATH = 'path/to/your/private-key.pem';
 const CERT_PATH = 'path/to/your/fullchain.pem';
@@ -207,7 +224,7 @@ server.on('request', (req, res) => {
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; " + // Updated with all servers
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co; " +
         "object-src 'none'; base-uri 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
@@ -227,6 +244,7 @@ server.on('request', (req, res) => {
         res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
       }
       data = data.toString().replace('</head>', `<script nonce="${nonce}">window.__CLIENT_ID__=${JSON.stringify(clientIdFromCookie)};</script></head>`);
+      res.setHeader('Content-Security-Policy', updatedCSP);
     } else if (filePath.endsWith('.js')) {
       contentType = 'application/javascript';
     }
@@ -255,7 +273,7 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
-const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com'];
+const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com', 'https://signaling-server-1.onrender.com'];
 let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   JWT_SECRET = crypto.randomBytes(32).toString('hex');
@@ -268,6 +286,24 @@ if (!TURN_USERNAME) {
 const TURN_CREDENTIAL = process.env.TURN_CREDENTIAL;
 if (!TURN_CREDENTIAL) {
   throw new Error('TURN_CREDENTIAL environment variable is not set. Please configure it.');
+}
+function issueTurnCredentials(forClientId) {
+  const ttl = 3600;
+  const secret = process.env.TURN_SECRET;
+  if (secret) {
+    const username = `${Math.floor(Date.now() / 1000) + ttl}:${forClientId}`;
+    const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+    return { turnUsername: username, turnCredential: credential, turnTtl: ttl };
+  }
+  return { turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, turnTtl: ttl };
+}
+async function markOnline(id) {
+  if (!id) return;
+  try { await redisClient.set('online:' + id, '1', { EX: 120 }); } catch (e) {}
+}
+async function markOffline(id) {
+  if (!id) return;
+  try { await redisClient.del('online:' + id); } catch (e) {}
 }
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
@@ -598,6 +634,7 @@ function validateMessage(data) {
       break;
     case 'ping':
     case 'pong':
+    case 'get-turn-credentials':
       break;
     case 'set-totp':
       if (!data.code) {
@@ -895,6 +932,7 @@ wss.on('connection', (ws, req) => {
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+        markOnline(clientId);
         dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]).catch(err => {
           logger.error('DB error on connect: %s %s', err.message, err.stack);
         });
@@ -1071,7 +1109,9 @@ wss.on('connection', (ws, req) => {
           await redisClient.del(clientKey);
           return;
         }
-        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, turnUsername: TURN_USERNAME, turnCredential: TURN_CREDENTIAL, features }));
+        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, features }));
+        const turn = issueTurnCredentials(clientId);
+        ws.send(JSON.stringify({ type: 'turn-credentials', ...turn }));
         logStats({ clientId, username, code, event: 'join', totalClients: currentSize });
         if (room.clients.size > 0) {
           room.clients.forEach((_, existingClientId) => {
@@ -1395,7 +1435,13 @@ wss.on('connection', (ws, req) => {
         ws.send(JSON.stringify({ type: 'export-logs-csv', csv }));
         return;
       }
+      if (data.type === 'get-turn-credentials') {
+        const turn = issueTurnCredentials(data.clientId || ws.clientId);
+        ws.send(JSON.stringify({ type: 'turn-credentials', ...turn }));
+        return;
+      }
       if (data.type === 'ping') {
+        markOnline(data.clientId || ws.clientId);
         ws.send(JSON.stringify({ type: 'pong' }));
         return;
       }
@@ -1453,23 +1499,22 @@ wss.on('connection', (ws, req) => {
           }
           await safeQuery(updateQuery, updateParams, ws, 'Failed to update user on login.');
           const msgRes = await safeQuery(`
-            SELECT om.id, om.message, u.username AS from_username
+            SELECT om.id, om.message
             FROM offline_messages om
-            JOIN users u ON om.from_user_id = u.id
             WHERE om.to_user_id = $1
           `, [user.id], ws, 'Failed to fetch offline messages.');
           const offlineMessages = msgRes.rows.map(msg => {
             try {
               const parsedMessage = JSON.parse(msg.message);
               return {
-                id: msg.id, // Include message ID for confirmation
-                from: msg.from_username,
-                code: parsedMessage.code || null,
-                type: parsedMessage.type || 'connection-request',
+                id: msg.id,
+                from: null,
+                code: null,
+                type: parsedMessage.type || 'message',
                 encrypted: parsedMessage.encrypted || null,
                 iv: parsedMessage.iv || null,
                 ephemeral_public: parsedMessage.ephemeral_public || null,
-                identity_public: parsedMessage.identity_public || user.identity_public_key || null
+                messageId: parsedMessage.messageId || null
               };
             } catch (err) {
               logger.error(`Failed to parse offline message for user ${user.id}: %s`, err.message);
@@ -1492,60 +1537,80 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Must be logged in to search users.' }));
           return;
         }
-        const from_user_id = from_res.rows[0].id;
-        const from_username_actual = from_res.rows[0].username;
-        const res = await safeQuery('SELECT * FROM users WHERE username = $1', [username], ws, 'Failed to find user.');
+        const res = await safeQuery('SELECT id, client_id, public_key, identity_public_key, last_active FROM users WHERE username = $1', [username], ws, 'Failed to find user.');
         if (res.rows.length === 0) {
           ws.send(JSON.stringify({ type: 'user-not-found' }));
           return;
         }
         const user = res.rows[0];
-        const dynamicCode = uuidv4().replace(/-/g, '').substring(0, 16).match(/.{1,4}/g).join('-');
-        const ownerWs = [...wss.clients].find(client => client.clientId === user.client_id);
-        if (ownerWs) {
-          ownerWs.send(JSON.stringify({ type: 'incoming-connection', from: from_username_actual, code: dynamicCode }));
-        } else {
-          await safeQuery(
-            'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-            [from_user_id, user.id, JSON.stringify({ type: 'connection-request', code: dynamicCode })],
-            ws,
-            'Failed to send offline message.'
-          );
+        let isOnline = false;
+        try {
+          isOnline = !!(await redisClient.get('online:' + user.client_id));
+        } catch (e) {}
+        if (!isOnline) {
+          const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
+          isOnline = Date.now() - lastActive < 2 * 60 * 1000;
         }
-        const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
-        const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000);
-        ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key, identity_public_key: user.identity_public_key }));
-        logger.info(`User ${username} found for clientId ${data.clientId}, status: ${isOnline ? 'online' : 'offline'}, code: ${dynamicCode}`);
+        ws.send(JSON.stringify({
+          type: 'user-found',
+          status: isOnline ? 'online' : 'offline',
+          public_key: user.public_key,
+          identity_public_key: user.identity_public_key
+        }));
+        logger.info(`User lookup for clientId ${data.clientId}, status: ${isOnline ? 'online' : 'offline'}`);
         return;
       }
       if (data.type === 'send-offline-message') {
-        const { to_username, encrypted, iv, ephemeral_public, messageId, identity_public } = data;
-        const res = await safeQuery('SELECT id FROM users WHERE username = $1', [to_username], ws, 'Recipient not found.');
+        const { to_username, encrypted, iv, ephemeral_public, messageId } = data;
+        const res = await safeQuery('SELECT id, client_id FROM users WHERE username = $1', [to_username], ws, 'Recipient not found.');
         if (res.rows.length === 0) {
           ws.send(JSON.stringify({ type: 'error', message: 'Recipient not found.' }));
           return;
         }
         const to_user_id = res.rows[0].id;
+        const to_client_id = res.rows[0].client_id;
         const from_res = await safeQuery('SELECT id FROM users WHERE client_id = $1', [data.clientId], ws, 'Sender not logged in with a username.');
         if (from_res.rows.length === 0) {
           logger.warn(`Send-offline-message failed: No user found for clientId ${data.clientId}`);
           ws.send(JSON.stringify({ type: 'error', message: 'Sender not logged in with a username.' }));
           return;
         }
-        const from_user_id = from_res.rows[0].id;
-        await safeQuery(
-          'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-          [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, identity_public, messageId })],
+        const sealed = JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, messageId });
+        const inserted = await safeQuery(
+          'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3) RETURNING id',
+          [null, to_user_id, sealed],
           ws,
           'Failed to send offline message.'
         );
+        const rowId = inserted && inserted.rows && inserted.rows[0] ? inserted.rows[0].id : null;
+        const payload = {
+          type: 'inbox-message',
+          id: rowId,
+          encrypted,
+          iv,
+          ephemeral_public,
+          messageId
+        };
+        try {
+          await pubClient.publish('inbox', JSON.stringify({ targetClientId: to_client_id, payload }));
+        } catch (e) {}
         ws.send(JSON.stringify({ type: 'offline-message-sent', messageId }));
-        logger.info(`Offline message ${messageId} sent from clientId ${data.clientId} (user_id: ${from_user_id}) to ${to_username} (user_id: ${to_user_id})`);
+        logger.info(`Sealed offline message stored for recipient id ${to_user_id}`);
         return;
       }
       if (data.type === 'confirm-offline-message') {
-        await safeQuery('DELETE FROM offline_messages WHERE id = $1', [data.messageId], ws, 'Failed to confirm offline message.');
-        logger.info(`Confirmed and deleted offline message ${data.messageId} for clientId ${data.clientId}`);
+        const owner = await safeQuery('SELECT id FROM users WHERE client_id = $1', [data.clientId], ws, 'Not logged in.');
+        if (owner.rows.length === 0) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Not logged in.' }));
+          return;
+        }
+        const del = await safeQuery(
+          'DELETE FROM offline_messages WHERE id = $1 AND to_user_id = $2',
+          [data.messageId, owner.rows[0].id],
+          ws,
+          'Failed to confirm offline message.'
+        );
+        logger.info(`Confirmed offline message ${data.messageId} for owner ${owner.rows[0].id}`);
         ws.send(JSON.stringify({ type: 'confirm-offline-message-ack', messageId: data.messageId }));
         return;
       }
@@ -1566,6 +1631,7 @@ wss.on('connection', (ws, req) => {
   });
   ws.on('close', async () => {
     revokeTokens(ws.clientId);
+    markOffline(ws.clientId);
     if (ws.code && rooms.has(ws.code)) {
       const code = ws.code;
       const roomKey = `room:${code}`;

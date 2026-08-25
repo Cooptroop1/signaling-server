@@ -644,8 +644,8 @@ async function handleSocketMessage(event) {
       }
       updateMaxClientsUI();
       updateDots();
-      turnUsername = message.turnUsername;
-      turnCredential = message.turnCredential;
+      if (message.turnUsername) turnUsername = message.turnUsername;
+      if (message.turnCredential) turnCredential = message.turnCredential;
       updateRecentCodes(code);
       return;
     }
@@ -748,7 +748,7 @@ async function handleSocketMessage(event) {
           messageSalt: arrayBufferToBase64(messageSalt)
         };
         const payloadStr = JSON.stringify(payload);
-        const { encrypted, iv } = await encryptRaw(sharedKey, payloadStr);
+        const { encrypted, iv } = await encryptRaw(sharedKey, payloadStr, 'room-key|' + message.clientId + '|' + code);
         const myPublic = await exportPublicKey(keyPair.publicKey);
         await initIdentityKeys();
         socket.send(JSON.stringify({
@@ -776,7 +776,7 @@ async function handleSocketMessage(event) {
         }
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
-        const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv);
+        const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv, 'room-key|' + clientId + '|' + code);
         const payload = JSON.parse(decryptedStr);
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
         signingSalt = base64ToArrayBuffer(payload.signingSalt);
@@ -812,7 +812,7 @@ async function handleSocketMessage(event) {
         }
         const importedInitiatorPublic = await importPublicKey(dhPubB64);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
-        const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv);
+        const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv, 'new-room-key|' + clientId + '|' + message.version);
         const payload = JSON.parse(decryptedStr);
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
         signingSalt = base64ToArrayBuffer(payload.signingSalt);
@@ -880,7 +880,7 @@ async function handleSocketMessage(event) {
       rateMap.set(rateKey, rate);
       try {
         const messageKey = await deriveMessageKey();
-        let rawData = await decryptRaw(messageKey, encrypted, message.iv);
+        let rawData = await decryptRaw(messageKey, encrypted, message.iv, String(message.messageId) + '|' + String(message.nonce));
         const toVerify = rawData + message.nonce;
         const valid = await verifyMessage(signingKey, message.signature, toVerify);
         if (!valid) {
@@ -1005,6 +1005,11 @@ async function handleSocketMessage(event) {
       }
       return;
     }
+    if (message.type === 'turn-credentials') {
+      if (message.turnUsername) turnUsername = message.turnUsername;
+      if (message.turnCredential) turnCredential = message.turnCredential;
+      return;
+    }
     if (message.type === 'username-registered') {
       const claimSuccess = document.getElementById('claimSuccess');
       claimSuccess.textContent = `Username claimed successfully: ${message.username}`;
@@ -1032,40 +1037,33 @@ async function handleSocketMessage(event) {
           if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
             (async () => {
               try {
-                const keys = await loadPersistentKeys();
-                if (!keys) throw new Error('No identity keys on this device');
-                const ephemeralPublicImported = await importPublicKey(msg.ephemeral_public);
-                const shared = await deriveSharedKey(keys.ecdhPrivate, ephemeralPublicImported);
-                const decrypted = await decryptRaw(shared, msg.encrypted, msg.iv);
-                let displayText = decrypted;
-                let fromName = msg.from;
-                try {
-                  const parsed = JSON.parse(decrypted);
-                  if (parsed.inner && parsed.identitySig && parsed.identityPublic) {
-                    const ok = await verifyIdentitySignature(parsed.identityPublic, parsed.identitySig, parsed.inner);
-                    if (!ok) throw new Error('identity');
-                    if (msg.identity_public && msg.identity_public !== parsed.identityPublic) throw new Error('identity mismatch');
-                    const inner = JSON.parse(parsed.inner);
-                    fromName = inner.from || msg.from;
-                    displayText = inner.text || decrypted;
-                  }
-                } catch (parseErr) {
-                  if (String(parseErr.message).indexOf('identity') !== -1) throw parseErr;
+                const opened = await openOfflinePayload(msg);
+                let parsed;
+                try { parsed = JSON.parse(opened); } catch (e) { parsed = null; }
+                if (parsed && parsed.type === 'connection-request' && parsed.code) {
+                  showIncomingInvite(parsed.from || msg.from || 'Someone', parsed.code, msg.id);
+                  return;
                 }
+                const fromName = (parsed && parsed.from) || msg.from || 'Someone';
+                const displayText = (parsed && parsed.text) || opened;
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message-bubble other';
                 messageDiv.textContent = `Offline message from ${fromName}: ${displayText}`;
                 messages.prepend(messageDiv);
+                if (msg.id) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: msg.id, clientId, token }));
               } catch (error) {
-                console.error('Failed to decrypt offline message:', error);
+                console.error('Failed to decrypt offline message');
                 showStatusMessage('Failed to decrypt an offline message.');
               }
             })();
           } else if (msg.type === 'connection-request') {
             const messageDiv = document.createElement('div');
             messageDiv.className = 'message-bubble other';
-            messageDiv.textContent = `Offline request from ${msg.from}: code ${msg.code}`;
+            messageDiv.textContent = `Offline request from ${msg.from || 'Someone'}: encrypted invite could not be read on this device.`;
             messages.prepend(messageDiv);
+          }
+          if (msg.id && msg.type !== 'message') {
+            socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: msg.id, clientId, token }));
           }
         }
         showStatusMessage('Pending offline messages loaded.');
@@ -1087,24 +1085,21 @@ async function handleSocketMessage(event) {
     if (message.type === 'user-found') {
       const searchedUsername = document.getElementById('searchUsernameInput').value.trim();
       const searchResult = document.getElementById('searchResult');
-      searchResult.innerHTML = `User ${searchedUsername} is ${message.status}. Code: `;
-      const codeLink = document.createElement('a');
-      codeLink.href = '#';
-      codeLink.textContent = message.code;
-      codeLink.onclick = (e) => {
-        e.preventDefault();
-        autoConnect(message.code);
-        document.getElementById('searchUserModal').classList.remove('active');
-      };
-      searchResult.appendChild(codeLink);
-      if (message.status === 'offline' && message.public_key) {
+      searchResult.innerHTML = '';
+      searchResult.appendChild(document.createTextNode(`User ${searchedUsername} is ${message.status}. `));
+      if (message.public_key) {
         userPublicKey = message.public_key;
-        if (message.identity_public_key) {
-          userPublicKeyIdentity = message.identity_public_key;
-        }
+        if (message.identity_public_key) userPublicKeyIdentity = message.identity_public_key;
+        const inviteBtn = document.createElement('button');
+        inviteBtn.textContent = 'Start encrypted chat';
+        inviteBtn.onclick = () => {
+          inviteEncryptedChat(searchedUsername, message.public_key);
+          document.getElementById('searchUserModal').classList.remove('active');
+        };
+        searchResult.appendChild(inviteBtn);
         const offlineMsgContainer = document.createElement('div');
         const textarea = document.createElement('textarea');
-        textarea.placeholder = 'Send offline message...';
+        textarea.placeholder = 'Send encrypted offline message...';
         const sendBtn = document.createElement('button');
         sendBtn.textContent = 'Send';
         sendBtn.onclick = () => {
@@ -1121,22 +1116,35 @@ async function handleSocketMessage(event) {
         offlineMsgContainer.appendChild(textarea);
         offlineMsgContainer.appendChild(sendBtn);
         searchResult.appendChild(offlineMsgContainer);
+      } else {
+        searchResult.appendChild(document.createTextNode('They have no encryption key on file, so mail cannot be sent.'));
       }
       return;
     }
-    if (message.type === 'incoming-connection') {
-      const fromUser = message.from === username ? 'Someone' : message.from;
-      document.getElementById('incomingMessage').textContent = `${fromUser} wants to connect. Accept?`;
-      document.getElementById('acceptButton').onclick = () => {
-        socket.send(JSON.stringify({ type: 'connection-accepted', code: message.code, clientId, token }));
-        autoConnect(message.code);
-        document.getElementById('incomingConnectionModal').classList.remove('active');
-      };
-      document.getElementById('denyButton').onclick = () => {
-        socket.send(JSON.stringify({ type: 'connection-denied', code: message.code, clientId, token }));
-        document.getElementById('incomingConnectionModal').classList.remove('active');
-      };
-      document.getElementById('incomingConnectionModal').classList.add('active');
+    if (message.type === 'inbox-message' || message.type === 'incoming-connection') {
+      if (message.encrypted && message.ephemeral_public) {
+        openOfflinePayload(message).then(opened => {
+          let parsed;
+          try { parsed = JSON.parse(opened); } catch (e) { parsed = null; }
+          if (parsed && parsed.type === 'connection-request' && parsed.code) {
+            showIncomingInvite(parsed.from || 'Someone', parsed.code, message.id);
+            return;
+          }
+          const fromName = (parsed && parsed.from) || 'Someone';
+          const displayText = (parsed && parsed.text) || opened;
+          const messageDiv = document.createElement('div');
+          messageDiv.className = 'message-bubble other';
+          messageDiv.textContent = `Message from ${fromName}: ${displayText}`;
+          if (messages) messages.prepend(messageDiv);
+          if (message.id) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: message.id, clientId, token }));
+        }).catch(() => {
+          showStatusMessage('Could not decrypt an incoming message.');
+        });
+        return;
+      }
+      if (message.code) {
+        showIncomingInvite(message.from || 'Someone', message.code, null);
+      }
       return;
     }
     if (message.type === 'connection-denied') {
@@ -1151,7 +1159,7 @@ async function handleSocketMessage(event) {
       return;
     }
     if (message.type === 'offline-message-sent') {
-      showStatusMessage('Offline message sent successfully.');
+      showStatusMessage('Encrypted offline message sent.');
       return;
     }
   } catch (error) {
@@ -1194,7 +1202,7 @@ async function triggerRatchet() {
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr, 'new-room-key|' + cId + '|' + keyVersion);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion, publicKey: newPub }));
       success++;
     } catch (error) {
@@ -1244,7 +1252,7 @@ async function triggerRatchetPartial(failures, newKeyPair, newPub, newRoomMaster
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const { encrypted, iv } = await encryptRaw(shared, payloadStr);
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr, 'new-room-key|' + cId + '|' + version);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version, publicKey: newPub }));
       retrySuccess++;
     } catch (error) {
@@ -1894,29 +1902,76 @@ async function sendMessage(content) {
 async function sendOfflineMessage(toUsername, messageText) {
   if (!toUsername || !messageText) throw new Error('Missing recipient or message');
   if (!userPublicKey) throw new Error('No public key for recipient');
-  const keys = await ensurePersistentKeys();
-  if (keys.recoveryKit) showRecoveryKitModal(keys.recoveryKit);
-  applyPersistentIdentity(keys);
-  const recipientPub = await importPublicKey(userPublicKey);
-  const eph = await generateSessionKeyPair();
-  const shared = await deriveSharedKey(eph.privateKey, recipientPub);
-  const inner = JSON.stringify({ from: username, text: messageText, timestamp: Date.now() });
-  const identitySig = await signIdentitySignature(keys.ecdsaPrivate, inner);
-  const envelope = JSON.stringify({ inner, identitySig, identityPublic: keys.ecdsaPubB64 });
-  const { encrypted, iv } = await encryptRaw(shared, envelope);
-  const ephemeral_public = await exportPublicKey(eph.publicKey);
+  await ensurePersistentKeys();
   const messageId = generateMessageId();
+  const plaintext = JSON.stringify({ type: 'message', from: username, text: messageText, timestamp: Date.now() });
+  const sealed = await sealOfflinePayload(userPublicKey, toUsername, plaintext, messageId);
   socket.send(JSON.stringify({
     type: 'send-offline-message',
     to_username: toUsername,
-    encrypted,
-    iv,
-    ephemeral_public,
-    identity_public: keys.ecdsaPubB64,
+    encrypted: sealed.encrypted,
+    iv: sealed.iv,
+    ephemeral_public: sealed.ephemeral_public,
     messageId,
     clientId,
     token
   }));
+}
+
+async function inviteEncryptedChat(toUsername, theirPub) {
+  if (!theirPub) {
+    showStatusMessage('That user has no encryption key.');
+    return;
+  }
+  userPublicKey = theirPub;
+  if (!validateUsername(username)) {
+    username = prompt('Enter your username (1-16 alphanumeric characters):')?.trim() || 'Guest';
+    if (!validateUsername(username)) username = 'Guest';
+    localStorage.setItem('username', username);
+  }
+  code = generateCode();
+  const messageId = generateMessageId();
+  const plaintext = JSON.stringify({ type: 'connection-request', code, from: username });
+  try {
+    await ensurePersistentKeys();
+    const sealed = await sealOfflinePayload(theirPub, toUsername, plaintext, messageId);
+    socket.send(JSON.stringify({
+      type: 'send-offline-message',
+      to_username: toUsername,
+      encrypted: sealed.encrypted,
+      iv: sealed.iv,
+      ephemeral_public: sealed.ephemeral_public,
+      messageId,
+      clientId,
+      token
+    }));
+    await sendJoin();
+    showStatusMessage('Encrypted invite sent. Waiting in a private room.');
+  } catch (err) {
+    console.error(err);
+    showStatusMessage('Failed to send encrypted invite.');
+  }
+}
+
+function showIncomingInvite(fromUser, inviteCode, dbId) {
+  const label = document.getElementById('incomingMessage');
+  if (label) label.textContent = `${fromUser} wants to connect. Accept?`;
+  const accept = document.getElementById('acceptButton');
+  const deny = document.getElementById('denyButton');
+  if (accept) {
+    accept.onclick = () => {
+      if (dbId) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: dbId, clientId, token }));
+      autoConnect(inviteCode);
+      document.getElementById('incomingConnectionModal').classList.remove('active');
+    };
+  }
+  if (deny) {
+    deny.onclick = () => {
+      if (dbId) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: dbId, clientId, token }));
+      document.getElementById('incomingConnectionModal').classList.remove('active');
+    };
+  }
+  document.getElementById('incomingConnectionModal')?.classList.add('active');
 }
 
 function showRecoveryKitModal(kit) {

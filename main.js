@@ -165,7 +165,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   let rawData = metadata + (dataToSend || sanitizedContent);
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' ');
-  const { encrypted, iv } = await encryptRaw(messageKey, rawData);
+  const { encrypted, iv } = await encryptRaw(messageKey, rawData, String(messageId) + '|' + String(nonce));
   const toSign = rawData + nonce;
   const signature = await signMessage(signingKey, toSign);
   await initIdentityKeys();
@@ -281,6 +281,11 @@ async function startPeerConnection(targetId, isOfferer) {
   if (peerConnections.has(targetId)) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
+  }
+  if (!turnUsername || !turnCredential) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'get-turn-credentials', clientId, token }));
+    }
   }
   const peerConnection = new RTCPeerConnection({
     iceServers: [
@@ -553,7 +558,7 @@ async function processReceivedMessage(data, targetId) {
   try {
     const messageKey = await deriveMessageKey();
     const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
-    const rawData = await decryptRaw(messageKey, encrypted, data.iv);
+    const rawData = await decryptRaw(messageKey, encrypted, data.iv, String(data.messageId) + '|' + String(data.nonce));
     const toVerify = rawData + data.nonce;
     const valid = await verifyMessage(signingKey, data.signature, toVerify);
     if (!valid) {

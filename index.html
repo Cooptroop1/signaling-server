@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com wss://signaling-server.onrender.com https://api.x.ai https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co; object-src 'none'; base-uri 'self';">
   <title>Anonomoose Chat</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
@@ -809,7 +810,7 @@
       <p><strong>Moose (corner):</strong> Tap once to burn every message, image, voice note and draft on this device. Tap twice quickly to burn and leave the room. Refreshing or closing the tab also burns the transcript. Live chats are never saved.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
       <p><strong>Login:</strong> Login with your claimed username to retrieve it on new devices and get offline messages.</p>
-      <p><strong>Search User:</strong> Search for a claimed username to get a dynamic code to connect.</p>
+      <p><strong>Search User:</strong> Search for a claimed username. Invites and offline mail are end-to-end encrypted (Double Ratchet). The server cannot read them or see who mailed whom.</p>
     </div>
   </div>
   <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
@@ -936,6 +937,7 @@
     </div>
   </div>
     <script src="crypto.js"></script>
+  <script src="ratchet.js"></script>
   <script src="utils.js"></script>
   <script src="main.js"></script>
   <script src="init.js"></script>

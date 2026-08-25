@@ -372,6 +372,7 @@
     }
     .button-group {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       margin: 0.5rem 0.8rem;
       width: calc(100% - 1.6rem);
@@ -420,6 +421,14 @@
     }
     #textCodeButton:hover {
       background-color: #0284c7;
+    }
+    .button-group #addUserText {
+      background-color: #6366f1;
+      color: white;
+    }
+    .button-group #addUserText:hover {
+      background-color: #4f46e5;
+      color: white;
     }
     #helpText, #addUserText {
       color: #3b82f6;
@@ -732,7 +741,8 @@
           <button id="button1" aria-label="Send code to random chat board">Send Code</button>
           <button id="button2" aria-label="Join a random chat">Random Chat</button>
           <button id="copyCodeButton" aria-label="Copy chat code">Copy Code</button>
-          <button id="textCodeButton" aria-label="Send chat code by text message">Text Code</button>
+          <button id="textCodeButton" aria-label="Share chat code">Text Code</button>
+          <button id="addUserText" class="hidden" aria-label="Set maximum users">Add User</button>
         </div>
         <div class="messages-wrapper">
           <div id="messages" role="log" aria-live="polite"></div>
@@ -776,7 +786,6 @@
         <button id="claimUsernameButton" class="text-blue-500 hover:underline hidden" aria-label="Claim a username">Claim Username</button>
         <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
         <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log out">Log Out</button>
-        <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
       </div>
             <!-- SUPABASE AUTH — Simple text links like your old system (only on start page) -->
@@ -896,12 +905,12 @@
       <button id="searchCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-  <div id="textCodeModal" class="totp-modal hidden" role="dialog" aria-label="Send code by text" tabindex="-1">
+  <div id="textCodeModal" class="totp-modal hidden" role="dialog" aria-label="Share invite" tabindex="-1">
     <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Text the invite</h2>
-      <p class="text-sm mb-3">Opens your phone’s Messages app with the room code only — no chat, no names. We do not store the number.</p>
-      <input id="textCodeNumberInput" type="tel" inputmode="tel" autocomplete="tel" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Phone number (optional)">
-      <button id="textCodeSendButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Open Messages</button>
+      <h2 class="text-xl font-bold mb-4">Share the invite</h2>
+      <p class="text-sm mb-3">This copies a join link only — no chat. Do not leave this tab or the room dies. Paste the link into Messages yourself.</p>
+      <textarea id="textCodePreview" class="border border-gray-300 p-2 w-full mb-2 rounded font-mono text-xs" rows="3" readonly></textarea>
+      <button id="textCodeCopyButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Copy invite</button>
       <button id="textCodeShareButton" class="bg-green-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-green-600">Share…</button>
       <button id="textCodeCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>

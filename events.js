@@ -280,15 +280,20 @@ helpModal.addEventListener('keydown', (event) => {
 });
 const addUserText = document.getElementById('addUserText');
 const addUserModal = document.getElementById('addUserModal');
-addUserText.addEventListener('click', () => {
+addUserText.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
   if (isInitiator) {
     addUserModal.classList.add('active');
     addUserModal.focus();
+  } else {
+    showStatusMessage('Only the person who started the room can raise the user limit.');
   }
 });
-addUserModal.addEventListener('click', () => {
-  addUserModal.classList.remove('active');
-  addUserText.focus();
+addUserModal.addEventListener('click', (e) => {
+  if (e.target === addUserModal) {
+    addUserModal.classList.remove('active');
+  }
 });
 addUserModal.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
@@ -1804,28 +1809,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function inviteSmsBody(inviteCode) {
     return 'Join private chat: https://www.anonomoose.com/?code=' + inviteCode;
   }
-  function normalisePhoneNumber(raw) {
-    let n = (raw || '').replace(/[^\d+]/g, '');
-    if (n.startsWith('00')) n = '+' + n.slice(2);
-    if (n.startsWith('0') && n.length === 11) n = '+44' + n.slice(1);
-    return n;
-  }
-  function smsHref(number, body) {
-    const encoded = encodeURIComponent(body);
-    const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (!number) return ios ? ('sms:&body=' + encoded) : ('sms:?body=' + encoded);
-    return ios ? ('sms:' + number + '&body=' + encoded) : ('sms:' + number + '?body=' + encoded);
-  }
   function openTextCodeModal() {
     const inviteCode = currentInviteCode();
     if (!inviteCode) {
       showStatusMessage('Start a chat first so there is a code to send.');
       return;
     }
+    const preview = document.getElementById('textCodePreview');
+    if (preview) preview.value = inviteSmsBody(inviteCode);
     const modal = document.getElementById('textCodeModal');
     modal.classList.remove('hidden');
     modal.classList.add('active');
-    document.getElementById('textCodeNumberInput')?.focus();
   }
   function closeTextCodeModal() {
     const modal = document.getElementById('textCodeModal');
@@ -1834,24 +1828,27 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   document.getElementById('textCodeButton').onclick = () => openTextCodeModal();
   document.getElementById('textCodeCancelButton').onclick = () => closeTextCodeModal();
-  function openSmsComposer(href) {
-    const a = document.createElement('a');
-    a.href = href;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-  document.getElementById('textCodeSendButton').onclick = () => {
+  document.getElementById('textCodeCopyButton').onclick = async () => {
     const inviteCode = currentInviteCode();
     if (!inviteCode) {
       showStatusMessage('No code to send.');
       return;
     }
-    const number = normalisePhoneNumber(document.getElementById('textCodeNumberInput').value.trim());
-    openSmsComposer(smsHref(number, inviteSmsBody(inviteCode)));
-    closeTextCodeModal();
-    showStatusMessage('Messages opened. Stay in this tab so the room stays alive.');
+    const text = inviteSmsBody(inviteCode);
+    try {
+      if (navigator.clipboard) await navigator.clipboard.writeText(text);
+      else {
+        const preview = document.getElementById('textCodePreview');
+        if (preview) {
+          preview.select();
+          document.execCommand('copy');
+        }
+      }
+      showStatusMessage('Invite copied. Paste it into Messages. Stay on this page.');
+      closeTextCodeModal();
+    } catch (e) {
+      showStatusMessage('Copy failed. Select the text and copy it yourself.');
+    }
   };
   document.getElementById('textCodeShareButton').onclick = async () => {
     const inviteCode = currentInviteCode();
@@ -1870,9 +1867,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e && e.name === 'AbortError') return;
       }
     }
-    openSmsComposer(smsHref('', text));
-    closeTextCodeModal();
-    showStatusMessage('Messages opened. Stay in this tab so the room stays alive.');
+    try {
+      if (navigator.clipboard) await navigator.clipboard.writeText(text);
+      showStatusMessage('Share not available. Invite copied — paste it into Messages.');
+      closeTextCodeModal();
+    } catch (e) {
+      showStatusMessage('Select the invite text and copy it.');
+    }
   };
   document.getElementById('button1').onclick = () => {
     if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {

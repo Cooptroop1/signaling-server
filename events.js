@@ -182,8 +182,10 @@ function bindSocketHandlers(s) {
 }
 async function ensureServerForCode(roomCode) {
   const want = serverForCode(roomCode);
-  const have = socket && socket.url ? socket.url : '';
-  if (have.indexOf(want.replace('wss://', '')) !== -1 && socket.readyState === WebSocket.OPEN && token) {
+  const wantHost = want.replace(/^wss:\/\//, '').split('/')[0];
+  let haveHost = '';
+  try { haveHost = socket && socket.url ? new URL(socket.url).host : ''; } catch (e) {}
+  if (haveHost === wantHost && socket && socket.readyState === WebSocket.OPEN && token) {
     return;
   }
   pinReconnect = true;
@@ -230,7 +232,7 @@ async function sendJoin(extra) {
     identityPublic: identityPubB64
   }, extra)));
 }
-lastWsUrl = serverForCode(code);
+lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code')) || code);
 socket = new WebSocket(lastWsUrl);
 bindSocketHandlers(socket);
 console.log(`WebSocket created, connected to ${lastWsUrl}`);
@@ -372,7 +374,7 @@ function handleSocketOpen() {
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
     console.log('Detected code in URL, setting pendingCode for autoConnect after token');
-    pendingCode = codeParam;
+    if (code !== codeParam) pendingCode = codeParam;
   } else if (!code && !pendingJoin && !pinReconnect) {
     console.log('No valid code in URL, showing initial container');
     initialContainer.classList.remove('hidden');
@@ -431,8 +433,10 @@ async function handleSocketMessage(event) {
       startKeepAlive();
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (window.notifyConnected) window.notifyConnected();
-      if (pendingCode) {
+      if (pendingCode && pendingCode !== code) {
         autoConnect(pendingCode);
+        pendingCode = null;
+      } else {
         pendingCode = null;
       }
       if (pendingJoin) {

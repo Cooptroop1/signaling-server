@@ -939,6 +939,7 @@ wss.on('connection', (ws, req) => {
         const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '10m' });
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
+        ws.accessToken = accessToken;
         const turn = issueTurnCredentials(clientId);
         ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken, ...turn }));
         ipFailureCounts.delete(compositeKey);
@@ -1120,9 +1121,8 @@ wss.on('connection', (ws, req) => {
           await redisClient.del(clientKey);
           return;
         }
-        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, features }));
         const turn = issueTurnCredentials(clientId);
-        ws.send(JSON.stringify({ type: 'turn-credentials', ...turn }));
+        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, features, ...turn }));
         logStats({ clientId, username, code, event: 'join', totalClients: currentSize });
         if (room.clients.size > 0) {
           room.clients.forEach((_, existingClientId) => {
@@ -1641,9 +1641,16 @@ wss.on('connection', (ws, req) => {
     }
   });
   ws.on('close', async () => {
-    revokeTokens(ws.clientId);
-    markOffline(ws.clientId);
-    if (ws.code && rooms.has(ws.code)) {
+    const currentTokens = clientTokens.get(ws.clientId);
+    if (currentTokens && ws.accessToken && currentTokens.accessToken === ws.accessToken) {
+      revokeTokens(ws.clientId);
+    }
+    let stillConnected = false;
+    wss.clients.forEach(c => {
+      if (c !== ws && c.clientId === ws.clientId && c.readyState === WebSocket.OPEN) stillConnected = true;
+    });
+    if (!stillConnected) markOffline(ws.clientId);
+    if (ws.code && rooms.has(ws.code) && !stillConnected) {
       const code = ws.code;
       const roomKey = `room:${code}`;
       const clientsKey = `${roomKey}:clients`;

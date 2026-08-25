@@ -282,36 +282,20 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
   }
-  if (!turnUsername || !turnCredential) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'get-turn-credentials', clientId, token }));
-    }
+  const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' }
+  ];
+  if (turnUsername && turnCredential) {
+    iceServers.push(
+      { urls: 'turn:global.relay.metered.ca:80', username: turnUsername, credential: turnCredential },
+      { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: turnUsername, credential: turnCredential },
+      { urls: 'turn:global.relay.metered.ca:443', username: turnUsername, credential: turnCredential },
+      { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: turnUsername, credential: turnCredential }
+    );
   }
   const peerConnection = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" }, // Public fallback
-      { urls: "stun:stun.relay.metered.ca:80" },
-      {
-        urls: "turn:global.relay.metered.ca:80",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turn:global.relay.metered.ca:80?transport=tcp",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turn:global.relay.metered.ca:443",
-        username: turnUsername,
-        credential: turnCredential
-      },
-      {
-        urls: "turns:global.relay.metered.ca:443?transport=tcp",
-        username: turnUsername,
-        credential: turnCredential
-      }
-    ],
+    iceServers,
     iceTransportPolicy: 'all'
   });
   peerConnections.set(targetId, peerConnection);
@@ -860,6 +844,10 @@ function updateUIState(isConnected = false, hasChat = false) {
 }
 async function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);
+  if (code === codeParam && token && socket && socket.readyState === WebSocket.OPEN && !pendingCode) {
+    console.log('Already joining this code, skip duplicate autoConnect');
+    return;
+  }
   code = codeParam;
   updateUIState(false, true);
   codeDisplayElement.classList.add('hidden');

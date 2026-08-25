@@ -855,7 +855,7 @@
     <div id="claimUsernameModal" class="totp-modal legacy-auth" role="dialog" aria-label="Claim Username" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Claim Username</h2>
-      <p class="text-sm text-red-500 mb-2">Warning: Encryption keys are stored locally. On a new device, re-claim to update keys (old offline messages may be lost).</p>
+      <p class="text-sm text-red-500 mb-2">Keys stay on this device in IndexedDB. Save the recovery kit when it appears — you need it on a new phone or laptop.</p>
       <input id="claimUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Desired username (1-16 chars)" maxlength="16">
       <input id="claimPasswordInput" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Password (min 8 chars)">
       <div id="claimError" class="text-red-500 mb-2"></div>
@@ -913,6 +913,25 @@
       <input id="modalLoginPassword" type="password" placeholder="Password" class="border border-gray-300 p-3 w-full mb-4 rounded">
       <button id="modalLoginSubmit" class="bg-blue-500 text-white px-4 py-3 rounded w-full mb-2">Login</button>
       <button id="modalLoginCancel" class="bg-gray-500 text-white px-4 py-3 rounded w-full">Cancel</button>
+    </div>
+  </div>
+  <div id="recoveryKitModal" class="totp-modal hidden" role="dialog" aria-label="Save recovery kit" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Save your recovery kit</h2>
+      <p class="text-sm mb-2">Copy this now. It is the only way to read old offline messages on a new device. We cannot recover it for you.</p>
+      <textarea id="recoveryKitValue" class="border border-gray-300 p-2 w-full mb-2 rounded font-mono text-xs" rows="5" readonly></textarea>
+      <button id="copyRecoveryKitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Copy kit</button>
+      <button id="closeRecoveryKitButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">I have saved it</button>
+    </div>
+  </div>
+  <div id="recoverKeysModal" class="totp-modal hidden" role="dialog" aria-label="Restore keys" tabindex="-1">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-4">Restore encryption keys</h2>
+      <p class="text-sm mb-2">Paste your recovery kit from the original device. Or generate new keys (old offline messages will not decrypt).</p>
+      <textarea id="recoverKitInput" class="border border-gray-300 p-2 w-full mb-2 rounded font-mono text-xs" rows="4" placeholder="AAAA-BBBB-....kit"></textarea>
+      <button id="restoreKeysButton" class="bg-green-500 text-white px-4 py-2 rounded w-full hover:bg-green-600">Restore kit</button>
+      <button id="generateNewKeysButton" class="bg-red-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-red-600">Generate new keys</button>
+      <button id="cancelRecoverKeysButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
     <script src="crypto.js"></script>

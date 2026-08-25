@@ -31,16 +31,13 @@ function detectImageMime(base64) {
 // generateUserKeypair moved to top to ensure it's defined before onclick handlers
 async function generateUserKeypair() {
   try {
-    const keyPair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
-      true, // extractable for local storage
-      ['deriveKey', 'deriveBits']
-    );
-    const exportedPrivate = await window.crypto.subtle.exportKey('jwk', keyPair.privateKey);
-    localStorage.setItem('userPrivateKey', JSON.stringify(exportedPrivate));
-    const exportedPublic = await exportPublicKey(keyPair.publicKey);
-    console.log('Generated and stored user keypair');
-    return exportedPublic;
+    const keys = await ensurePersistentKeys();
+    if (keys.recoveryKit) {
+      showRecoveryKitModal(keys.recoveryKit);
+    }
+    applyPersistentIdentity(keys);
+    console.log('Generated/loaded persistent user keypair');
+    return keys.ecdhPubB64;
   } catch (error) {
     console.error('generateUserKeypair error:', error);
     throw new Error('Failed to generate user keypair');
@@ -97,7 +94,16 @@ function generateCode() {
   return result;
 }
 let code = generateCode();
-let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
+function readInitialClientId() {
+  if (typeof window !== 'undefined' && window.__CLIENT_ID__) return window.__CLIENT_ID__;
+  try {
+    const stored = localStorage.getItem('anonClientId');
+    if (stored) return stored;
+  } catch (e) {}
+  return newClientId();
+}
+let clientId = readInitialClientId();
+try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
 let username = '';
 let isInitiator = false;
 let isConnected = false;
@@ -127,25 +133,107 @@ let refreshingToken = false;
 let signalingQueue = new Map();
 let connectedClients = new Set();
 let clientPublicKeys = new Map();
+let clientIdentityKeys = new Map();
+let identityKeyPair = null;
+let identityPubB64 = null;
 let initiatorPublic;
-let userPrivateKey = localStorage.getItem('userPrivateKey'); // Added: Load from storage at top
-let userPublicKey; // Added: Will be set if needed
+let persistentEcdhPrivate = null;
+let userPublicKey;
+let userPublicKeyIdentity = null;
+let lastWsUrl = '';
+let pinReconnect = false;
+let connectedWaiters = [];
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
 if (typeof window !== 'undefined') {
-  // In events.js, replace the socket creation with this:
 const serverUrls = [
-  'wss://signaling-server-zc6m.onrender.com', // server1
-  'wss://signaling-server-1.onrender.com' // server2
+  'wss://signaling-server-zc6m.onrender.com',
+  'wss://signaling-server-1.onrender.com'
 ];
-const serverIndex = Math.floor(Math.random() * serverUrls.length); // Randomly pick a server
-socket = new WebSocket(serverUrls[serverIndex]);
-console.log(`WebSocket created, connected to ${serverUrls[serverIndex]}`);
-if (getCookie('clientId')) {
-  clientId = getCookie('clientId');
-} else {
-  setCookie('clientId', clientId, 365);
+function serverForCode(roomCode) {
+  const s = String(roomCode || '').replace(/-/g, '').toLowerCase();
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return serverUrls[(h >>> 0) % serverUrls.length];
 }
+function notifyConnected() {
+  const waiters = connectedWaiters.slice();
+  connectedWaiters = [];
+  waiters.forEach(fn => fn());
+}
+function waitForToken(timeoutMs = 10000) {
+  if (token && socket && socket.readyState === WebSocket.OPEN) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Signaling reconnect timed out')), timeoutMs);
+    connectedWaiters.push(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+function bindSocketHandlers(s) {
+  s.onopen = handleSocketOpen;
+  s.onerror = handleSocketError;
+  s.onclose = handleSocketClose;
+  s.onmessage = handleSocketMessage;
+}
+async function ensureServerForCode(roomCode) {
+  const want = serverForCode(roomCode);
+  const have = socket && socket.url ? socket.url : '';
+  if (have.indexOf(want.replace('wss://', '')) !== -1 && socket.readyState === WebSocket.OPEN && token) {
+    return;
+  }
+  pinReconnect = true;
+  lastWsUrl = want;
+  token = '';
+  refreshToken = '';
+  try {
+    if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+  } catch (e) {}
+  socket = new WebSocket(want);
+  bindSocketHandlers(socket);
+  await waitForToken();
+  pinReconnect = false;
+}
+async function initIdentityKeys() {
+  if (identityKeyPair && identityPubB64) return;
+  const persistent = await loadPersistentKeys();
+  if (persistent) {
+    applyPersistentIdentity(persistent);
+    return;
+  }
+  identityKeyPair = await window.crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-384' },
+    false,
+    ['sign', 'verify']
+  );
+  identityPubB64 = await exportIdentityPublic(identityKeyPair.publicKey);
+}
+function applyPersistentIdentity(keys) {
+  persistentEcdhPrivate = keys.ecdhPrivate;
+  identityKeyPair = { privateKey: keys.ecdsaPrivate, publicKey: keys.ecdsaPublic };
+  identityPubB64 = keys.ecdsaPubB64;
+}
+async function sendJoin(extra) {
+  extra = extra || {};
+  await initIdentityKeys();
+  await ensureServerForCode(code);
+  socket.send(JSON.stringify(Object.assign({
+    type: 'join',
+    code,
+    clientId,
+    username,
+    token,
+    identityPublic: identityPubB64
+  }, extra)));
+}
+lastWsUrl = serverForCode(code);
+socket = new WebSocket(lastWsUrl);
+bindSocketHandlers(socket);
+console.log(`WebSocket created, connected to ${lastWsUrl}`);
   username = localStorage.getItem('username')?.trim() || '';
   globalMessageRate.startTime = performance.now();
   statusElement = document.getElementById('status');
@@ -165,7 +253,14 @@ if (getCookie('clientId')) {
   helpModal = document.getElementById('helpModal');
   (async () => {
     keyPair = await generateSessionKeyPair();
+    try { await initIdentityKeys(); } catch (e) { console.error('Identity init failed', e); }
   })();
+  window.sendJoin = sendJoin;
+  window.ensureServerForCode = ensureServerForCode;
+  window.initIdentityKeys = initIdentityKeys;
+  window.notifyConnected = notifyConnected;
+  window.serverForCode = serverForCode;
+  window.bindSocketHandlers = bindSocketHandlers;
 }
 helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
@@ -217,12 +312,9 @@ function logout() {
   username = '';
   token = '';
   refreshToken = '';
-  clientId = Math.random().toString(36).substr(2, 9);
-  setCookie('clientId', clientId, 365);
+  clientId = newClientId();
+  try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
   localStorage.removeItem('username');
-  localStorage.removeItem('userPrivateKey');
-  userPrivateKey = null;
-  userPublicKey = null;
   processedMessageIds.clear();
   connectedClients.clear();
   peerConnections.forEach((pc) => pc.close());
@@ -272,7 +364,7 @@ function endChat() {
   showStatusMessage('Chat ended.');
   document.getElementById('startChatToggleButton')?.focus();
 }
-socket.onopen = () => {
+function handleSocketOpen() {
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
   reconnectAttempts = 0;
@@ -291,15 +383,16 @@ socket.onopen = () => {
     copyCodeButton.classList.add('hidden');
   }
   updateLogoutButtonVisibility();
-};
-socket.onerror = (error) => {
+}
+function handleSocketError(error) {
   console.error('WebSocket error:', error);
   showStatusMessage('Connection error, please try again later.');
   connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
-};
-socket.onclose = () => {
+}
+function handleSocketClose() {
   console.log('WebSocket closed');
   stopKeepAlive();
+  if (pinReconnect) return;
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
     return;
@@ -307,14 +400,12 @@ socket.onclose = () => {
   const delay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
   reconnectAttempts++;
   setTimeout(() => {
-    socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
-    socket.onopen = socket.onopen;
-    socket.onerror = socket.onerror;
-    socket.onclose = socket.onclose;
-    socket.onmessage = socket.onmessage;
+    socket = new WebSocket(lastWsUrl || (window.serverForCode && window.serverForCode(code)) || 'wss://signaling-server-zc6m.onrender.com');
+    if (window.bindSocketHandlers) window.bindSocketHandlers(socket);
+    else bindSocketHandlers(socket);
   }, delay);
-};
-socket.onmessage = async (event) => {
+}
+async function handleSocketMessage(event) {
   console.log('Received WebSocket message:', event.data);
   try {
     const message = JSON.parse(event.data);
@@ -332,12 +423,26 @@ socket.onmessage = async (event) => {
     if (message.type === 'connected') {
       token = message.accessToken;
       refreshToken = message.refreshToken;
-      console.log('Received authentication tokens:', { accessToken: token, refreshToken });
+      if (message.clientId) {
+        clientId = message.clientId;
+        try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
+      }
+      console.log('Received authentication tokens');
       startKeepAlive();
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
+      if (window.notifyConnected) window.notifyConnected();
       if (pendingCode) {
         autoConnect(pendingCode);
         pendingCode = null;
+      }
+      if (pendingJoin) {
+        code = pendingJoin.code || code;
+        username = pendingJoin.username || username;
+        sendJoin(pendingJoin.totpCode ? { totpCode: pendingJoin.totpCode } : {}).catch(err => {
+          console.error(err);
+          showStatusMessage('Failed to join after reconnect.');
+        });
+        pendingJoin = null;
       }
       processSignalingQueue();
       updateLogoutButtonVisibility();
@@ -351,7 +456,7 @@ socket.onmessage = async (event) => {
       refreshBackoff = 1000;
       setTimeout(refreshAccessToken, 5 * 60 * 1000);
       if (pendingJoin) {
-        socket.send(JSON.stringify({ type: 'join', ...pendingJoin, token }));
+        sendJoin(pendingJoin.totpCode ? { totpCode: pendingJoin.totpCode } : {}).catch(() => {});
         pendingJoin = null;
       }
       processSignalingQueue();
@@ -408,8 +513,8 @@ socket.onmessage = async (event) => {
         console.log(`Refresh failure count: ${refreshFailures}`);
         if (refreshFailures > 3) {
           console.log('Exceeded refresh failures, forcing full reconnect with new clientId');
-          clientId = Math.random().toString(36).substr(2, 9);
-          setCookie('clientId', clientId, 365);
+          clientId = newClientId();
+          try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
           token = '';
           refreshToken = '';
           refreshFailures = 0;
@@ -492,7 +597,7 @@ socket.onmessage = async (event) => {
         showTotpSecretModal(pendingTotpSecret.display);
         pendingTotpSecret = null;
       }
-      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+      sendJoin();
       return;
     }
     if (message.type === 'init') {
@@ -507,6 +612,7 @@ socket.onmessage = async (event) => {
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
       connectedClients.add(clientId);
+      if (identityPubB64) clientIdentityKeys.set(clientId, identityPubB64);
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {
@@ -535,7 +641,8 @@ socket.onmessage = async (event) => {
         }
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
-        socket.send(JSON.stringify({ type: 'public-key', publicKey, clientId, code, token }));
+        await initIdentityKeys();
+        socket.send(JSON.stringify({ type: 'public-key', publicKey, identityPublic: identityPubB64, clientId, code, token }));
       }
       updateMaxClientsUI();
       updateDots();
@@ -556,6 +663,9 @@ socket.onmessage = async (event) => {
       console.log(`Join-notify received for code: ${code}, client: ${message.clientId}, total: ${totalClients}, username: ${message.username}`);
       if (message.username) {
         usernames.set(message.clientId, message.username);
+      }
+      if (message.identityPublic) {
+        clientIdentityKeys.set(message.clientId, message.identityPublic);
       }
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
@@ -629,6 +739,9 @@ socket.onmessage = async (event) => {
     if (message.type === 'public-key' && isInitiator) {
       try {
         clientPublicKeys.set(message.clientId, message.publicKey);
+        if (message.identityPublic) {
+          clientIdentityKeys.set(message.clientId, message.identityPublic);
+        }
         const joinerPublic = await importPublicKey(message.publicKey);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, joinerPublic);
         const payload = {
@@ -639,11 +752,13 @@ socket.onmessage = async (event) => {
         const payloadStr = JSON.stringify(payload);
         const { encrypted, iv } = await encryptRaw(sharedKey, payloadStr);
         const myPublic = await exportPublicKey(keyPair.publicKey);
+        await initIdentityKeys();
         socket.send(JSON.stringify({
           type: 'encrypted-room-key',
           encryptedKey: encrypted,
           iv,
           publicKey: myPublic,
+          identityPublic: identityPubB64,
           targetId: message.clientId,
           code,
           clientId,
@@ -658,6 +773,9 @@ socket.onmessage = async (event) => {
     if (message.type === 'encrypted-room-key') {
       try {
         initiatorPublic = message.publicKey;
+        if (message.identityPublic) {
+          clientIdentityKeys.set(message.clientId || 'initiator', message.identityPublic);
+        }
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
         const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv);
@@ -710,7 +828,7 @@ socket.onmessage = async (event) => {
         keyPair = await generateSessionKeyPair();
         const rotatedPub = await exportPublicKey(keyPair.publicKey);
         if (socket.readyState === WebSocket.OPEN && token) {
-          socket.send(JSON.stringify({ type: 'public-key', publicKey: rotatedPub, clientId, code, token }));
+          socket.send(JSON.stringify({ type: 'public-key', publicKey: rotatedPub, identityPublic: identityPubB64, clientId, code, token }));
         }
       } catch (error) {
         console.error('Error handling new-room-key:', error);
@@ -772,6 +890,31 @@ socket.onmessage = async (event) => {
           showStatusMessage('Invalid message signature detected.');
           return;
         }
+        const encryptedBlob = message.encryptedContent || message.encryptedData;
+        if (!message.identityPublic || !message.identitySig) {
+          console.warn('Relay message missing identity signature');
+          showStatusMessage('Unsigned message rejected.');
+          return;
+        }
+        const senderId = message.senderId;
+        if (senderId && clientIdentityKeys.has(senderId) && clientIdentityKeys.get(senderId) !== message.identityPublic) {
+          console.warn('Relay identity key mismatch');
+          showStatusMessage('Message identity mismatch.');
+          return;
+        }
+        const identityOk = await verifyIdentitySignature(
+          message.identityPublic,
+          message.identitySig,
+          String(message.messageId) + String(message.nonce) + String(encryptedBlob)
+        );
+        if (!identityOk) {
+          console.warn('Relay identity signature invalid');
+          showStatusMessage('Message identity check failed.');
+          return;
+        }
+        if (senderId && message.identityPublic) {
+          clientIdentityKeys.set(senderId, message.identityPublic);
+        }
         // Parse metadata (same as P2P)
         let metadataStr = '';
         let braceCount = 0;
@@ -782,7 +925,7 @@ socket.onmessage = async (event) => {
           if (braceCount === 0 && metadataStr.startsWith('{')) break;
         }
         const metadata = JSON.parse(metadataStr);
-        const senderUsername = metadata.username;
+        const senderUsername = (senderId && usernames.get(senderId)) || metadata.username;
         const timestamp = metadata.timestamp;
         const contentType = metadata.type;
         let base64Data = rawData.substring(metadataStr.length).trimEnd();
@@ -891,13 +1034,29 @@ socket.onmessage = async (event) => {
           if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
             (async () => {
               try {
-                const privateKey = await window.crypto.subtle.importKey('jwk', JSON.parse(userPrivateKey), { name: 'ECDH', namedCurve: 'P-384' }, false, ['deriveKey', 'deriveBits']);
+                const keys = await loadPersistentKeys();
+                if (!keys) throw new Error('No identity keys on this device');
                 const ephemeralPublicImported = await importPublicKey(msg.ephemeral_public);
-                const shared = await deriveSharedKey(privateKey, ephemeralPublicImported);
+                const shared = await deriveSharedKey(keys.ecdhPrivate, ephemeralPublicImported);
                 const decrypted = await decryptRaw(shared, msg.encrypted, msg.iv);
+                let displayText = decrypted;
+                let fromName = msg.from;
+                try {
+                  const parsed = JSON.parse(decrypted);
+                  if (parsed.inner && parsed.identitySig && parsed.identityPublic) {
+                    const ok = await verifyIdentitySignature(parsed.identityPublic, parsed.identitySig, parsed.inner);
+                    if (!ok) throw new Error('identity');
+                    if (msg.identity_public && msg.identity_public !== parsed.identityPublic) throw new Error('identity mismatch');
+                    const inner = JSON.parse(parsed.inner);
+                    fromName = inner.from || msg.from;
+                    displayText = inner.text || decrypted;
+                  }
+                } catch (parseErr) {
+                  if (String(parseErr.message).indexOf('identity') !== -1) throw parseErr;
+                }
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message-bubble other';
-                messageDiv.textContent = `Offline message from ${msg.from}: ${decrypted}`;
+                messageDiv.textContent = `Offline message from ${fromName}: ${displayText}`;
                 messages.prepend(messageDiv);
               } catch (error) {
                 console.error('Failed to decrypt offline message:', error);
@@ -942,6 +1101,9 @@ socket.onmessage = async (event) => {
       searchResult.appendChild(codeLink);
       if (message.status === 'offline' && message.public_key) {
         userPublicKey = message.public_key;
+        if (message.identity_public_key) {
+          userPublicKeyIdentity = message.identity_public_key;
+        }
         const offlineMsgContainer = document.createElement('div');
         const textarea = document.createElement('textarea');
         textarea.placeholder = 'Send offline message...';
@@ -1276,17 +1438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.getElementById('loginModal').classList.add('active');
   });
-  document.getElementById('loginSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    const name = document.getElementById('loginUsernameInput').value.trim();
-    const pass = document.getElementById('loginPasswordInput').value;
-    if (name && pass) {
-      socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-    }
-  };
+  document.getElementById('loginSubmitButton').onclick = () => submitLegacyLogin();
   document.getElementById('loginCancelButton').onclick = () => {
     document.getElementById('loginModal').classList.remove('active');
   };
@@ -1321,7 +1473,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const pass = document.getElementById('claimPasswordInput').value;
     if (validateUsername(name) && pass.length >= 8) {
       generateUserKeypair().then(publicKey => {
-        socket.send(JSON.stringify({ type: 'register-username', username: name, password: pass, public_key: publicKey, clientId, token }));
+        socket.send(JSON.stringify({
+          type: 'register-username',
+          username: name,
+          password: pass,
+          public_key: publicKey,
+          identity_public_key: identityPubB64,
+          clientId,
+          token
+        }));
       }).catch(error => {
         console.error('Key generation error:', error);
         showStatusMessage('Failed to generate keys for claim.');
@@ -1330,33 +1490,85 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatusMessage('Invalid username or password (min 8 chars).');
     }
   };
-  document.getElementById('loginSubmitButton').onclick = () => {
-    if (username && token) {
-      showStatusMessage('You are already logged in. Log out first to switch accounts.');
-      return;
-    }
-    const name = document.getElementById('loginUsernameInput').value.trim();
-    const pass = document.getElementById('loginPasswordInput').value;
-    if (validateUsername(name) && pass.length >= 8) {
-      if (!userPrivateKey) {
-        generateUserKeypair().then(() => {
-          showStatusMessage('New device detected. Generated new keys (old offline messages may be lost).');
-          socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-        }).catch(error => {
-          console.error('Key generation error:', error);
-          showStatusMessage('Failed to generate keys for login.');
-        });
-      } else {
-        socket.send(JSON.stringify({ type: 'login-username', username: name, password: pass, clientId, token }));
-      }
-    } else {
-      showStatusMessage('Invalid username or password (min 8 chars).');
-    }
-  };
+  document.getElementById('loginSubmitButton').onclick = () => submitLegacyLogin();
   document.getElementById('logoutButton').onclick = () => {
     console.log('Logout button clicked');
     logout();
   };
+  const copyRecoveryBtn = document.getElementById('copyRecoveryKitButton');
+  if (copyRecoveryBtn) {
+    copyRecoveryBtn.onclick = () => {
+      const val = document.getElementById('recoveryKitValue').value;
+      if (navigator.clipboard && val) navigator.clipboard.writeText(val);
+      showStatusMessage('Recovery kit copied.');
+    };
+  }
+  const closeRecoveryBtn = document.getElementById('closeRecoveryKitButton');
+  if (closeRecoveryBtn) {
+    closeRecoveryBtn.onclick = () => {
+      document.getElementById('recoveryKitModal').classList.remove('active');
+      document.getElementById('recoveryKitModal').classList.add('hidden');
+    };
+  }
+  const restoreBtn = document.getElementById('restoreKeysButton');
+  if (restoreBtn) {
+    restoreBtn.onclick = () => {
+      const kit = document.getElementById('recoverKitInput').value.trim();
+      const modal = document.getElementById('recoverKeysModal');
+      const name = modal.dataset.username;
+      const pass = modal.dataset.password;
+      restorePersistentKeys(kit).then(keys => {
+        applyPersistentIdentity(keys);
+        modal.classList.remove('active');
+        modal.classList.add('hidden');
+        socket.send(JSON.stringify({
+          type: 'login-username',
+          username: name,
+          password: pass,
+          public_key: keys.ecdhPubB64,
+          identity_public_key: keys.ecdsaPubB64,
+          clientId,
+          token
+        }));
+        showStatusMessage('Keys restored.');
+      }).catch(err => {
+        console.error(err);
+        showStatusMessage('Could not restore kit. Check it and try again.');
+      });
+    };
+  }
+  const genNewBtn = document.getElementById('generateNewKeysButton');
+  if (genNewBtn) {
+    genNewBtn.onclick = () => {
+      const modal = document.getElementById('recoverKeysModal');
+      const name = modal.dataset.username;
+      const pass = modal.dataset.password;
+      generateUserKeypair().then(publicKey => {
+        modal.classList.remove('active');
+        modal.classList.add('hidden');
+        showStatusMessage('New keys generated. Old offline messages may be lost.');
+        socket.send(JSON.stringify({
+          type: 'login-username',
+          username: name,
+          password: pass,
+          public_key: publicKey,
+          identity_public_key: identityPubB64,
+          clientId,
+          token
+        }));
+      }).catch(err => {
+        console.error(err);
+        showStatusMessage('Failed to generate new keys.');
+      });
+    };
+  }
+  const cancelRecoverBtn = document.getElementById('cancelRecoverKeysButton');
+  if (cancelRecoverBtn) {
+    cancelRecoverBtn.onclick = () => {
+      document.getElementById('recoverKeysModal').classList.remove('active');
+      document.getElementById('recoverKeysModal').classList.add('hidden');
+    };
+  }
   updateLogoutButtonVisibility();
   document.getElementById('startChatToggleButton').onclick = () => {
     console.log('Start chat toggle clicked');
@@ -1469,21 +1681,10 @@ document.addEventListener('DOMContentLoaded', () => {
     chatContainer.classList.remove('hidden');
     messages.classList.add('waiting');
     statusElement.textContent = 'Waiting for connection...';
-    if (socket.readyState === WebSocket.OPEN && token) {
-      console.log('Sending join message for new chat');
-      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-    } else {
-      pendingJoin = { code, clientId, username };
-      if (socket.readyState !== WebSocket.OPEN) {
-        socket.addEventListener('open', () => {
-          console.log('WebSocket opened, sending join for new chat');
-          if (token) {
-            socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-            pendingJoin = null;
-          }
-        }, { once: true });
-      }
-    }
+    sendJoin().catch(err => {
+      console.error(err);
+      showStatusMessage('Failed to start chat.');
+    });
     document.getElementById('messageInput')?.focus();
   };
   document.getElementById('connectButton').onclick = () => {
@@ -1512,21 +1713,10 @@ document.addEventListener('DOMContentLoaded', () => {
     chatContainer.classList.remove('hidden');
     messages.classList.add('waiting');
     statusElement.textContent = 'Waiting for connection...';
-    if (socket.readyState === WebSocket.OPEN && token) {
-      console.log('Sending join message for existing chat');
-      socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-    } else {
-      pendingJoin = { code, clientId, username };
-      if (socket.readyState !== WebSocket.OPEN) {
-        socket.addEventListener('open', () => {
-          console.log('WebSocket opened, sending join for existing chat');
-          if (token) {
-            socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
-            pendingJoin = null;
-          }
-        }, { once: true });
-      }
-    }
+    sendJoin().catch(err => {
+      console.error(err);
+      showStatusMessage('Failed to join chat.');
+    });
     document.getElementById('messageInput')?.focus();
   };
   document.getElementById('backButton').onclick = () => {
@@ -1695,6 +1885,92 @@ async function sendMessage(content) {
   messageInput?.focus();
 }
 async function sendOfflineMessage(toUsername, messageText) {
-  // Assuming implementation elsewhere
+  if (!toUsername || !messageText) throw new Error('Missing recipient or message');
+  if (!userPublicKey) throw new Error('No public key for recipient');
+  const keys = await ensurePersistentKeys();
+  if (keys.recoveryKit) showRecoveryKitModal(keys.recoveryKit);
+  applyPersistentIdentity(keys);
+  const recipientPub = await importPublicKey(userPublicKey);
+  const eph = await generateSessionKeyPair();
+  const shared = await deriveSharedKey(eph.privateKey, recipientPub);
+  const inner = JSON.stringify({ from: username, text: messageText, timestamp: Date.now() });
+  const identitySig = await signIdentitySignature(keys.ecdsaPrivate, inner);
+  const envelope = JSON.stringify({ inner, identitySig, identityPublic: keys.ecdsaPubB64 });
+  const { encrypted, iv } = await encryptRaw(shared, envelope);
+  const ephemeral_public = await exportPublicKey(eph.publicKey);
+  const messageId = generateMessageId();
+  socket.send(JSON.stringify({
+    type: 'send-offline-message',
+    to_username: toUsername,
+    encrypted,
+    iv,
+    ephemeral_public,
+    identity_public: keys.ecdsaPubB64,
+    messageId,
+    clientId,
+    token
+  }));
 }
-// Other missing functions like exportPublicKey, deriveSharedKey, etc., assume defined elsewhere
+
+function showRecoveryKitModal(kit) {
+  const modal = document.getElementById('recoveryKitModal');
+  const field = document.getElementById('recoveryKitValue');
+  if (!modal || !field) {
+    window.prompt('Save this recovery kit. You need it on a new device:', kit);
+    return;
+  }
+  field.value = kit;
+  modal.classList.add('active');
+  modal.classList.remove('hidden');
+}
+
+function submitLegacyLogin() {
+  if (username && token) {
+    showStatusMessage('You are already logged in. Log out first to switch accounts.');
+    return;
+  }
+  const name = document.getElementById('loginUsernameInput').value.trim();
+  const pass = document.getElementById('loginPasswordInput').value;
+  if (!validateUsername(name) || pass.length < 8) {
+    showStatusMessage('Invalid username or password (min 8 chars).');
+    return;
+  }
+  loadPersistentKeys().then(existing => {
+    if (existing) {
+      applyPersistentIdentity(existing);
+      socket.send(JSON.stringify({
+        type: 'login-username',
+        username: name,
+        password: pass,
+        public_key: existing.ecdhPubB64,
+        identity_public_key: existing.ecdsaPubB64,
+        clientId,
+        token
+      }));
+      return;
+    }
+    const recoverModal = document.getElementById('recoverKeysModal');
+    if (recoverModal) {
+      recoverModal.dataset.username = name;
+      recoverModal.dataset.password = pass;
+      recoverModal.classList.add('active');
+      recoverModal.classList.remove('hidden');
+      return;
+    }
+    generateUserKeypair().then(publicKey => {
+      showStatusMessage('New device: generated new keys. Old offline messages may be lost.');
+      socket.send(JSON.stringify({
+        type: 'login-username',
+        username: name,
+        password: pass,
+        public_key: publicKey,
+        identity_public_key: identityPubB64,
+        clientId,
+        token
+      }));
+    });
+  }).catch(error => {
+    console.error(error);
+    showStatusMessage('Failed to load keys for login.');
+  });
+}

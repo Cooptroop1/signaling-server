@@ -69,6 +69,7 @@ dbPool.connect(async (err) => {
     logger.error('DB connection error: %s %s', err.message, err.stack);
   } else {
     logger.info('Connected to DB successfully');
+    await dbPool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_public_key TEXT');
     await loadFeatures();
     await loadAggregatedStats();
   }
@@ -224,6 +225,7 @@ server.on('request', (req, res) => {
         clientIdFromCookie = uuidv4();
         res.setHeader('Set-Cookie', `clientId=${clientIdFromCookie}; Secure; HttpOnly; SameSite=Strict; Max-Age=31536000; Path=/`);
       }
+      data = data.toString().replace('</head>', `<script nonce="${nonce}">window.__CLIENT_ID__=${JSON.stringify(clientIdFromCookie)};</script></head>`);
     } else if (filePath.endsWith('.js')) {
       contentType = 'application/javascript';
     }
@@ -399,6 +401,9 @@ function validateMessage(data) {
       if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
         return { valid: false, error: 'public-key: invalid publicKey format or length' };
       }
+      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 128 || data.identityPublic.length > 132)) {
+        return { valid: false, error: 'public-key: invalid identityPublic format or length' };
+      }
       if (!data.code) {
         return { valid: false, error: 'public-key: code required' };
       }
@@ -412,6 +417,9 @@ function validateMessage(data) {
       }
       if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
         return { valid: false, error: 'encrypted-room-key: invalid publicKey format or length' };
+      }
+      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 128 || data.identityPublic.length > 132)) {
+        return { valid: false, error: 'encrypted-room-key: invalid identityPublic format or length' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
         return { valid: false, error: 'encrypted-room-key: targetId required as string' };
@@ -449,6 +457,9 @@ function validateMessage(data) {
       }
       if (data.totpCode && typeof data.totpCode !== 'string') {
         return { valid: false, error: 'join: totpCode must be a string if provided' };
+      }
+      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 128 || data.identityPublic.length > 132)) {
+        return { valid: false, error: 'join: invalid identityPublic format or length' };
       }
       break;
     case 'check-totp':
@@ -526,6 +537,12 @@ function validateMessage(data) {
       if (!data.nonce || typeof data.nonce !== 'string') {
         return { valid: false, error: 'relay-message: nonce required as string' };
       }
+      if (!data.identityPublic || !isValidBase64(data.identityPublic)) {
+        return { valid: false, error: 'relay-message: identityPublic required' };
+      }
+      if (!data.identitySig || !isValidBase64(data.identitySig)) {
+        return { valid: false, error: 'relay-message: identitySig required' };
+      }
       if (!data.code) {
         return { valid: false, error: 'relay-message: code required' };
       }
@@ -599,6 +616,9 @@ function validateMessage(data) {
       if (data.public_key && !isValidBase64(data.public_key)) {
         return { valid: false, error: 'register-username: invalid public_key (base64)' };
       }
+      if (data.identity_public_key && !isValidBase64(data.identity_public_key)) {
+        return { valid: false, error: 'register-username: invalid identity_public_key (base64)' };
+      }
       break;
     case 'login-username':
       if (!data.username) {
@@ -610,6 +630,9 @@ function validateMessage(data) {
       // Updated: Allow public_key in login for key update
       if (data.public_key && !isValidBase64(data.public_key)) {
         return { valid: false, error: 'login-username: invalid public_key (base64)' };
+      }
+      if (data.identity_public_key && !isValidBase64(data.identity_public_key)) {
+        return { valid: false, error: 'login-username: invalid identity_public_key (base64)' };
       }
       break;
     case 'find-user':
@@ -632,6 +655,9 @@ function validateMessage(data) {
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
         return { valid: false, error: 'send-offline-message: messageId required as string' };
+      }
+      if (data.identity_public && !isValidBase64(data.identity_public)) {
+        return { valid: false, error: 'send-offline-message: invalid identity_public (base64)' };
       }
       break;
     case 'confirm-offline-message':
@@ -796,12 +822,17 @@ wss.on('connection', (ws, req) => {
       // Skip escaping for specific fields that should remain untouched
       const skipEscapeFields = [
         data.type === 'public-key' && 'publicKey',
+        data.type === 'public-key' && 'identityPublic',
         data.type === 'encrypted-room-key' && 'publicKey',
+        data.type === 'encrypted-room-key' && 'identityPublic',
         data.type === 'encrypted-room-key' && 'encryptedKey',
         data.type === 'encrypted-room-key' && 'iv',
         data.type === 'new-room-key' && 'encrypted',
         data.type === 'new-room-key' && 'iv',
         data.type === 'new-room-key' && 'publicKey',
+        data.type === 'join' && 'identityPublic',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'identityPublic',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'identitySig',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'content',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'data',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
@@ -811,7 +842,12 @@ wss.on('connection', (ws, req) => {
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'mime',
         data.type === 'send-offline-message' && 'encrypted',
         data.type === 'send-offline-message' && 'iv',
-        data.type === 'send-offline-message' && 'ephemeral_public'
+        data.type === 'send-offline-message' && 'ephemeral_public',
+        data.type === 'send-offline-message' && 'identity_public',
+        data.type === 'register-username' && 'public_key',
+        data.type === 'register-username' && 'identity_public_key',
+        data.type === 'login-username' && 'public_key',
+        data.type === 'login-username' && 'identity_public_key'
       ];
       Object.keys(data).forEach(key => {
         if (typeof data[key] === 'string' && !skipEscapeFields.includes(key)) {
@@ -896,7 +932,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         const targetId = rooms.get(data.code).initiator;
-        const fwdMsg = { type: 'public-key', publicKey: data.publicKey, clientId: data.clientId, code: data.code };
+        const fwdMsg = { type: 'public-key', publicKey: data.publicKey, identityPublic: data.identityPublic, clientId: data.clientId, code: data.code };
         await forwardUnicast(data.code, targetId, fwdMsg, data.clientId);
         return;
       }
@@ -905,7 +941,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
           return;
         }
-        const fwdMsg = { type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, clientId: data.clientId, code: data.code };
+        const fwdMsg = { type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, identityPublic: data.identityPublic, clientId: data.clientId, code: data.code };
         await forwardUnicast(data.code, data.targetId, fwdMsg, data.clientId);
         return;
       }
@@ -1051,7 +1087,7 @@ wss.on('connection', (ws, req) => {
         }
         // Broadcast join-notify
         const totalClients = currentSize;
-        const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients };
+        const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients, identityPublic: data.identityPublic || null };
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
         // New: Remove from randomCodes if this is a non-initiator joining a random code (one-time use)
         if (randomCodes.has(code) && clientId !== roomState.initiator) {
@@ -1265,7 +1301,10 @@ wss.on('connection', (ws, req) => {
           iv: data.iv,
           signature: data.signature,
           nonce: data.nonce,
-          mime: mime
+          mime: mime,
+          senderId: senderId,
+          identityPublic: data.identityPublic,
+          identitySig: data.identitySig
         };
         const clientJson = JSON.stringify(clientMessageObj);
         // Publish to Redis
@@ -1364,7 +1403,7 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'register-username') {
-        const { username, password, public_key } = data;
+        const { username, password, public_key, identity_public_key } = data;
         if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
           const checkRes = await safeQuery('SELECT * FROM users WHERE username = $1', [username], ws, 'Failed to register username.');
           if (checkRes.rows.length > 0) {
@@ -1373,8 +1412,8 @@ wss.on('connection', (ws, req) => {
           }
           const passwordHash = await hashPassword(password);
           await safeQuery(
-            'INSERT INTO users (username, password_hash, client_id, public_key) VALUES ($1, $2, $3, $4)',
-            [username, passwordHash, data.clientId, public_key || null],
+            'INSERT INTO users (username, password_hash, client_id, public_key, identity_public_key) VALUES ($1, $2, $3, $4, $5)',
+            [username, passwordHash, data.clientId, public_key || null, identity_public_key || null],
             ws,
             'Failed to register username.'
           );
@@ -1386,7 +1425,7 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'login-username') {
-        const { username, password, public_key } = data; // Updated: Allow public_key
+        const { username, password, public_key, identity_public_key } = data; // Updated: Allow public_key
         if (validateUsername(username) && password && typeof password === 'string' && password.length >= 8) {
           const res = await safeQuery('SELECT * FROM users WHERE username = $1', [username], ws, 'Failed to login.');
           if (res.rows.length === 0) {
@@ -1400,10 +1439,13 @@ wss.on('connection', (ws, req) => {
             return;
           }
           // Updated: Update public_key if provided
-          const updateParams = [data.clientId, new Date(), user.id];
+          const updateParams = [data.clientId, new Date()];
           let updateQuery = 'UPDATE users SET client_id = $1, last_active = $2 WHERE id = $3';
-          if (public_key && isValidBase64(public_key)) {
-            updateQuery = 'UPDATE users SET client_id = $1, last_active = $2, public_key = $4 WHERE id = $5';
+          if (public_key && isValidBase64(public_key) && identity_public_key && isValidBase64(identity_public_key)) {
+            updateQuery = 'UPDATE users SET client_id = $1, last_active = $2, public_key = $3, identity_public_key = $4 WHERE id = $5';
+            updateParams.push(public_key, identity_public_key, user.id);
+          } else if (public_key && isValidBase64(public_key)) {
+            updateQuery = 'UPDATE users SET client_id = $1, last_active = $2, public_key = $3 WHERE id = $4';
             updateParams.push(public_key, user.id);
           } else {
             updateParams.push(user.id);
@@ -1425,7 +1467,8 @@ wss.on('connection', (ws, req) => {
                 type: parsedMessage.type || 'connection-request',
                 encrypted: parsedMessage.encrypted || null,
                 iv: parsedMessage.iv || null,
-                ephemeral_public: parsedMessage.ephemeral_public || null
+                ephemeral_public: parsedMessage.ephemeral_public || null,
+                identity_public: parsedMessage.identity_public || user.identity_public_key || null
               };
             } catch (err) {
               logger.error(`Failed to parse offline message for user ${user.id}: %s`, err.message);
@@ -1470,12 +1513,12 @@ wss.on('connection', (ws, req) => {
         }
         const lastActive = user.last_active ? new Date(user.last_active).getTime() : 0;
         const isOnline = ownerWs || (Date.now() - lastActive < 5 * 60 * 1000);
-        ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key }));
+        ws.send(JSON.stringify({ type: 'user-found', status: isOnline ? 'online' : 'offline', code: dynamicCode, public_key: user.public_key, identity_public_key: user.identity_public_key }));
         logger.info(`User ${username} found for clientId ${data.clientId}, status: ${isOnline ? 'online' : 'offline'}, code: ${dynamicCode}`);
         return;
       }
       if (data.type === 'send-offline-message') {
-        const { to_username, encrypted, iv, ephemeral_public, messageId } = data;
+        const { to_username, encrypted, iv, ephemeral_public, messageId, identity_public } = data;
         const res = await safeQuery('SELECT id FROM users WHERE username = $1', [to_username], ws, 'Recipient not found.');
         if (res.rows.length === 0) {
           ws.send(JSON.stringify({ type: 'error', message: 'Recipient not found.' }));
@@ -1491,7 +1534,7 @@ wss.on('connection', (ws, req) => {
         const from_user_id = from_res.rows[0].id;
         await safeQuery(
           'INSERT INTO offline_messages (from_user_id, to_user_id, message) VALUES ($1, $2, $3)',
-          [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, messageId })],
+          [from_user_id, to_user_id, JSON.stringify({ type: 'message', encrypted, iv, ephemeral_public, identity_public, messageId })],
           ws,
           'Failed to send offline message.'
         );

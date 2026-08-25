@@ -67,14 +67,9 @@
  const socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
  const statusElement = document.getElementById('status');
  const randomCodesElement = document.getElementById('randomCodes');
- let clientId = getCookie('clientId') || Math.random().toString(36).substr(2, 9);
+ let clientId = window.__CLIENT_ID__ || (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 11));
  let token = '';
-
- if (getCookie('clientId')) {
- clientId = getCookie('clientId');
- } else {
- setCookie('clientId', clientId, 365);
- }
+ try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
 
  socket.onopen = () => {
  console.log('Random page WebSocket opened');

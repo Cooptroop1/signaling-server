@@ -15,7 +15,14 @@ function sanitizeMessage(content) {
 }
 
 function generateMessageId() {
-  return Math.random().toString(36).substr(2, 9);
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const bytes = window.crypto.getRandomValues(new Uint8Array(16));
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+}
+
+function newClientId() {
+  return generateMessageId();
 }
 
 function validateUsername(username) {

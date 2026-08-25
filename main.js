@@ -168,11 +168,15 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const { encrypted, iv } = await encryptRaw(messageKey, rawData);
   const toSign = rawData + nonce;
   const signature = await signMessage(signingKey, toSign);
+  await initIdentityKeys();
+  const identitySig = await signIdentitySignature(identityKeyPair.privateKey, String(messageId) + String(nonce) + String(encrypted));
   const payload = {
     messageId,
     nonce,
     iv,
-    signature
+    signature,
+    identityPublic: identityPubB64,
+    identitySig
   };
   if (useRelay) {
     payload.timestamp = jitteredTimestamp;
@@ -557,6 +561,28 @@ async function processReceivedMessage(data, targetId) {
       showStatusMessage('Invalid message signature detected.');
       return;
     }
+    const encryptedVal = data.encryptedBlob || data.encryptedContent || data.encryptedData;
+    if (!data.identityPublic || !data.identitySig) {
+      console.warn(`Missing identity signature from ${targetId}`);
+      showStatusMessage('Unsigned message rejected.');
+      return;
+    }
+    if (clientIdentityKeys.has(targetId) && clientIdentityKeys.get(targetId) !== data.identityPublic) {
+      console.warn(`Identity key mismatch from ${targetId}`);
+      showStatusMessage('Message identity mismatch.');
+      return;
+    }
+    const identityOk = await verifyIdentitySignature(
+      data.identityPublic,
+      data.identitySig,
+      String(data.messageId) + String(data.nonce) + String(encryptedVal)
+    );
+    if (!identityOk) {
+      console.warn(`Invalid identity signature from ${targetId}`);
+      showStatusMessage('Message identity check failed.');
+      return;
+    }
+    clientIdentityKeys.set(targetId, data.identityPublic);
     let metadataStr = '';
     let braceCount = 0;
     for (let i = 0; i < rawData.length; i++) {
@@ -566,7 +592,7 @@ async function processReceivedMessage(data, targetId) {
       if (braceCount === 0 && metadataStr.startsWith('{')) break;
     }
     const metadata = JSON.parse(metadataStr);
-    senderUsername = metadata.username;
+    senderUsername = usernames.get(targetId) || metadata.username;
     timestamp = metadata.timestamp;
     contentType = metadata.type;
     contentOrData = rawData.substring(metadataStr.length).trimEnd();
@@ -843,13 +869,16 @@ async function autoConnect(codeParam) {
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN) {
         console.log('Sending check-totp');
-        socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
+        ensureServerForCode(codeParam).then(() => {
+          socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
+        }).catch(err => {
+          console.error(err);
+          showStatusMessage('Could not reach the server for this code.');
+        });
       } else {
         console.log('WebSocket not open, waiting for open event to send check-totp');
-        socket.addEventListener('open', () => {
-          console.log('WebSocket opened, sending check-totp');
-          socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
-        }, { once: true });
+        pendingCode = codeParam;
+        ensureServerForCode(codeParam).catch(() => {});
       }
       document.getElementById('messageInput')?.focus();
       updateFeaturesUI();
@@ -1056,7 +1085,10 @@ async function startTotpRoom(serverGenerated) {
   totpEnabled = true;
   code = generateCode();
   pendingTotpSecret = { display: totpSecret, send: secretToSend };
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, token }));
+  sendJoin().catch(err => {
+    console.error(err);
+    showStatusMessage('Failed to create 2FA room.');
+  });
   document.getElementById('totpOptionsModal').classList.remove('active');
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
@@ -1077,8 +1109,12 @@ function showTotpSecretModal(secret) {
   new QRCode(qrCanvas, generateTotpUri(code, secret));
   document.getElementById('totpSecretModal').classList.add('active');
 }
-async function joinWithTotp(code, totpCode) {
-  socket.send(JSON.stringify({ type: 'join', code, clientId, username, totpCode, token }));
+async function joinWithTotp(roomCode, totpCode) {
+  if (roomCode) code = roomCode;
+  sendJoin({ totpCode }).catch(err => {
+    console.error(err);
+    showStatusMessage('Failed to join 2FA room.');
+  });
 }
 function startVoiceRecording() {
   if (!features.enableVoice) {

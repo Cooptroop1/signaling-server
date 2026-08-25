@@ -140,14 +140,26 @@ async function deriveSharedKey(privateKey, publicKey) {
     const sharedBits = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: publicKey },
       privateKey,
-      256
+      384
     );
-    const key = await window.crypto.subtle.importKey(
-      "raw",
+    const hkdfKey = await window.crypto.subtle.importKey(
+      'raw',
       sharedBits,
-      "AES-GCM",
+      { name: 'HKDF' },
       false,
-      ["encrypt", "decrypt"]
+      ['deriveKey']
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      {
+        name: 'HKDF',
+        hash: 'SHA-256',
+        salt: new Uint8Array(32),
+        info: new TextEncoder().encode('anonomoose-ecdh-wrap')
+      },
+      hkdfKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
     );
     console.log('deriveSharedKey successful');
     return key;

@@ -46,6 +46,13 @@ async function generateUserKeypair() {
     throw new Error('Failed to generate user keypair');
   }
 }
+async function generateSessionKeyPair() {
+  return window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    false,
+    ['deriveKey', 'deriveBits']
+  );
+}
 console.log('generateUserKeypair function loaded'); // Confirm it's defined
 function getCookie(name) {
   const value = `; ${document.cookie}`;
@@ -157,11 +164,7 @@ if (getCookie('clientId')) {
   helpText = document.getElementById('helpText');
   helpModal = document.getElementById('helpModal');
   (async () => {
-    keyPair = await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
-      false, // Non-extractable
-      ['deriveKey', 'deriveBits']
-    );
+    keyPair = await generateSessionKeyPair();
   })();
 }
 helpText.addEventListener('click', () => {
@@ -687,7 +690,11 @@ socket.onmessage = async (event) => {
         return;
       }
       try {
-        const importedInitiatorPublic = await importPublicKey(initiatorPublic);
+        const dhPubB64 = message.publicKey || initiatorPublic;
+        if (!dhPubB64) {
+          throw new Error('No initiator public key available for ratchet');
+        }
+        const importedInitiatorPublic = await importPublicKey(dhPubB64);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
         const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv);
         const payload = JSON.parse(decryptedStr);
@@ -696,7 +703,15 @@ socket.onmessage = async (event) => {
         messageSalt = base64ToArrayBuffer(payload.messageSalt);
         signingKey = await deriveSigningKey();
         keyVersion = message.version;
+        if (message.publicKey) {
+          initiatorPublic = message.publicKey;
+        }
         console.log(`New room master and salts received and set for PFS (version ${keyVersion}).`);
+        keyPair = await generateSessionKeyPair();
+        const rotatedPub = await exportPublicKey(keyPair.publicKey);
+        if (socket.readyState === WebSocket.OPEN && token) {
+          socket.send(JSON.stringify({ type: 'public-key', publicKey: rotatedPub, clientId, code, token }));
+        }
       } catch (error) {
         console.error('Error handling new-room-key:', error);
         showStatusMessage('Failed to update encryption key for PFS.');
@@ -995,6 +1010,8 @@ function refreshAccessToken() {
 async function triggerRatchet() {
   if (!isInitiator || connectedClients.size <= 1) return;
   keyVersion++;
+  const newKeyPair = await generateSessionKeyPair();
+  const newPub = await exportPublicKey(newKeyPair.publicKey);
   const newRoomMaster = window.crypto.getRandomValues(new Uint8Array(32));
   const newSigningSalt = window.crypto.getRandomValues(new Uint8Array(16));
   const newMessageSalt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -1010,7 +1027,7 @@ async function triggerRatchet() {
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const shared = await deriveSharedKey(newKeyPair.privateKey, importedPublic);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),
@@ -1018,7 +1035,7 @@ async function triggerRatchet() {
       };
       const payloadStr = JSON.stringify(payload);
       const { encrypted, iv } = await encryptRaw(shared, payloadStr);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion }));
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion, publicKey: newPub }));
       success++;
     } catch (error) {
       console.error(`Error sending new room key to ${cId}:`, error);
@@ -1026,21 +1043,22 @@ async function triggerRatchet() {
     }
   }
   if (success > 0) {
+    keyPair = newKeyPair;
     roomMaster = newRoomMaster;
     signingSalt = newSigningSalt;
     messageSalt = newMessageSalt;
     signingKey = await deriveSigningKey();
-    console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster and salts set.`);
+    console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster, salts, and DH key set.`);
     if (failures.length > 0) {
       console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
-      triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, keyVersion, 1);
+      triggerRatchetPartial(failures, newKeyPair, newPub, newRoomMaster, newSigningSalt, newMessageSalt, keyVersion, 1);
     }
   } else {
     console.warn(`PFS ratchet failed (version ${keyVersion}): No keys available to send to any clients.`);
     keyVersion--;
   }
 }
-async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
+async function triggerRatchetPartial(failures, newKeyPair, newPub, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount) {
   if (retryCount > 3) {
     console.warn(`Max retries (3) reached for partial ratchet (version ${version}). Giving up.`);
     return;
@@ -1059,7 +1077,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(keyPair.privateKey, importedPublic);
+      const shared = await deriveSharedKey(newKeyPair.privateKey, importedPublic);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),
@@ -1067,7 +1085,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
       };
       const payloadStr = JSON.stringify(payload);
       const { encrypted, iv } = await encryptRaw(shared, payloadStr);
-      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version }));
+      socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version, publicKey: newPub }));
       retrySuccess++;
     } catch (error) {
       console.error(`Retry ${retryCount} failed for ${cId}:`, error);
@@ -1079,7 +1097,7 @@ async function triggerRatchetPartial(failures, newRoomMaster, newSigningSalt, ne
   }
   if (newFailures.length > 0) {
     console.warn(`Still failures after retry ${retryCount}: ${newFailures.join(', ')}. Trying again...`);
-    triggerRatchetPartial(newFailures, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount + 1);
+    triggerRatchetPartial(newFailures, newKeyPair, newPub, newRoomMaster, newSigningSalt, newMessageSalt, version, retryCount + 1);
   } else {
     console.log(`All partial ratchet retries complete for version ${version}.`);
   }

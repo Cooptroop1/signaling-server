@@ -433,6 +433,12 @@ function validateMessage(data) {
       if (!data.code) {
         return { valid: false, error: 'new-room-key: code required' };
       }
+      if (typeof data.version !== 'number' || !Number.isInteger(data.version) || data.version < 1) {
+        return { valid: false, error: 'new-room-key: version required as positive integer' };
+      }
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+        return { valid: false, error: 'new-room-key: invalid publicKey format or length' };
+      }
       break;
     case 'join':
       if (!data.code) {
@@ -795,6 +801,7 @@ wss.on('connection', (ws, req) => {
         data.type === 'encrypted-room-key' && 'iv',
         data.type === 'new-room-key' && 'encrypted',
         data.type === 'new-room-key' && 'iv',
+        data.type === 'new-room-key' && 'publicKey',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'content',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'data',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
@@ -811,7 +818,7 @@ wss.on('connection', (ws, req) => {
           data[key] = validator.escape(validator.trim(data[key]));
         }
       });
-      if ((data.type === 'public-key' || data.type === 'encrypted-room-key') && data.publicKey) {
+      if ((data.type === 'public-key' || data.type === 'encrypted-room-key' || data.type === 'new-room-key') && data.publicKey) {
         if (!isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format or length' }));
           incrementFailure(clientIp, ws.userAgent);
@@ -907,7 +914,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
           return;
         }
-        const fwdMsg = { type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code };
+        const fwdMsg = { type: 'new-room-key', encrypted: data.encrypted, iv: data.iv, targetId: data.targetId, clientId: data.clientId, code: data.code, version: data.version, publicKey: data.publicKey };
         await forwardUnicast(data.code, data.targetId, fwdMsg, data.clientId);
         return;
       }

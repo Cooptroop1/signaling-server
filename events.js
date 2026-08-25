@@ -373,7 +373,7 @@ function handleSocketOpen() {
   if (codeParam && validateCode(codeParam)) {
     console.log('Detected code in URL, setting pendingCode for autoConnect after token');
     pendingCode = codeParam;
-  } else {
+  } else if (!code && !pendingJoin && !pinReconnect) {
     console.log('No valid code in URL, showing initial container');
     initialContainer.classList.remove('hidden');
     usernameContainer.classList.add('hidden');
@@ -616,6 +616,17 @@ async function handleSocketMessage(event) {
       usernames.set(clientId, username);
       connectedClients.add(clientId);
       if (identityPubB64) clientIdentityKeys.set(clientId, identityPubB64);
+      initialContainer.classList.add('hidden');
+      usernameContainer.classList.add('hidden');
+      connectContainer.classList.add('hidden');
+      chatContainer.classList.remove('hidden');
+      if (code) {
+        codeDisplayElement.textContent = 'Your code: ' + code;
+        codeDisplayElement.classList.remove('hidden');
+        copyCodeButton.classList.remove('hidden');
+      }
+      messages.classList.add('waiting');
+      statusElement.textContent = isInitiator ? 'Waiting for connection...' : 'Connecting...';
       initializeMaxClientsUI();
       updateFeaturesUI();
       if (isInitiator) {

@@ -835,8 +835,9 @@ wss.on('connection', (ws, req) => {
   const hashedUa = hashUa(userAgent);
   const compositeKey = hashedIp + ':' + hashedUa;
   if (ipBans.has(compositeKey) && ipBans.get(compositeKey).expiry > Date.now()) {
-    ws.send(JSON.stringify({ type: 'error', message: 'IP temporarily banned due to excessive failures. Try again later.' }));
-    return;
+    logger.warn(`IP had a ban flag but connect is still allowed: ${compositeKey}`);
+    ipBans.delete(compositeKey);
+    ipFailureCounts.delete(compositeKey);
   }
   let clientId, code, username;
   ws.on('message', async (message) => {
@@ -854,11 +855,18 @@ wss.on('connection', (ws, req) => {
       const validation = validateMessage(data);
       if (!validation.valid) {
         ws.send(JSON.stringify({ type: 'error', message: validation.error }));
-        incrementFailure(clientIp, ws.userAgent);
+        logger.warn('Message validation failed: %s', validation.error);
         return;
       }
       // Skip escaping for specific fields that should remain untouched
       const skipEscapeFields = [
+        'token',
+        'refreshToken',
+        'clientId',
+        'targetId',
+        'nonce',
+        'messageId',
+        'code',
         data.type === 'public-key' && 'publicKey',
         data.type === 'public-key' && 'identityPublic',
         data.type === 'encrypted-room-key' && 'publicKey',
@@ -893,9 +901,9 @@ wss.on('connection', (ws, req) => {
         }
       });
       if ((data.type === 'public-key' || data.type === 'encrypted-room-key' || data.type === 'new-room-key') && data.publicKey) {
-        if (!isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+        if (!isValidBase64(data.publicKey) || data.publicKey.length < 80 || data.publicKey.length > 400) {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid public key format or length' }));
-          incrementFailure(clientIp, ws.userAgent);
+          logger.warn('Rejected public key length %s', data.publicKey && data.publicKey.length);
           return;
         }
       }
@@ -931,7 +939,10 @@ wss.on('connection', (ws, req) => {
         const accessToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '10m' });
         const refreshToken = jwt.sign({ clientId }, JWT_SECRET, { expiresIn: '1h' });
         clientTokens.set(clientId, { accessToken, refreshToken });
-        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken }));
+        const turn = issueTurnCredentials(clientId);
+        ws.send(JSON.stringify({ type: 'connected', clientId, accessToken, refreshToken, ...turn }));
+        ipFailureCounts.delete(compositeKey);
+        ipBans.delete(compositeKey);
         markOnline(clientId);
         dbPool.query('UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE client_id = $1', [clientId]).catch(err => {
           logger.error('DB error on connect: %s %s', err.message, err.stack);
@@ -1693,9 +1704,9 @@ function incrementFailure(ip, ua) {
     logger.warn(`High failure rate for key ${key}: ${failure.count} failures`);
     auditLogger.info(`${new Date().toISOString()} - High failure anomaly for key ${key}: ${failure.count} failures`);
   }
-  if (failure.count >= 10) {
-    const banDurations = [5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
-    failure.banLevel = Math.min(failure.banLevel + 1, 2);
+  if (failure.count >= 40) {
+    const banDurations = [2 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000];
+    failure.banLevel = Math.min((failure.banLevel || 0) + 1, 2);
     const duration = banDurations[failure.banLevel];
     const expiry = Date.now() + duration;
     ipBans.set(key, { expiry, banLevel: failure.banLevel });

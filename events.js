@@ -421,6 +421,8 @@ async function handleSocketMessage(event) {
     if (message.type === 'connected') {
       token = message.accessToken;
       refreshToken = message.refreshToken;
+      if (message.turnUsername) turnUsername = message.turnUsername;
+      if (message.turnCredential) turnCredential = message.turnCredential;
       if (message.clientId) {
         clientId = message.clientId;
         try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
@@ -529,6 +531,9 @@ async function handleSocketMessage(event) {
           }, delay);
           refreshBackoff = Math.min(refreshBackoff * 2, 8000);
         }
+      } else if (message.message.includes('IP temporarily banned')) {
+        showStatusMessage('Too many failed tries. Wait a minute and refresh.');
+        return;
       } else if (message.message.includes('Rate limit exceeded')) {
         showStatusMessage('Rate limit exceeded. Waiting before retrying...');
         setTimeout(() => {
@@ -748,7 +753,7 @@ async function handleSocketMessage(event) {
           messageSalt: arrayBufferToBase64(messageSalt)
         };
         const payloadStr = JSON.stringify(payload);
-        const { encrypted, iv } = await encryptRaw(sharedKey, payloadStr, 'room-key|' + message.clientId + '|' + code);
+        const { encrypted, iv } = await encryptRaw(sharedKey, payloadStr, 'room-key|' + code);
         const myPublic = await exportPublicKey(keyPair.publicKey);
         await initIdentityKeys();
         socket.send(JSON.stringify({
@@ -776,7 +781,7 @@ async function handleSocketMessage(event) {
         }
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
         const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
-        const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv, 'room-key|' + clientId + '|' + code);
+        const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv, 'room-key|' + code);
         const payload = JSON.parse(decryptedStr);
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
         signingSalt = base64ToArrayBuffer(payload.signingSalt);
@@ -812,7 +817,7 @@ async function handleSocketMessage(event) {
         }
         const importedInitiatorPublic = await importPublicKey(dhPubB64);
         const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
-        const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv, 'new-room-key|' + clientId + '|' + message.version);
+        const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv, 'new-room-key|' + code + '|' + message.version);
         const payload = JSON.parse(decryptedStr);
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
         signingSalt = base64ToArrayBuffer(payload.signingSalt);
@@ -1202,7 +1207,7 @@ async function triggerRatchet() {
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const { encrypted, iv } = await encryptRaw(shared, payloadStr, 'new-room-key|' + cId + '|' + keyVersion);
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr, 'new-room-key|' + code + '|' + keyVersion);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version: keyVersion, publicKey: newPub }));
       success++;
     } catch (error) {
@@ -1252,7 +1257,7 @@ async function triggerRatchetPartial(failures, newKeyPair, newPub, newRoomMaster
         messageSalt: arrayBufferToBase64(newMessageSalt)
       };
       const payloadStr = JSON.stringify(payload);
-      const { encrypted, iv } = await encryptRaw(shared, payloadStr, 'new-room-key|' + cId + '|' + version);
+      const { encrypted, iv } = await encryptRaw(shared, payloadStr, 'new-room-key|' + code + '|' + version);
       socket.send(JSON.stringify({ type: 'new-room-key', encrypted, iv, targetId: cId, code, clientId, token, version, publicKey: newPub }));
       retrySuccess++;
     } catch (error) {

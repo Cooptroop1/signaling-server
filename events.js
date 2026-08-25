@@ -1058,39 +1058,7 @@ async function handleSocketMessage(event) {
       const loginSuccess = document.getElementById('loginSuccess');
       loginSuccess.textContent = `Logged in as ${username}`;
       if (message.offlineMessages && message.offlineMessages.length > 0) {
-        for (const msg of message.offlineMessages) {
-          if (msg.type === 'message' && msg.encrypted && msg.iv && msg.ephemeral_public) {
-            (async () => {
-              try {
-                const opened = await openOfflinePayload(msg);
-                let parsed;
-                try { parsed = JSON.parse(opened); } catch (e) { parsed = null; }
-                if (parsed && parsed.type === 'connection-request' && parsed.code) {
-                  showIncomingInvite(parsed.from || msg.from || 'Someone', parsed.code, msg.id);
-                  return;
-                }
-                const fromName = (parsed && parsed.from) || msg.from || 'Someone';
-                const displayText = (parsed && parsed.text) || opened;
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message-bubble other';
-                messageDiv.textContent = `Offline message from ${fromName}: ${displayText}`;
-                messages.prepend(messageDiv);
-                if (msg.id) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: msg.id, clientId, token }));
-              } catch (error) {
-                console.error('Failed to decrypt offline message');
-                showStatusMessage('Failed to decrypt an offline message.');
-              }
-            })();
-          } else if (msg.type === 'connection-request') {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'message-bubble other';
-            messageDiv.textContent = `Offline request from ${msg.from || 'Someone'}: encrypted invite could not be read on this device.`;
-            messages.prepend(messageDiv);
-          }
-          if (msg.id && msg.type !== 'message') {
-            socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: msg.id, clientId, token }));
-          }
-        }
+        deliverOfflineMessages(message.offlineMessages);
         showStatusMessage('Pending offline messages loaded.');
       }
       setTimeout(() => {
@@ -1109,41 +1077,7 @@ async function handleSocketMessage(event) {
     }
     if (message.type === 'user-found') {
       const searchedUsername = document.getElementById('searchUsernameInput').value.trim();
-      const searchResult = document.getElementById('searchResult');
-      searchResult.innerHTML = '';
-      searchResult.appendChild(document.createTextNode(`User ${searchedUsername} is ${message.status}. `));
-      if (message.public_key) {
-        userPublicKey = message.public_key;
-        if (message.identity_public_key) userPublicKeyIdentity = message.identity_public_key;
-        const inviteBtn = document.createElement('button');
-        inviteBtn.textContent = 'Start encrypted chat';
-        inviteBtn.onclick = () => {
-          inviteEncryptedChat(searchedUsername, message.public_key);
-          document.getElementById('searchUserModal').classList.remove('active');
-        };
-        searchResult.appendChild(inviteBtn);
-        const offlineMsgContainer = document.createElement('div');
-        const textarea = document.createElement('textarea');
-        textarea.placeholder = 'Send encrypted offline message...';
-        const sendBtn = document.createElement('button');
-        sendBtn.textContent = 'Send';
-        sendBtn.onclick = () => {
-          const msgText = textarea.value.trim();
-          if (msgText) {
-            sendOfflineMessage(searchedUsername, msgText).then(() => {
-              textarea.value = '';
-            }).catch(error => {
-              console.error('Offline send error:', error);
-              showStatusMessage('Failed to send offline message.');
-            });
-          }
-        };
-        offlineMsgContainer.appendChild(textarea);
-        offlineMsgContainer.appendChild(sendBtn);
-        searchResult.appendChild(offlineMsgContainer);
-      } else {
-        searchResult.appendChild(document.createTextNode('They have no encryption key on file, so mail cannot be sent.'));
-      }
+      showUserSearchResult(searchedUsername, message);
       return;
     }
     if (message.type === 'inbox-message' || message.type === 'incoming-connection') {
@@ -1161,7 +1095,7 @@ async function handleSocketMessage(event) {
           messageDiv.className = 'message-bubble other';
           messageDiv.textContent = `Message from ${fromName}: ${displayText}`;
           if (messages) messages.prepend(messageDiv);
-          if (message.id) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: message.id, clientId, token }));
+          if (message.id) confirmOfflineMessage(message.id);
         }).catch(() => {
           showStatusMessage('Could not decrypt an incoming message.');
         });
@@ -1458,11 +1392,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('searchUserButton').addEventListener('click', () => {
     document.getElementById('searchUserModal').classList.add('active');
   });
-  document.getElementById('searchSubmitButton').onclick = () => {
+  document.getElementById('searchSubmitButton').onclick = async () => {
     const name = document.getElementById('searchUsernameInput').value.trim();
-    if (name) {
-      socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
+    if (!name) return;
+    if (window.sbAuth && window.sbAuth.isLoggedIn()) {
+      try {
+        const found = await window.sbAuth.findUser(name);
+        if (!found) {
+          document.getElementById('searchError').textContent = 'User not found.';
+          setTimeout(() => { document.getElementById('searchError').textContent = ''; }, 5000);
+          return;
+        }
+        showUserSearchResult(name, found);
+      } catch (err) {
+        document.getElementById('searchError').textContent = 'Search failed.';
+      }
+      return;
     }
+    socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
   };
   document.getElementById('searchCancelButton').onclick = () => {
     document.getElementById('searchUserModal').classList.remove('active');
@@ -1924,6 +1871,87 @@ async function sendMessage(content) {
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
 }
+function confirmOfflineMessage(id) {
+  if (!id) return;
+  if (window.sbAuth && window.sbAuth.isLoggedIn()) {
+    window.sbAuth.confirmOffline(id).catch(() => {});
+    return;
+  }
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: id, clientId, token }));
+  }
+}
+
+function deliverOfflineMessages(list) {
+  if (!list || !list.length) return;
+  showStatusMessage('Pending offline messages loaded.');
+  for (const msg of list) {
+    if (msg.encrypted && msg.iv && msg.ephemeral_public) {
+      (async () => {
+        try {
+          const opened = await openOfflinePayload(msg);
+          let parsed;
+          try { parsed = JSON.parse(opened); } catch (e) { parsed = null; }
+          if (parsed && parsed.type === 'connection-request' && parsed.code) {
+            showIncomingInvite(parsed.from || msg.from || 'Someone', parsed.code, msg.id);
+            return;
+          }
+          const fromName = (parsed && parsed.from) || msg.from || 'Someone';
+          const displayText = (parsed && parsed.text) || opened;
+          const messageDiv = document.createElement('div');
+          messageDiv.className = 'message-bubble other';
+          messageDiv.textContent = `Offline message from ${fromName}: ${displayText}`;
+          if (messages) messages.prepend(messageDiv);
+          confirmOfflineMessage(msg.id);
+        } catch (error) {
+          console.error('Failed to decrypt offline message');
+          showStatusMessage('Failed to decrypt an offline message.');
+        }
+      })();
+    } else if (msg.id) {
+      confirmOfflineMessage(msg.id);
+    }
+  }
+}
+
+function showUserSearchResult(searchedUsername, message) {
+  const searchResult = document.getElementById('searchResult');
+  searchResult.innerHTML = '';
+  searchResult.appendChild(document.createTextNode(`User ${searchedUsername} is ${message.status}. `));
+  if (message.public_key) {
+    userPublicKey = message.public_key;
+    if (message.identity_public_key) userPublicKeyIdentity = message.identity_public_key;
+    const inviteBtn = document.createElement('button');
+    inviteBtn.textContent = 'Start encrypted chat';
+    inviteBtn.onclick = () => {
+      inviteEncryptedChat(searchedUsername, message.public_key);
+      document.getElementById('searchUserModal').classList.remove('active');
+    };
+    searchResult.appendChild(inviteBtn);
+    const offlineMsgContainer = document.createElement('div');
+    const textarea = document.createElement('textarea');
+    textarea.placeholder = 'Send encrypted offline message...';
+    const sendBtn = document.createElement('button');
+    sendBtn.textContent = 'Send';
+    sendBtn.onclick = () => {
+      const msgText = textarea.value.trim();
+      if (msgText) {
+        sendOfflineMessage(searchedUsername, msgText).then(() => {
+          textarea.value = '';
+        }).catch(error => {
+          console.error('Offline send error:', error);
+          showStatusMessage('Failed to send offline message.');
+        });
+      }
+    };
+    offlineMsgContainer.appendChild(textarea);
+    offlineMsgContainer.appendChild(sendBtn);
+    searchResult.appendChild(offlineMsgContainer);
+  } else {
+    searchResult.appendChild(document.createTextNode('They have no encryption key on file, so mail cannot be sent.'));
+  }
+}
+
 async function sendOfflineMessage(toUsername, messageText) {
   if (!toUsername || !messageText) throw new Error('Missing recipient or message');
   if (!userPublicKey) throw new Error('No public key for recipient');
@@ -1931,6 +1959,12 @@ async function sendOfflineMessage(toUsername, messageText) {
   const messageId = generateMessageId();
   const plaintext = JSON.stringify({ type: 'message', from: username, text: messageText, timestamp: Date.now() });
   const sealed = await sealOfflinePayload(userPublicKey, toUsername, plaintext, messageId);
+  sealed.messageId = messageId;
+  if (window.sbAuth && window.sbAuth.isLoggedIn()) {
+    await window.sbAuth.sendOffline(toUsername, sealed);
+    showStatusMessage('Encrypted offline message sent.');
+    return;
+  }
   socket.send(JSON.stringify({
     type: 'send-offline-message',
     to_username: toUsername,
@@ -1960,16 +1994,21 @@ async function inviteEncryptedChat(toUsername, theirPub) {
   try {
     await ensurePersistentKeys();
     const sealed = await sealOfflinePayload(theirPub, toUsername, plaintext, messageId);
-    socket.send(JSON.stringify({
-      type: 'send-offline-message',
-      to_username: toUsername,
-      encrypted: sealed.encrypted,
-      iv: sealed.iv,
-      ephemeral_public: sealed.ephemeral_public,
-      messageId,
-      clientId,
-      token
-    }));
+    sealed.messageId = messageId;
+    if (window.sbAuth && window.sbAuth.isLoggedIn()) {
+      await window.sbAuth.sendOffline(toUsername, sealed);
+    } else {
+      socket.send(JSON.stringify({
+        type: 'send-offline-message',
+        to_username: toUsername,
+        encrypted: sealed.encrypted,
+        iv: sealed.iv,
+        ephemeral_public: sealed.ephemeral_public,
+        messageId,
+        clientId,
+        token
+      }));
+    }
     await sendJoin();
     showStatusMessage('Encrypted invite sent. Waiting in a private room.');
   } catch (err) {
@@ -1985,14 +2024,14 @@ function showIncomingInvite(fromUser, inviteCode, dbId) {
   const deny = document.getElementById('denyButton');
   if (accept) {
     accept.onclick = () => {
-      if (dbId) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: dbId, clientId, token }));
+      if (dbId) confirmOfflineMessage(dbId);
       autoConnect(inviteCode);
       document.getElementById('incomingConnectionModal').classList.remove('active');
     };
   }
   if (deny) {
     deny.onclick = () => {
-      if (dbId) socket.send(JSON.stringify({ type: 'confirm-offline-message', messageId: dbId, clientId, token }));
+      if (dbId) confirmOfflineMessage(dbId);
       document.getElementById('incomingConnectionModal').classList.remove('active');
     };
   }

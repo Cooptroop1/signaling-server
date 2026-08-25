@@ -1834,6 +1834,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   document.getElementById('textCodeButton').onclick = () => openTextCodeModal();
   document.getElementById('textCodeCancelButton').onclick = () => closeTextCodeModal();
+  function openSmsComposer(href) {
+    const a = document.createElement('a');
+    a.href = href;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
   document.getElementById('textCodeSendButton').onclick = () => {
     const inviteCode = currentInviteCode();
     if (!inviteCode) {
@@ -1841,8 +1849,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     const number = normalisePhoneNumber(document.getElementById('textCodeNumberInput').value.trim());
-    window.location.href = smsHref(number, inviteSmsBody(inviteCode));
+    openSmsComposer(smsHref(number, inviteSmsBody(inviteCode)));
     closeTextCodeModal();
+    showStatusMessage('Messages opened. Stay in this tab so the room stays alive.');
   };
   document.getElementById('textCodeShareButton').onclick = async () => {
     const inviteCode = currentInviteCode();
@@ -1855,13 +1864,15 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         await navigator.share({ title: 'Anonomoose', text, url: 'https://www.anonomoose.com/?code=' + inviteCode });
         closeTextCodeModal();
+        showStatusMessage('Invite shared. Stay in this tab so they can join.');
         return;
       } catch (e) {
         if (e && e.name === 'AbortError') return;
       }
     }
-    window.location.href = smsHref('', text);
+    openSmsComposer(smsHref('', text));
     closeTextCodeModal();
+    showStatusMessage('Messages opened. Stay in this tab so the room stays alive.');
   };
   document.getElementById('button1').onclick = () => {
     if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
@@ -1908,7 +1919,8 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.error('cornerLogo element not found—check ID in index.html');
   }
-  window.addEventListener('pagehide', () => {
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return;
     burnTranscript();
     try {
       if (socket && socket.readyState === WebSocket.OPEN && code && token) {
@@ -1920,7 +1932,9 @@ document.addEventListener('DOMContentLoaded', () => {
     burnTranscript();
   });
   window.addEventListener('pageshow', (event) => {
-    if (event.persisted) burnTranscript();
+    if (event.persisted && typeof showStatusMessage === 'function') {
+      showStatusMessage('Still in the room. Chat was kept while you switched apps.');
+    }
   });
 });
 async function sendMessage(content) {

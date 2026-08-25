@@ -767,7 +767,6 @@
       <div class="text-center mt-4 footer-buttons legacy-auth">
         <button id="claimUsernameButton" class="text-blue-500 hover:underline hidden" aria-label="Claim a username">Claim Username</button>
         <button id="loginButton" class="text-blue-500 hover:underline" aria-label="Login with username">Login</button>
-        <button id="searchUserButton" class="text-blue-500 hover:underline" aria-label="Search for user">Search User</button>
         <button id="logoutButton" class="text-blue-500 hover:underline hidden" aria-label="Log out">Log Out</button>
         <button id="addUserText" class="text-blue-500 hover:underline hidden" aria-label="Set maximum users">Add User</button>
         <button id="helpText" class="text-blue-500 hover:underline" aria-label="View help information">Help</button>
@@ -784,6 +783,7 @@
         <!-- Logged in state (always visible when logged in) -->
         <div id="userInfo" class="hidden mt-4 text-center">
           <span id="userDisplayName" class="text-lg text-gray-700 block mb-3 font-medium"></span>
+          <button id="searchUserButton" class="text-blue-500 hover:underline text-lg mr-4" aria-label="Search for user">Search User</button>
           <button id="signOutBtn" class="text-red-500 hover:underline text-lg">Sign Out</button>
         </div>
       </div>
@@ -877,7 +877,7 @@
       <button id="loginCancelButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-    <div id="searchUserModal" class="totp-modal hidden legacy-auth" role="dialog" aria-label="Search User" tabindex="-1">
+    <div id="searchUserModal" class="totp-modal hidden" role="dialog" aria-label="Search User" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Search User</h2>
       <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username" maxlength="16">

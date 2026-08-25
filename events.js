@@ -1390,7 +1390,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('loginModal').classList.remove('active');
   };
   document.getElementById('searchUserButton').addEventListener('click', () => {
-    document.getElementById('searchUserModal').classList.add('active');
+    const modal = document.getElementById('searchUserModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
   });
   document.getElementById('searchSubmitButton').onclick = async () => {
     const name = document.getElementById('searchUsernameInput').value.trim();
@@ -1412,7 +1414,9 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.send(JSON.stringify({ type: 'find-user', username: name, from_username: username, clientId, token }));
   };
   document.getElementById('searchCancelButton').onclick = () => {
-    document.getElementById('searchUserModal').classList.remove('active');
+    const modal = document.getElementById('searchUserModal');
+    modal.classList.remove('active');
+    modal.classList.add('hidden');
   };
   document.getElementById('claimUsernameButton').addEventListener('click', () => {
     if (username && token) {

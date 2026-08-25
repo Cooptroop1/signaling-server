@@ -881,13 +881,13 @@ async function autoConnect(codeParam) {
   code = codeParam;
   updateUIState(false, true);
   codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
+  copyCodeButton?.classList.add('hidden');
   if (validateCode(codeParam)) {
     if (validateUsername(username)) {
       console.log('Valid username and code, joining chat');
       codeDisplayElement.textContent = `Using code: ${code}`;
       codeDisplayElement.classList.remove('hidden');
-      copyCodeButton.classList.remove('hidden');
+      copyCodeButton?.classList.remove('hidden');
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
       if (socket.readyState === WebSocket.OPEN) {
@@ -925,7 +925,7 @@ async function autoConnect(codeParam) {
         chatContainer.classList.remove('hidden');
         codeDisplayElement.textContent = `Using code: ${code}`;
         codeDisplayElement.classList.remove('hidden');
-        copyCodeButton.classList.remove('hidden');
+        copyCodeButton?.classList.remove('hidden');
         messages.classList.add('waiting');
         statusElement.textContent = 'Waiting for connection...';
         socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
@@ -1115,7 +1115,7 @@ async function startTotpRoom(serverGenerated) {
   document.getElementById('totpOptionsModal').classList.remove('active');
   codeDisplayElement.textContent = `Your code: ${code}`;
   codeDisplayElement.classList.remove('hidden');
-  copyCodeButton.classList.remove('hidden');
+  copyCodeButton?.classList.remove('hidden');
   usernameContainer.classList.add('hidden');
   connectContainer.classList.add('hidden');
   initialContainer.classList.add('hidden');

@@ -334,7 +334,7 @@ function logout() {
   connectContainer.classList.add('hidden');
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
+  copyCodeButton?.classList.add('hidden');
   newSessionButton.classList.add('hidden');
   maxClientsContainer.classList.add('hidden');
   inputContainer.classList.add('hidden');
@@ -361,7 +361,7 @@ function endChat() {
   connectContainer.classList.add('hidden');
   chatContainer.classList.add('hidden');
   codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
+  copyCodeButton?.classList.add('hidden');
   newSessionButton.classList.add('hidden');
   maxClientsContainer.classList.add('hidden');
   inputContainer.classList.add('hidden');
@@ -387,7 +387,7 @@ function handleSocketOpen() {
     connectContainer.classList.add('hidden');
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
+    copyCodeButton?.classList.add('hidden');
   }
   updateLogoutButtonVisibility();
 }
@@ -561,7 +561,7 @@ async function handleSocketMessage(event) {
         usernameContainer.classList.add('hidden');
         connectContainer.classList.add('hidden');
         codeDisplayElement.classList.add('hidden');
-        copyCodeButton.classList.add('hidden');
+        copyCodeButton?.classList.add('hidden');
         chatContainer.classList.add('hidden');
         newSessionButton.classList.add('hidden');
         maxClientsContainer.classList.add('hidden');
@@ -579,7 +579,7 @@ async function handleSocketMessage(event) {
         usernameContainer.classList.add('hidden');
         connectContainer.classList.add('hidden');
         codeDisplayElement.classList.add('hidden');
-        copyCodeButton.classList.add('hidden');
+        copyCodeButton?.classList.add('hidden');
         chatContainer.classList.add('hidden');
         newSessionButton.classList.add('hidden');
         maxClientsContainer.classList.add('hidden');
@@ -632,7 +632,7 @@ async function handleSocketMessage(event) {
       if (code) {
         codeDisplayElement.textContent = 'Your code: ' + code;
         codeDisplayElement.classList.remove('hidden');
-        copyCodeButton.classList.remove('hidden');
+        copyCodeButton?.classList.remove('hidden');
       }
       messages.classList.add('waiting');
       statusElement.textContent = isInitiator ? 'Waiting for connection...' : 'Connecting...';
@@ -1055,7 +1055,7 @@ async function handleSocketMessage(event) {
         connectContainer.classList.add('hidden');
         chatContainer.classList.add('hidden');
         codeDisplayElement.classList.add('hidden');
-        copyCodeButton.classList.add('hidden');
+        copyCodeButton?.classList.add('hidden');
         statusElement.textContent = 'Start a new chat or connect to an existing one';
         updateLogoutButtonVisibility();
       }, 5000);
@@ -1078,7 +1078,7 @@ async function handleSocketMessage(event) {
         connectContainer.classList.add('hidden');
         chatContainer.classList.add('hidden');
         codeDisplayElement.classList.add('hidden');
-        copyCodeButton.classList.add('hidden');
+        copyCodeButton?.classList.add('hidden');
         statusElement.textContent = 'Start a new chat or connect to an existing one';
         updateLogoutButtonVisibility();
       }, 5000);
@@ -1339,7 +1339,7 @@ function setupWaitingForJoin(codeParam) {
   connectContainer.classList.add('hidden');
   chatContainer.classList.remove('hidden');
   codeDisplayElement.classList.add('hidden');
-  copyCodeButton.classList.add('hidden');
+  copyCodeButton?.classList.add('hidden');
   messages.classList.add('waiting');
   statusElement.textContent = 'Waiting for connection...';
   // Prompt for username if not set
@@ -1550,7 +1550,7 @@ document.addEventListener('DOMContentLoaded', () => {
     connectContainer.classList.add('hidden');
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
+    copyCodeButton?.classList.add('hidden');
     statusElement.textContent = 'Enter a username to start a chat';
     document.getElementById('usernameInput').value = username || '';
     document.getElementById('usernameInput')?.focus();
@@ -1562,7 +1562,7 @@ document.addEventListener('DOMContentLoaded', () => {
     connectContainer.classList.remove('hidden');
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
+    copyCodeButton?.classList.add('hidden');
     statusElement.textContent = 'Enter a username and code to join a chat';
     document.getElementById('usernameConnectInput').value = username || '';
     document.getElementById('usernameConnectInput')?.focus();
@@ -1580,7 +1580,7 @@ document.addEventListener('DOMContentLoaded', () => {
     connectContainer.classList.remove('hidden');
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
+    copyCodeButton?.classList.add('hidden');
     statusElement.textContent = 'Enter a username and code to join a 2FA chat';
     document.getElementById('usernameConnectInput').value = username || '';
     document.getElementById('usernameConnectInput')?.focus();
@@ -1647,7 +1647,7 @@ document.addEventListener('DOMContentLoaded', () => {
     code = generateCode();
     codeDisplayElement.textContent = `Your code: ${code}`;
     codeDisplayElement.classList.remove('hidden');
-    copyCodeButton.classList.remove('hidden');
+    copyCodeButton?.classList.remove('hidden');
     usernameContainer.classList.add('hidden');
     connectContainer.classList.add('hidden');
     initialContainer.classList.add('hidden');
@@ -1679,7 +1679,7 @@ document.addEventListener('DOMContentLoaded', () => {
     code = inputCode;
     codeDisplayElement.textContent = `Using code: ${code}`;
     codeDisplayElement.classList.remove('hidden');
-    copyCodeButton.classList.remove('hidden');
+    copyCodeButton?.classList.remove('hidden');
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
     connectContainer.classList.add('hidden');
@@ -1699,7 +1699,7 @@ document.addEventListener('DOMContentLoaded', () => {
     connectContainer.classList.add('hidden');
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
+    copyCodeButton?.classList.add('hidden');
     statusElement.textContent = 'Start a new chat or connect to an existing one';
     messages.classList.remove('waiting');
     document.getElementById('startChatToggleButton')?.focus();
@@ -1712,7 +1712,7 @@ document.addEventListener('DOMContentLoaded', () => {
     usernameContainer.classList.add('hidden');
     chatContainer.classList.add('hidden');
     codeDisplayElement.classList.add('hidden');
-    copyCodeButton.classList.add('hidden');
+    copyCodeButton?.classList.add('hidden');
     statusElement.textContent = 'Start a new chat or connect to an existing one';
     messages.classList.remove('waiting');
     document.getElementById('connectToggleButton')?.focus();
@@ -1787,19 +1787,6 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('connectButton')?.click();
     }
   });
-  document.getElementById('copyCodeButton').onclick = () => {
-    const codeText = codeDisplayElement.textContent.replace('Your code: ', '').replace('Using code: ', '');
-    navigator.clipboard.writeText(codeText).then(() => {
-      copyCodeButton.textContent = 'Copied!';
-      setTimeout(() => {
-        copyCodeButton.textContent = 'Copy Code';
-      }, 2000);
-    }).catch(err => {
-      console.error('Failed to copy text: ', err);
-      showStatusMessage('Failed to copy code.');
-    });
-    copyCodeButton?.focus();
-  };
   function currentInviteCode() {
     if (code && validateCode(code)) return code;
     const shown = (codeDisplayElement && codeDisplayElement.textContent) || '';

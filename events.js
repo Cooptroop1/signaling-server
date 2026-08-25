@@ -695,7 +695,16 @@ async function handleSocketMessage(event) {
       if (voiceCallActive) {
         renegotiate(message.clientId);
       }
-      if (useRelay) {
+      if (features.enableRelay && message.totalClients >= 2) {
+        useRelay = true;
+        isConnected = true;
+        updatePrivacyStatus('Relay Mode (E2EE)');
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
+        statusElement.textContent = 'Connected';
+        updateUIState(true);
+        updateMaxClientsUI();
+      } else if (useRelay) {
         isConnected = true;
         inputContainer.classList.remove('hidden');
         messages.classList.remove('waiting');
@@ -722,8 +731,10 @@ async function handleSocketMessage(event) {
       updateMaxClientsUI();
       updateDots();
       if (totalClients <= 1) {
-        alert('The chat room is now empty. Returning to start page.');
-        endChat();
+        showStatusMessage('The other person left. Room is still open if they rejoin.');
+        inputContainer.classList.add('hidden');
+        messages.classList.add('waiting');
+        statusElement.textContent = 'Waiting for connection...';
       }
       if (totalClients <= 1) {
         inputContainer.classList.add('hidden');
@@ -751,6 +762,9 @@ async function handleSocketMessage(event) {
     }
     if (message.type === 'candidate' && message.clientId !== clientId) {
       console.log(`Received ICE candidate from ${message.clientId} for code: ${code}`);
+      if (!peerConnections.has(message.clientId) && features.enableP2P) {
+        startPeerConnection(message.clientId, !!isInitiator);
+      }
       handleCandidate(message.candidate, message.clientId);
       return;
     }

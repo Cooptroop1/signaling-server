@@ -435,10 +435,10 @@ function validateMessage(data) {
       }
       break;
     case 'public-key':
-      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 80 || data.publicKey.length > 400) {
         return { valid: false, error: 'public-key: invalid publicKey format or length' };
       }
-      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 128 || data.identityPublic.length > 132)) {
+      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 80 || data.identityPublic.length > 400)) {
         return { valid: false, error: 'public-key: invalid identityPublic format or length' };
       }
       if (!data.code) {
@@ -452,10 +452,10 @@ function validateMessage(data) {
       if (!data.iv || !isValidBase64(data.iv)) {
         return { valid: false, error: 'encrypted-room-key: invalid iv' };
       }
-      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 80 || data.publicKey.length > 400) {
         return { valid: false, error: 'encrypted-room-key: invalid publicKey format or length' };
       }
-      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 128 || data.identityPublic.length > 132)) {
+      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 80 || data.identityPublic.length > 400)) {
         return { valid: false, error: 'encrypted-room-key: invalid identityPublic format or length' };
       }
       if (!data.targetId || typeof data.targetId !== 'string') {
@@ -481,7 +481,7 @@ function validateMessage(data) {
       if (typeof data.version !== 'number' || !Number.isInteger(data.version) || data.version < 1) {
         return { valid: false, error: 'new-room-key: version required as positive integer' };
       }
-      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 128 || data.publicKey.length > 132) {
+      if (!data.publicKey || !isValidBase64(data.publicKey) || data.publicKey.length < 80 || data.publicKey.length > 400) {
         return { valid: false, error: 'new-room-key: invalid publicKey format or length' };
       }
       break;
@@ -495,7 +495,7 @@ function validateMessage(data) {
       if (data.totpCode && typeof data.totpCode !== 'string') {
         return { valid: false, error: 'join: totpCode must be a string if provided' };
       }
-      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 128 || data.identityPublic.length > 132)) {
+      if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 80 || data.identityPublic.length > 400)) {
         return { valid: false, error: 'join: invalid identityPublic format or length' };
       }
       break;

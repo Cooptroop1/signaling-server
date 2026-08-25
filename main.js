@@ -77,8 +77,16 @@ function checkAndUpdateRateLimit(rateObj, maxValue, isSize = false, addValue = 1
   rateObj[isSize ? 'totalSize' : 'count'] += addValue;
   return true;
 }
+function hasOpenDataChannel() {
+  let open = false;
+  dataChannels.forEach(dc => {
+    if (dc && dc.readyState === 'open') open = true;
+  });
+  return open;
+}
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
-  if (!username || (dataChannels.size === 0 && !useRelay)) {
+  const p2pOpen = hasOpenDataChannel();
+  if (!username || (!p2pOpen && !useRelay && !features.enableRelay)) {
     showStatusMessage('Error: Ensure you are connected and have a username.');
     return;
   }
@@ -178,7 +186,9 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     identityPublic: identityPubB64,
     identitySig
   };
-  if (useRelay) {
+  const sendViaP2p = p2pOpen;
+  if (sendViaP2p) useRelay = false;
+  if (!sendViaP2p) {
     payload.timestamp = jitteredTimestamp;
     if (type === 'message') {
       payload.encryptedContent = encrypted;
@@ -190,17 +200,15 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     }
   } else {
     payload.encryptedBlob = encrypted;
-    payload.timestamp = jitteredTimestamp; // Add for consistency, though P2P receive uses metadata.timestamp
+    payload.timestamp = jitteredTimestamp;
   }
   if (type === 'file') {
     payload.filename = file?.name;
   }
   const jsonString = JSON.stringify(payload);
   let sent = false;
-  if (useRelay) {
-    sendMessageViaSocket(type, payload, true);
-    sent = true;
-  } else if (dataChannels.size > 0) {
+  if (sendViaP2p) {
+    updatePrivacyStatus('E2E Encrypted (P2P)');
     dataChannels.forEach((dataChannel, id) => {
       if (dataChannel.readyState === 'open') {
         if (jsonString.length > CHUNK_SIZE) {
@@ -224,8 +232,13 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       if (!messageQueue.has('global')) messageQueue.set('global', []);
       messageQueue.get('global').push({ type, payload });
     }
+  } else if (features.enableRelay) {
+    useRelay = true;
+    updatePrivacyStatus('Relay Mode (E2EE)');
+    sendMessageViaSocket(type, payload, true);
+    sent = true;
   } else {
-    showStatusMessage('Error: No connections.');
+    showStatusMessage('Waiting for peer connection...');
     return;
   }
   if (sent) {
@@ -332,6 +345,11 @@ async function startPeerConnection(targetId, isOfferer) {
   peerConnection.onconnectionstatechange = () => {
     console.log(`Connection state for ${targetId}: ${peerConnection.connectionState}`);
     if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+      const dc = dataChannels.get(targetId);
+      if (dc && dc.readyState === 'open') {
+        console.log(`ICE blip with ${targetId} but data channel still open — keep P2P`);
+        return;
+      }
       console.log(`Connection failed with ${targetId}`);
       cleanupPeerConnection(targetId);
       const retryCount = retryCounts.get(targetId) || 0;
@@ -344,6 +362,7 @@ async function startPeerConnection(targetId, isOfferer) {
     } else if (peerConnection.connectionState === 'connected') {
       console.log(`WebRTC connection established with ${targetId} for code: ${code}`);
       isConnected = true;
+      useRelay = false;
       retryCounts.delete(targetId);
       clearTimeout(connectionTimeouts.get(targetId));
       updateMaxClientsUI();
@@ -390,6 +409,11 @@ async function startPeerConnection(targetId, isOfferer) {
     });
   }
   const timeout = setTimeout(() => {
+    if (hasOpenDataChannel()) {
+      useRelay = false;
+      updatePrivacyStatus('E2E Encrypted (P2P)');
+      return;
+    }
     if (!dataChannels.get(targetId) || dataChannels.get(targetId).readyState !== 'open') {
       console.log(`P2P failed with ${targetId}, checking relay availability`);
       if (features.enableRelay) {
@@ -410,6 +434,8 @@ function setupDataChannel(dataChannel, targetId) {
   dataChannel.onopen = () => {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
     isConnected = true;
+    useRelay = false;
+    updatePrivacyStatus('E2E Encrypted (P2P)');
     updateUIState(true, true);
     clearTimeout(connectionTimeouts.get(targetId));
     retryCounts.delete(targetId);

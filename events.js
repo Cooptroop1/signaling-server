@@ -695,16 +695,7 @@ async function handleSocketMessage(event) {
       if (voiceCallActive) {
         renegotiate(message.clientId);
       }
-      if (features.enableRelay && message.totalClients >= 2) {
-        useRelay = true;
-        isConnected = true;
-        updatePrivacyStatus('Relay Mode (E2EE)');
-        inputContainer.classList.remove('hidden');
-        messages.classList.remove('waiting');
-        statusElement.textContent = 'Connected';
-        updateUIState(true);
-        updateMaxClientsUI();
-      } else if (useRelay) {
+      if (useRelay) {
         isConnected = true;
         inputContainer.classList.remove('hidden');
         messages.classList.remove('waiting');
@@ -868,7 +859,7 @@ async function handleSocketMessage(event) {
       }
       return;
     }
-    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && useRelay) {
+    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && (message.encryptedContent || message.encryptedData)) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
       console.log('Received relay message:', message);

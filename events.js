@@ -2100,24 +2100,33 @@ async function inviteEncryptedChat(toUsername, theirPub) {
 }
 
 function showIncomingInvite(fromUser, inviteCode, dbId) {
+  const modal = document.getElementById('incomingConnectionModal');
   const label = document.getElementById('incomingMessage');
   if (label) label.textContent = `${fromUser} wants to connect. Accept?`;
   const accept = document.getElementById('acceptButton');
   const deny = document.getElementById('denyButton');
+  const closeInvite = () => {
+    if (!modal) return;
+    modal.classList.remove('active');
+    modal.classList.add('hidden');
+  };
   if (accept) {
     accept.onclick = () => {
       if (dbId) confirmOfflineMessage(dbId);
       autoConnect(inviteCode);
-      document.getElementById('incomingConnectionModal').classList.remove('active');
+      closeInvite();
     };
   }
   if (deny) {
     deny.onclick = () => {
       if (dbId) confirmOfflineMessage(dbId);
-      document.getElementById('incomingConnectionModal').classList.remove('active');
+      closeInvite();
     };
   }
-  document.getElementById('incomingConnectionModal')?.classList.add('active');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
+  }
 }
 
 function showRecoveryKitModal(kit) {

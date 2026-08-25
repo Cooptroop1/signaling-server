@@ -339,6 +339,7 @@ function logout() {
   document.getElementById('startChatToggleButton')?.focus();
 }
 function endChat() {
+  burnTranscript();
   if (socket.readyState === WebSocket.OPEN && code && token) {
     socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
   }
@@ -358,7 +359,6 @@ function endChat() {
   maxClientsContainer.classList.add('hidden');
   inputContainer.classList.add('hidden');
   messages.classList.remove('waiting');
-  messages.innerHTML = '';
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   updateLogoutButtonVisibility();
   showStatusMessage('Chat ended.');
@@ -406,10 +406,8 @@ function handleSocketClose() {
   }, delay);
 }
 async function handleSocketMessage(event) {
-  console.log('Received WebSocket message:', event.data);
   try {
     const message = JSON.parse(event.data);
-    console.log('Parsed message:', message);
     if (!message.type) {
       console.error('Invalid message: missing type');
       showStatusMessage('Invalid server message received.');
@@ -1349,32 +1347,14 @@ function setupLazyObserver() {
   }, { rootMargin: '100px' });
 }
 function loadRecentCodes() {
-  const recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
+  try { localStorage.removeItem('recentCodes'); } catch (e) {}
   const recentCodesList = document.getElementById('recentCodesList');
-  recentCodesList.innerHTML = '';
-  if (recentCodes.length > 0) {
-    document.getElementById('recentChats').classList.remove('hidden');
-    recentCodes.forEach(recentCode => {
-      const button = document.createElement('button');
-      button.textContent = recentCode;
-      button.onclick = () => autoConnect(recentCode);
-      recentCodesList.appendChild(button);
-    });
-  } else {
-    document.getElementById('recentChats').classList.add('hidden');
-  }
+  if (recentCodesList) recentCodesList.innerHTML = '';
+  const recentChats = document.getElementById('recentChats');
+  if (recentChats) recentChats.classList.add('hidden');
 }
 function updateRecentCodes(code) {
-  let recentCodes = JSON.parse(localStorage.getItem('recentCodes')) || [];
-  if (recentCodes.includes(code)) {
-    recentCodes = recentCodes.filter(c => c !== code);
-  }
-  recentCodes.unshift(code);
-  if (recentCodes.length > 5) {
-    recentCodes = recentCodes.slice(0, 5);
-  }
-  localStorage.setItem('recentCodes', JSON.stringify(recentCodes));
-  loadRecentCodes();
+  // Live rooms are ephemeral — do not persist codes across refresh.
 }
 function setupWaitingForJoin(codeParam) {
   console.log('Setting up waiting state for URL code:', codeParam);
@@ -1793,7 +1773,7 @@ document.addEventListener('DOMContentLoaded', () => {
     saveGrokKey();
   };
   document.getElementById('newSessionButton').onclick = () => {
-    console.log('New session button clicked');
+    burnChatSession();
     window.location.href = 'https://anonomoose.com';
   };
   document.getElementById('usernameInput').addEventListener('keydown', (event) => {
@@ -1846,19 +1826,46 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   const cornerLogo = document.getElementById('cornerLogo');
   if (cornerLogo) {
-    cornerLogo.addEventListener('click', () => {
-      document.getElementById('messages').innerHTML = '';
-      processedMessageIds.clear();
-      showStatusMessage('Chat history cleared locally.');
+    let mooseTapAt = 0;
+    const onMoose = () => {
+      const now = Date.now();
+      if (now - mooseTapAt < 700) {
+        mooseTapAt = 0;
+        burnChatSession();
+        showStatusMessage('Chat burned and room left. Nothing kept on this device.');
+        return;
+      }
+      mooseTapAt = now;
+      burnTranscript();
+      showStatusMessage('Messages burned. Tap the moose again to leave the room.');
+    };
+    cornerLogo.addEventListener('click', onMoose);
+    cornerLogo.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      mooseTapAt = 0;
+      burnChatSession();
+      showStatusMessage('Chat burned and room left. Nothing kept on this device.');
     });
   } else {
     console.error('cornerLogo element not found—check ID in index.html');
   }
+  window.addEventListener('pagehide', () => {
+    burnTranscript();
+    try {
+      if (socket && socket.readyState === WebSocket.OPEN && code && token) {
+        socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
+      }
+    } catch (e) {}
+  });
+  window.addEventListener('beforeunload', () => {
+    burnTranscript();
+  });
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) burnTranscript();
+  });
 });
 async function sendMessage(content) {
-  console.log('sendMessage called with content:', content);
   if (!content) {
-    console.log('No content, returning');
     return;
   }
   if (grokBotActive && content.startsWith('/grok ')) {

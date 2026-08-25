@@ -182,7 +182,6 @@ async function encryptRaw(key, data) {
       encrypted: arrayBufferToBase64(encrypted),
       iv: arrayBufferToBase64(iv)
     };
-    console.log('encryptRaw result:', result);
     return result;
   } catch (error) {
     console.error('encryptRaw error:', error);

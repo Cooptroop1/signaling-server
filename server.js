@@ -189,6 +189,7 @@ server.on('request', (req, res) => {
     return;
   }
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Cache-Control', 'no-store');
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
   let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
   fs.readFile(filePath, (err, data) => {
@@ -809,10 +810,10 @@ wss.on('connection', (ws, req) => {
     try {
       const data = JSON.parse(message);
       const loggedData = { ...data };
-      if (loggedData.secret) {
-        loggedData.secret = '[REDACTED]';
-      }
-      logger.info('Received: %o', loggedData);
+      ['secret', 'password', 'token', 'refreshToken', 'encrypted', 'encryptedKey', 'encryptedContent', 'encryptedData', 'encryptedBlob', 'content', 'data', 'signature', 'identitySig', 'iv', 'publicKey', 'ephemeral_public', 'public_key', 'identityPublic', 'identity_public', 'identity_public_key'].forEach(k => {
+        if (loggedData[k]) loggedData[k] = '[REDACTED]';
+      });
+      logger.info('Received: %s', loggedData.type || 'unknown');
       const validation = validateMessage(data);
       if (!validation.valid) {
         ws.send(JSON.stringify({ type: 'error', message: validation.error }));

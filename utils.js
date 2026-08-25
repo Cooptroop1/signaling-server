@@ -230,3 +230,71 @@ function generateTotpSecret() {
 function generateTotpUri(roomCode, secret) {
   return otplib.authenticator.keyuri(roomCode, 'Anonomoose Chat', secret);
 }
+
+function burnBlobUrls(root) {
+  if (!root || !root.querySelectorAll) return;
+  root.querySelectorAll('img, audio, video, a, source').forEach(el => {
+    ['src', 'href'].forEach(attr => {
+      const v = el.getAttribute && el.getAttribute(attr);
+      if (v && v.indexOf('blob:') === 0) {
+        try { URL.revokeObjectURL(v); } catch (e) {}
+      }
+    });
+    if (el.dataset && el.dataset.src && String(el.dataset.src).indexOf('blob:') === 0) {
+      try { URL.revokeObjectURL(el.dataset.src); } catch (e) {}
+    }
+    try {
+      el.removeAttribute('src');
+      if (el.tagName === 'A') el.removeAttribute('href');
+      if (el.dataset) delete el.dataset.src;
+    } catch (e) {}
+  });
+}
+
+function burnTranscript() {
+  const messagesEl = document.getElementById('messages');
+  if (messagesEl) {
+    burnBlobUrls(messagesEl);
+    messagesEl.textContent = '';
+    messagesEl.innerHTML = '';
+  }
+  ['imageModal', 'audioModal'].forEach(id => {
+    const modal = document.getElementById(id);
+    if (modal) {
+      burnBlobUrls(modal);
+      modal.innerHTML = '';
+      modal.classList.remove('active');
+    }
+  });
+  const input = document.getElementById('messageInput');
+  if (input) {
+    input.value = '';
+    input.style.height = '2.5rem';
+  }
+  const fileInput = document.getElementById('imageInput');
+  if (fileInput) fileInput.value = '';
+  const totpDisplay = document.getElementById('totpSecretDisplay');
+  if (totpDisplay) totpDisplay.textContent = '';
+  if (typeof processedMessageIds !== 'undefined' && processedMessageIds && processedMessageIds.clear) processedMessageIds.clear();
+  if (typeof processedNonces !== 'undefined' && processedNonces && processedNonces.clear) processedNonces.clear();
+  if (typeof messageQueue !== 'undefined' && messageQueue && messageQueue.clear) messageQueue.clear();
+  if (typeof chunkBuffers !== 'undefined' && chunkBuffers && chunkBuffers.clear) chunkBuffers.clear();
+  if (typeof signalingQueue !== 'undefined' && signalingQueue && signalingQueue.clear) signalingQueue.clear();
+  if (typeof voiceChunks !== 'undefined' && Array.isArray(voiceChunks)) voiceChunks.length = 0;
+  if (typeof mediaRecorder !== 'undefined' && mediaRecorder && mediaRecorder.state === 'recording') {
+    try { mediaRecorder.stop(); } catch (e) {}
+  }
+  try { sessionStorage.removeItem('anonomoose-draft'); } catch (e) {}
+}
+
+function burnChatSession() {
+  burnTranscript();
+  try { localStorage.removeItem('recentCodes'); } catch (e) {}
+  const recent = document.getElementById('recentCodesList');
+  if (recent) recent.innerHTML = '';
+  const recentWrap = document.getElementById('recentChats');
+  if (recentWrap) recentWrap.classList.add('hidden');
+  if (typeof endChat === 'function') {
+    try { endChat(); } catch (e) {}
+  }
+}

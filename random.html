@@ -61,79 +61,70 @@
  <a href="index.html" class="text-blue-500 hover:underline">Back to Chat</a>
  </div>
  </div>
- <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
- <script src="utils.js"></script>
  <script>
- const socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+ const hosts = [
+   'wss://signaling-server-zc6m.onrender.com',
+   'wss://signaling-server-1.onrender.com'
+ ];
+ let hostIndex = 0;
+ let socket;
  const statusElement = document.getElementById('status');
  const randomCodesElement = document.getElementById('randomCodes');
  let clientId = window.__CLIENT_ID__ || (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 11));
  let token = '';
  try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
 
- socket.onopen = () => {
- console.log('Random page WebSocket opened');
- socket.send(JSON.stringify({ type: 'connect', clientId }));
- };
-
- socket.onmessage = (event) => {
- try {
- const message = JSON.parse(event.data);
- if (message.type === 'connected') {
- token = message.accessToken;
- socket.send(JSON.stringify({ type: 'get-random-codes', clientId, token }));
- } else if (message.type === 'random-codes') {
- randomCodesElement.innerHTML = '';
- if (message.codes.length === 0) {
- statusElement.textContent = 'No random chats available.';
- randomCodesElement.classList.add('hidden');
- } else {
- statusElement.textContent = 'Select a chat to join:';
- randomCodesElement.classList.remove('hidden');
- message.codes.forEach(code => {
- const codeDiv = document.createElement('div');
- codeDiv.className = 'code-item';
- codeDiv.textContent = code;
- codeDiv.onclick = () => {
- window.location.href = `index.html?code=${code}`;
- };
- randomCodesElement.appendChild(codeDiv);
- });
+ function bindSocket(url) {
+   socket = new WebSocket(url);
+   socket.onopen = () => {
+     console.log('Random page WebSocket opened', url);
+     socket.send(JSON.stringify({ type: 'connect', clientId }));
+   };
+   socket.onmessage = (event) => {
+     try {
+       const message = JSON.parse(event.data);
+       if (message.type === 'connected') {
+         token = message.accessToken;
+         socket.send(JSON.stringify({ type: 'get-random-codes', clientId, token }));
+       } else if (message.type === 'random-codes') {
+         randomCodesElement.innerHTML = '';
+         if (!message.codes || message.codes.length === 0) {
+           statusElement.textContent = 'No random chats waiting. On the main app: Start Chat, then Send Code, and stay in the room.';
+           randomCodesElement.classList.add('hidden');
+         } else {
+           statusElement.textContent = 'Tap a code to join. The host must still be in that chat.';
+           randomCodesElement.classList.remove('hidden');
+           message.codes.forEach(code => {
+             const codeDiv = document.createElement('div');
+             codeDiv.className = 'code-item';
+             codeDiv.textContent = code;
+             codeDiv.onclick = () => {
+               window.location.href = 'https://www.anonomoose.com/?code=' + encodeURIComponent(code);
+             };
+             randomCodesElement.appendChild(codeDiv);
+           });
+         }
+       } else if (message.type === 'error') {
+         statusElement.textContent = message.message;
+       }
+     } catch (error) {
+       console.error('Error parsing message:', error);
+       statusElement.textContent = 'Error loading random chats.';
+     }
+   };
+   socket.onerror = () => {
+     statusElement.textContent = 'Connection error. Please refresh.';
+   };
+   socket.onclose = () => {
+     if (hostIndex < hosts.length - 1) {
+       hostIndex += 1;
+       bindSocket(hosts[hostIndex]);
+       return;
+     }
+     statusElement.textContent = 'Disconnected. Please refresh.';
+   };
  }
- } else if (message.type === 'error') {
- statusElement.textContent = message.message;
- }
- } catch (error) {
- console.error('Error parsing message:', error);
- statusElement.textContent = 'Error loading random chats.';
- }
- };
-
- socket.onerror = () => {
- statusElement.textContent = 'Connection error. Please refresh.';
- };
-
- socket.onclose = () => {
- statusElement.textContent = 'Disconnected. Please refresh.';
- };
-
- // Reuse utils.js functions
- function getCookie(name) {
- const value = `; ${document.cookie}`;
- const parts = value.split(`; ${name}=`);
- if (parts.length === 2) return parts.pop().split(';').shift();
- return null;
- }
-
- function setCookie(name, value, days) {
- let expires = '';
- if (days) {
- const date = new Date();
- date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
- expires = '; expires=' + date.toUTCString();
- }
- document.cookie = name + '=' + (value || '') + expires + '; path=/; Secure; HttpOnly; SameSite=Strict';
- }
+ bindSocket(hosts[0]);
  </script>
 </body>
 </html>

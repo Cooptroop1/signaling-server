@@ -1866,18 +1866,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('button1').onclick = () => {
     if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
       socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
-      showStatusMessage(`Sent code ${code} to random board.`);
+      showStatusMessage(`Posted ${code} to the random board. Stay in this chat — others tap it to join you.`);
       codeSentToRandom = true;
-      button2.disabled = true;
     } else {
-      showStatusMessage('Cannot send: Not initiator, no code, no token, or room is full.');
+      showStatusMessage('Start a chat first, then tap Send Code. Stay on this page.');
     }
     document.getElementById('button1')?.focus();
   };
   document.getElementById('button2').onclick = () => {
-    if (!button2.disabled) {
-      window.location.href = 'https://anonomoose.com/random.html';
-    }
+    window.open('https://www.anonomoose.com/random.html', '_blank', 'noopener');
     document.getElementById('button2')?.focus();
   };
   const cornerLogo = document.getElementById('cornerLogo');

@@ -220,11 +220,11 @@ server.on('request', (req, res) => {
       contentType = 'text/html';
       const nonce = crypto.randomBytes(16).toString('base64');
       let updatedCSP = "default-src 'self'; " +
-        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com 'nonce-${nonce}'; ` +
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co; " +
+        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://static.cloudflareinsights.com https://www.anonomoose.com; " +
         "object-src 'none'; base-uri 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
@@ -1686,6 +1686,9 @@ wss.on('connection', (ws, req) => {
         await redisClient.del(roomKey);
         await redisClient.del(`${roomKey}:totp`);
         await redisClient.del(`${roomKey}:nonces`);
+        await redisClient.sRem('randomCodes', code);
+        randomCodes.delete(code);
+        broadcastRandomCodes();
         if (subscribed.has(code)) {
           await subClient.unsubscribe(`room:${code}`);
           subscribed.delete(code);

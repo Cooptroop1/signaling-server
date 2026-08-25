@@ -525,6 +525,10 @@ function processMessageQueue(targetId) {
   }
 }
 async function processReceivedMessage(data, targetId) {
+  if (data.type === 'room-wipe') {
+    applyRemoteRoomWipe();
+    return;
+  }
   if (data.type === 'voice-call-start') {
     if (!voiceCallActive) {
       startVoiceCall();

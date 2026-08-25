@@ -635,6 +635,7 @@ function validateMessage(data) {
     case 'ping':
     case 'pong':
     case 'get-turn-credentials':
+    case 'room-wipe':
       break;
     case 'set-totp':
       if (!data.code) {
@@ -1449,6 +1450,17 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'get-turn-credentials') {
         const turn = issueTurnCredentials(data.clientId || ws.clientId);
         ws.send(JSON.stringify({ type: 'turn-credentials', ...turn }));
+        return;
+      }
+      if (data.type === 'room-wipe') {
+        if (!ws.code || ws.code !== data.code) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Not in that room.' }));
+          return;
+        }
+        pubClient.publish(`room:${data.code}`, JSON.stringify({
+          type: 'broadcast',
+          clientMessage: JSON.stringify({ type: 'room-wipe', clientId: data.clientId })
+        }));
         return;
       }
       if (data.type === 'ping') {

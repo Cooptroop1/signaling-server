@@ -298,3 +298,29 @@ function burnChatSession() {
     try { endChat(); } catch (e) {}
   }
 }
+
+let remoteWipeInFlight = false;
+
+function applyRemoteRoomWipe() {
+  if (remoteWipeInFlight) return;
+  remoteWipeInFlight = true;
+  showStatusMessage('The other person burned the chat on every device in this room.');
+  burnChatSession();
+  setTimeout(() => { remoteWipeInFlight = false; }, 2000);
+}
+
+function requestRoomWipe() {
+  const payload = JSON.stringify({ type: 'room-wipe' });
+  if (typeof dataChannels !== 'undefined' && dataChannels) {
+    dataChannels.forEach((dc) => {
+      if (dc && dc.readyState === 'open') {
+        try { dc.send(payload); } catch (e) {}
+      }
+    });
+  }
+  try {
+    if (typeof socket !== 'undefined' && socket && socket.readyState === WebSocket.OPEN && code && token) {
+      socket.send(JSON.stringify({ type: 'room-wipe', code, clientId, token }));
+    }
+  } catch (e) {}
+}

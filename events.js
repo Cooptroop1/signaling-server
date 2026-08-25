@@ -704,6 +704,10 @@ async function handleSocketMessage(event) {
       updateRecentCodes(code);
       return;
     }
+    if (message.type === 'room-wipe') {
+      if (message.clientId !== clientId) applyRemoteRoomWipe();
+      return;
+    }
     if (message.type === 'client-disconnected') {
       totalClients = message.totalClients;
       console.log(`Client ${message.clientId} disconnected from code: ${code}, total: ${totalClients}`);
@@ -1815,20 +1819,26 @@ document.addEventListener('DOMContentLoaded', () => {
       const now = Date.now();
       if (now - mooseTapAt < 700) {
         mooseTapAt = 0;
-        burnChatSession();
-        showStatusMessage('Chat burned and room left. Nothing kept on this device.');
+        requestRoomWipe();
+        setTimeout(() => {
+          burnChatSession();
+          showStatusMessage('Chat burned on this phone and anyone still in the room.');
+        }, 300);
         return;
       }
       mooseTapAt = now;
       burnTranscript();
-      showStatusMessage('Messages burned. Tap the moose again to leave the room.');
+      showStatusMessage('Messages burned here. Tap the moose again to wipe everyone in the room and leave.');
     };
     cornerLogo.addEventListener('click', onMoose);
     cornerLogo.addEventListener('dblclick', (e) => {
       e.preventDefault();
       mooseTapAt = 0;
-      burnChatSession();
-      showStatusMessage('Chat burned and room left. Nothing kept on this device.');
+      requestRoomWipe();
+      setTimeout(() => {
+        burnChatSession();
+        showStatusMessage('Chat burned on this phone and anyone still in the room.');
+      }, 300);
     });
   } else {
     console.error('cornerLogo element not found—check ID in index.html');

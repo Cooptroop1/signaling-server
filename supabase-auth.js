@@ -82,14 +82,23 @@ async function publishKeys() {
     } else if (typeof generateUserKeypair === 'function') {
       pub = await generateUserKeypair();
     }
-    const patch = {
+    const uid = currentUser().id;
+    const keysPatch = {
       last_active: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    if (typeof clientId !== 'undefined' && clientId) patch.client_id = clientId;
-    if (pub) patch.public_key = pub;
-    if (typeof identityPubB64 !== 'undefined' && identityPubB64) patch.identity_public_key = identityPubB64;
-    const { error } = await sb.from('profiles').update(patch).eq('id', currentUser().id);
+    if (pub) keysPatch.public_key = pub;
+    if (typeof identityPubB64 !== 'undefined' && identityPubB64) keysPatch.identity_public_key = identityPubB64;
+    if (typeof clientId !== 'undefined' && clientId) keysPatch.client_id = clientId;
+    let { error } = await sb.from('profiles').update(keysPatch).eq('id', uid);
+    if (error && /client_id|schema cache/i.test(error.message || '')) {
+      delete keysPatch.client_id;
+      ({ error } = await sb.from('profiles').update(keysPatch).eq('id', uid));
+    }
+    if (error && /identity_public_key|schema cache/i.test(error.message || '')) {
+      delete keysPatch.identity_public_key;
+      ({ error } = await sb.from('profiles').update(keysPatch).eq('id', uid));
+    }
     if (error) console.warn('profile key publish', error.message);
   } catch (err) {
     console.warn('publishKeys', err);

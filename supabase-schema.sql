@@ -12,6 +12,12 @@ create table if not exists public.profiles (
   constraint display_name_format check (display_name ~ '^[a-zA-Z0-9]{1,16}$')
 );
 
+alter table public.profiles add column if not exists public_key text;
+alter table public.profiles add column if not exists identity_public_key text;
+alter table public.profiles add column if not exists client_id text;
+alter table public.profiles add column if not exists last_active timestamptz default now();
+alter table public.profiles add column if not exists updated_at timestamptz default now();
+
 create table if not exists public.offline_messages (
   id uuid primary key default gen_random_uuid(),
   to_user_id uuid not null references public.profiles (id) on delete cascade,

@@ -1795,6 +1795,74 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     copyCodeButton?.focus();
   };
+  function currentInviteCode() {
+    if (code && validateCode(code)) return code;
+    const shown = (codeDisplayElement && codeDisplayElement.textContent) || '';
+    const extracted = shown.replace('Your code: ', '').replace('Using code: ', '').trim();
+    return validateCode(extracted) ? extracted : '';
+  }
+  function inviteSmsBody(inviteCode) {
+    return 'Join private chat: https://www.anonomoose.com/?code=' + inviteCode;
+  }
+  function normalisePhoneNumber(raw) {
+    let n = (raw || '').replace(/[^\d+]/g, '');
+    if (n.startsWith('00')) n = '+' + n.slice(2);
+    if (n.startsWith('0') && n.length === 11) n = '+44' + n.slice(1);
+    return n;
+  }
+  function smsHref(number, body) {
+    const encoded = encodeURIComponent(body);
+    const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!number) return ios ? ('sms:&body=' + encoded) : ('sms:?body=' + encoded);
+    return ios ? ('sms:' + number + '&body=' + encoded) : ('sms:' + number + '?body=' + encoded);
+  }
+  function openTextCodeModal() {
+    const inviteCode = currentInviteCode();
+    if (!inviteCode) {
+      showStatusMessage('Start a chat first so there is a code to send.');
+      return;
+    }
+    const modal = document.getElementById('textCodeModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
+    document.getElementById('textCodeNumberInput')?.focus();
+  }
+  function closeTextCodeModal() {
+    const modal = document.getElementById('textCodeModal');
+    modal.classList.remove('active');
+    modal.classList.add('hidden');
+  }
+  document.getElementById('textCodeButton').onclick = () => openTextCodeModal();
+  document.getElementById('textCodeCancelButton').onclick = () => closeTextCodeModal();
+  document.getElementById('textCodeSendButton').onclick = () => {
+    const inviteCode = currentInviteCode();
+    if (!inviteCode) {
+      showStatusMessage('No code to send.');
+      return;
+    }
+    const number = normalisePhoneNumber(document.getElementById('textCodeNumberInput').value.trim());
+    window.location.href = smsHref(number, inviteSmsBody(inviteCode));
+    closeTextCodeModal();
+  };
+  document.getElementById('textCodeShareButton').onclick = async () => {
+    const inviteCode = currentInviteCode();
+    if (!inviteCode) {
+      showStatusMessage('No code to send.');
+      return;
+    }
+    const text = inviteSmsBody(inviteCode);
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Anonomoose', text, url: 'https://www.anonomoose.com/?code=' + inviteCode });
+        closeTextCodeModal();
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return;
+      }
+    }
+    window.location.href = smsHref('', text);
+    closeTextCodeModal();
+  };
   document.getElementById('button1').onclick = () => {
     if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
       socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));

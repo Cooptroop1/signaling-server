@@ -9,27 +9,18 @@ function concatBytes(a, b) {
 }
 
 async function generateRatchetDhPair() {
-  try {
-    return await window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'X25519' },
-      false,
-      ['deriveBits']
-    );
-  } catch (e) {
-    return window.crypto.subtle.generateKey(
-      { name: 'ECDH', namedCurve: 'P-384' },
-      false,
-      ['deriveKey', 'deriveBits']
-    );
-  }
+  return window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    false,
+    ['deriveKey', 'deriveBits']
+  );
 }
 
 async function dhBytes(privateKey, publicKey) {
-  const curve = (privateKey.algorithm && privateKey.algorithm.namedCurve) || 'P-384';
   const bits = await window.crypto.subtle.deriveBits(
     { name: 'ECDH', public: publicKey },
     privateKey,
-    curve === 'X25519' ? 256 : 384
+    384
   );
   return new Uint8Array(bits);
 }

@@ -172,51 +172,31 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   let rawData = metadata + (dataToSend || sanitizedContent);
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' ');
+  const messageKey = await deriveMessageKey();
+  const { encrypted, iv } = await encryptRaw(messageKey, rawData, String(messageId) + '|' + String(nonce));
+  const toSign = rawData + nonce;
+  const signature = await signMessage(signingKey, toSign);
+  await initIdentityKeys();
+  const identitySig = await signIdentitySignature(identityKeyPair.privateKey, String(messageId) + String(nonce) + String(encrypted));
+  const payload = {
+    messageId,
+    nonce,
+    iv,
+    signature,
+    identityPublic: identityPubB64,
+    identitySig,
+    timestamp: jitteredTimestamp
+  };
+  if (type === 'file') payload.filename = file?.name;
   const sendViaP2p = p2pOpen;
   if (sendViaP2p) useRelay = false;
   let sent = false;
   if (sendViaP2p) {
     updatePrivacyStatus('E2E Encrypted (P2P)');
-    for (const [id, dataChannel] of dataChannels) {
-      if (!dataChannel || dataChannel.readyState !== 'open') continue;
-      let jsonString;
-      const theirEcdh = (typeof clientEcdhKeys !== 'undefined' && clientEcdhKeys.get(id)) || null;
-      try {
-        if (theirEcdh && typeof drEncrypt === 'function') {
-          const packet = await drEncrypt('peer:' + id, theirEcdh, rawData, messageId);
-          jsonString = JSON.stringify({
-            type: 'dr',
-            messageId,
-            timestamp: jitteredTimestamp,
-            nonce,
-            header: packet.header,
-            body: packet.body,
-            identityPublic: packet.identityPublic,
-            identityEcdh: packet.identityEcdh,
-            identitySig: packet.identitySig
-          });
-        }
-      } catch (e) {
-        console.warn('DR encrypt failed, using room key', e);
-      }
-      if (!jsonString) {
-        const messageKey = await deriveMessageKey();
-        const { encrypted, iv } = await encryptRaw(messageKey, rawData, String(messageId) + '|' + String(nonce));
-        const toSign = rawData + nonce;
-        const signature = await signMessage(signingKey, toSign);
-        await initIdentityKeys();
-        const identitySig = await signIdentitySignature(identityKeyPair.privateKey, String(messageId) + String(nonce) + String(encrypted));
-        jsonString = JSON.stringify({
-          messageId,
-          nonce,
-          iv,
-          signature,
-          identityPublic: identityPubB64,
-          identitySig,
-          encryptedBlob: encrypted,
-          timestamp: jitteredTimestamp
-        });
-      }
+    payload.encryptedBlob = encrypted;
+    const jsonString = JSON.stringify(payload);
+    dataChannels.forEach((dataChannel, id) => {
+      if (!dataChannel || dataChannel.readyState !== 'open') return;
       if (jsonString.length > CHUNK_SIZE) {
         const chunkId = generateMessageId();
         const chunks = [];
@@ -230,46 +210,20 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
         dataChannel.send(jsonString);
       }
       sent = true;
-    }
+    });
     if (!sent) {
       console.log('No open data channels, queuing message for retry');
       if (!messageQueue.has('global')) messageQueue.set('global', []);
-      messageQueue.get('global').push({ type, payload: { rawData, messageId, nonce, timestamp: jitteredTimestamp, filename: file?.name } });
+      messageQueue.get('global').push({ type, payload });
     }
   } else if (features.enableRelay) {
     useRelay = true;
     updatePrivacyStatus('Relay Mode (E2EE)');
-    let payload;
-    try {
-      const sk = await skEncrypt(rawData, messageId);
-      payload = {
-        messageId,
-        nonce,
-        timestamp: jitteredTimestamp,
-        iv: sk.iv,
-        encryptedContent: sk.encrypted,
-        sk: sk.sk
-      };
-    } catch (e) {
-      const messageKey = await deriveMessageKey();
-      const { encrypted, iv } = await encryptRaw(messageKey, rawData, String(messageId) + '|' + String(nonce));
-      const toSign = rawData + nonce;
-      const signature = await signMessage(signingKey, toSign);
-      await initIdentityKeys();
-      const identitySig = await signIdentitySignature(identityKeyPair.privateKey, String(messageId) + String(nonce) + String(encrypted));
-      payload = {
-        messageId,
-        nonce,
-        iv,
-        signature,
-        identityPublic: identityPubB64,
-        identitySig,
-        timestamp: jitteredTimestamp
-      };
-      if (type === 'message') payload.encryptedContent = encrypted;
-      else payload.encryptedData = encrypted;
+    if (type === 'message') payload.encryptedContent = encrypted;
+    else {
+      payload.encryptedData = encrypted;
+      if (file?.type) payload.mime = file.type;
     }
-    if (type === 'file') payload.filename = file?.name;
     sendMessageViaSocket(type, payload, true);
     sent = true;
   } else {

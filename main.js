@@ -972,7 +972,7 @@ async function autoConnect(codeParam) {
           return;
         }
         username = usernameInput;
-        localStorage.setItem('username', username);
+        rememberUsername(username);
         usernameContainer.classList.add('hidden');
         chatContainer.classList.remove('hidden');
         codeDisplayElement.textContent = `Using code: ${code}`;
@@ -1284,7 +1284,7 @@ async function startTotpRoom(serverGenerated) {
     return;
   }
   username = usernameInput;
-  localStorage.setItem('username', username);
+  rememberUsername(username);
   let totpSecret;
   if (serverGenerated) {
     totpSecret = generateTotpSecret();

@@ -316,7 +316,8 @@ lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code
 socket = new WebSocket(lastWsUrl);
 bindSocketHandlers(socket);
 console.log(`WebSocket created, connected to ${lastWsUrl}`);
-  username = (sessionStorage.getItem('username') || localStorage.getItem('username') || '').trim();
+  username = (sessionStorage.getItem('username') || localStorage.getItem('username') || new URLSearchParams(window.location.search).get('name') || '').trim();
+  if (username) rememberUsername(username);
   globalMessageRate.startTime = performance.now();
   statusElement = document.getElementById('status');
   codeDisplayElement = document.getElementById('codeDisplay');
@@ -1162,7 +1163,7 @@ async function handleSocketMessage(event) {
     }
     if (message.type === 'login-success') {
       username = message.username;
-      sessionStorage.setItem('username', username);
+      rememberUsername(username);
       const loginSuccess = document.getElementById('loginSuccess');
       loginSuccess.textContent = `Logged in as ${username}`;
       if (message.offlineMessages && message.offlineMessages.length > 0) {
@@ -1449,7 +1450,7 @@ function setupWaitingForJoin(codeParam) {
       showStatusMessage('Invalid username. Using "Guest".');
       username = 'Guest';
     }
-    sessionStorage.setItem('username', username);
+    rememberUsername(username);
   }
   // Set pendingCode to trigger autoConnect after token
   pendingCode = codeParam;
@@ -1699,7 +1700,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       username = usernameInput;
-      sessionStorage.setItem('username', username);
+      rememberUsername(username);
       code = inputCode;
       showTotpInputModal(code);
     };
@@ -1742,7 +1743,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     username = usernameInput;
-    sessionStorage.setItem('username', username);
+    rememberUsername(username);
     const p2pBox = document.getElementById('p2pOnlyCheck');
     p2pOnly = !!(p2pBox && p2pBox.checked);
     code = generateCode();
@@ -1775,7 +1776,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     username = usernameInput;
-    sessionStorage.setItem('username', username);
+    rememberUsername(username);
     const p2pBoxConnect = document.getElementById('p2pOnlyCheckConnect');
     p2pOnly = !!(p2pBoxConnect && p2pBoxConnect.checked);
     code = inputCode;
@@ -2224,7 +2225,7 @@ async function inviteEncryptedChat(toUsername, theirPub) {
   if (!validateUsername(username)) {
     username = prompt('Enter your username (1-16 alphanumeric characters):')?.trim() || 'Guest';
     if (!validateUsername(username)) username = 'Guest';
-    sessionStorage.setItem('username', username);
+    rememberUsername(username);
   }
   code = generateCode();
   const messageId = generateMessageId();

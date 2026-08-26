@@ -98,7 +98,12 @@
              codeDiv.className = 'code-item';
              codeDiv.textContent = code;
              codeDiv.onclick = () => {
-               window.location.href = 'https://www.anonomoose.com/?code=' + encodeURIComponent(code);
+               let join = 'https://www.anonomoose.com/?code=' + encodeURIComponent(code);
+               try {
+                 const n = localStorage.getItem('username') || sessionStorage.getItem('username') || '';
+                 if (n) join += '&name=' + encodeURIComponent(n);
+               } catch (e) {}
+               window.location.href = join;
              };
              randomCodesElement.appendChild(codeDiv);
            });

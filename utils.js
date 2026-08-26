@@ -152,6 +152,12 @@ function updateMaxClientsUI() {
   }
 }
 
+function rememberUsername(name) {
+  username = String(name || '').trim();
+  try { sessionStorage.setItem('username', username); } catch (e) {}
+  try { localStorage.setItem('username', username); } catch (e) {}
+}
+
 function inviteAnotherSeat() {
   if (!isInitiator) {
     showStatusMessage('Only the person who started the room can add someone.');

@@ -171,8 +171,12 @@
       }
       h1.text-3xl {
         font-size: 1.5rem;
-        margin-bottom: 0.75rem;
-        padding: 0.25rem 0;
+        margin-bottom: 0.25rem;
+        padding: 0.25rem 0 0;
+      }
+      .tagline {
+        font-size: 0.8rem;
+        margin: 0.15rem 0 0.9rem;
       }
       #status, #privacyStatus {
         font-size: 0.875rem;
@@ -870,11 +874,13 @@
     #privacyStatus.mode-relay { color: #d97706; font-weight: 700; }
     #privacyStatus.mode-wait { color: #6b7280; }
     .tagline {
+      display: block;
       text-align: center;
       color: #4b5563;
       font-size: 0.95rem;
-      margin: -1.5rem 0 1.5rem;
-      line-height: 1.4;
+      margin: 0.4rem 0 1.25rem;
+      line-height: 1.45;
+      position: static;
     }
     .p2p-only-row {
       display: flex;
@@ -891,7 +897,7 @@
   <div id="cornerLogo" class="corner-logo" title="Tap to burn messages on this phone. Tap twice to wipe everyone in the room and leave." aria-label="Burn chat"></div>
   <div class="flex w-full max-w-xl mx-auto">
     <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
-      <h1 class="text-3xl font-bold mb-2 text-center text-gray-800">Anonomoose Chat</h1>
+      <h1 class="text-3xl font-bold mb-1 text-center text-gray-800">Anonomoose Chat</h1>
       <p class="tagline">Encrypted chat. Code to join. Moose to burn. Nothing saved.</p>
       <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Start a new chat or connect to an existing one</div>
       <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">Phone to phone · encrypted</div>

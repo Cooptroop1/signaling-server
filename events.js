@@ -137,6 +137,113 @@ let clientEcdhKeys = new Map();
 let clientIdentityKeys = new Map();
 let identityKeyPair = null;
 let identityPubB64 = null;
+let attachSheetOpen = false;
+let lastAttachAction = 'photos';
+let voiceCancelled = false;
+function closeAttachSheet() {
+  attachSheetOpen = false;
+  document.getElementById('attachSheet')?.classList.remove('open');
+  updateAttachButton();
+}
+function updateAttachButton() {
+  const btn = document.getElementById('imageButton');
+  if (!btn) return;
+  const recording = !!(typeof mediaRecorder !== 'undefined' && mediaRecorder && mediaRecorder.state === 'recording');
+  btn.classList.toggle('open', attachSheetOpen);
+  btn.classList.toggle('recording', recording);
+  btn.classList.toggle('active', !!voiceCallActive && !recording);
+  if (recording) {
+    btn.textContent = '■';
+    btn.title = 'Stop recording';
+  } else if (attachSheetOpen) {
+    btn.textContent = '+';
+    btn.title = 'Close';
+  } else if (voiceCallActive) {
+    btn.textContent = '📞';
+    btn.title = 'End call';
+  } else {
+    const icons = { photos: '📷', camera: '📸', file: '📄', voice: '🎤', call: '📞', grok: '🤖' };
+    btn.textContent = icons[lastAttachAction] || '📷';
+    btn.title = 'Attach photo, file, voice or call';
+  }
+  const callTile = document.getElementById('voiceCallButton');
+  if (callTile) {
+    callTile.classList.toggle('active', !!voiceCallActive);
+    const label = callTile.querySelector('.attach-label');
+    if (label) label.textContent = voiceCallActive ? 'Hang up' : 'Call';
+  }
+}
+function updateComposerSend() {
+  const send = document.getElementById('sendButton');
+  const input = document.getElementById('messageInput');
+  if (!send || !input) return;
+  const hasText = input.value.trim().length > 0;
+  const voiceOk = !features || features.enableVoice !== false;
+  if (hasText) {
+    send.textContent = '➤';
+    send.dataset.mode = 'send';
+    send.title = 'Send';
+    send.setAttribute('aria-label', 'Send message');
+    send.classList.remove('mic-mode');
+  } else if (voiceOk) {
+    send.textContent = '🎤';
+    send.dataset.mode = 'voice';
+    send.title = 'Record voice note';
+    send.setAttribute('aria-label', 'Record voice note');
+    send.classList.add('mic-mode');
+  } else {
+    send.textContent = '➤';
+    send.dataset.mode = 'send';
+    send.title = 'Send';
+    send.classList.remove('mic-mode');
+  }
+}
+function setComposerRecording(on) {
+  document.getElementById('composerRow')?.classList.toggle('hidden', on);
+  document.getElementById('recordBar')?.classList.toggle('hidden', !on);
+  attachSheetOpen = false;
+  document.getElementById('attachSheet')?.classList.remove('open');
+  updateAttachButton();
+}
+function toggleAttachSheet() {
+  if (typeof mediaRecorder !== 'undefined' && mediaRecorder && mediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+    return;
+  }
+  if (voiceCallActive) {
+    toggleVoiceCall();
+    updateAttachButton();
+    return;
+  }
+  attachSheetOpen = !attachSheetOpen;
+  document.getElementById('attachSheet')?.classList.toggle('open', attachSheetOpen);
+  updateAttachButton();
+}
+function pickAttachFile(inputId) {
+  closeAttachSheet();
+  const el = document.getElementById(inputId);
+  if (el) {
+    el.value = '';
+    el.click();
+  }
+}
+function handleAttachAction(action) {
+  lastAttachAction = action || lastAttachAction;
+  if (action === 'photos') pickAttachFile('imageInput');
+  else if (action === 'camera') pickAttachFile('cameraInput');
+  else if (action === 'file') pickAttachFile('fileInput');
+  else if (action === 'voice') {
+    closeAttachSheet();
+    startVoiceRecording();
+  } else if (action === 'call') {
+    closeAttachSheet();
+    toggleVoiceCall();
+  } else if (action === 'grok') {
+    closeAttachSheet();
+    toggleGrokBot();
+  }
+  updateAttachButton();
+}
 let initiatorPublic;
 let persistentEcdhPrivate = null;
 let userPublicKey;
@@ -1749,8 +1856,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const message = messageInput.value.trim();
     if (message) {
       sendMessage(message);
+      updateComposerSend();
+      return;
     }
+    if (features.enableVoice) startVoiceRecording();
   };
+  document.getElementById('messageInput').addEventListener('input', updateComposerSend);
   document.getElementById('messageInput').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -1758,20 +1869,45 @@ document.addEventListener('DOMContentLoaded', () => {
       const message = messageInput.value.trim();
       if (message) {
         sendMessage(message);
+        updateComposerSend();
       }
     }
   });
-  document.getElementById('imageButton').onclick = () => {
-    document.getElementById('imageInput')?.click();
+  document.getElementById('imageButton').onclick = (event) => {
+    event.stopPropagation();
+    toggleAttachSheet();
   };
-  document.getElementById('imageInput').onchange = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      const type = file.type.startsWith('image/') ? 'image' : 'file';
+  ['imageInput', 'cameraInput', 'fileInput'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.onchange = (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const type = file.type && file.type.startsWith('image/') ? 'image' : 'file';
       sendMedia(file, type);
       event.target.value = '';
-    }
-  };
+    };
+  });
+  document.querySelectorAll('#attachSheet .attach-tile').forEach(tile => {
+    tile.onclick = (event) => {
+      event.stopPropagation();
+      handleAttachAction(tile.getAttribute('data-action'));
+    };
+  });
+  const voiceSendBtn = document.getElementById('voiceSendButton');
+  if (voiceSendBtn) {
+    voiceSendBtn.onclick = () => {
+      voiceCancelled = false;
+      stopVoiceRecording();
+    };
+  }
+  const voiceCancelBtn = document.getElementById('voiceCancelButton');
+  if (voiceCancelBtn) {
+    voiceCancelBtn.onclick = () => {
+      voiceCancelled = true;
+      stopVoiceRecording();
+    };
+  }
   document.getElementById('voiceButton').onclick = () => {
     if (!mediaRecorder || mediaRecorder.state !== 'recording') {
       startVoiceRecording();
@@ -1779,14 +1915,15 @@ document.addEventListener('DOMContentLoaded', () => {
       stopVoiceRecording();
     }
   };
-  document.getElementById('voiceCallButton').onclick = () => {
-    toggleVoiceCall();
-  };
+  document.addEventListener('click', (event) => {
+    if (!attachSheetOpen) return;
+    const box = document.querySelector('.input-container');
+    if (box && !box.contains(event.target)) closeAttachSheet();
+  });
+  updateComposerSend();
+  updateAttachButton();
   document.getElementById('audioOutputButton').onclick = () => {
     toggleAudioOutput();
-  };
-  document.getElementById('grokButton').onclick = () => {
-    toggleGrokBot();
   };
   document.getElementById('saveGrokKey').onclick = () => {
     saveGrokKey();
@@ -1977,6 +2114,7 @@ async function sendMessage(content) {
   messageInput.value = '';
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
+  if (typeof updateComposerSend === 'function') updateComposerSend();
 }
 function confirmOfflineMessage(id) {
   if (!id) return;

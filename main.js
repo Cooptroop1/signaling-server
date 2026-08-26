@@ -259,20 +259,19 @@ async function sendMessage(content) {
   messageInput.value = '';
   messageInput.style.height = '2.5rem';
   messageInput?.focus();
+  if (typeof updateComposerSend === 'function') updateComposerSend();
 }
 async function sendMedia(file, type) {
   const validTypes = {
-    image: ['image/jpeg', 'image/png'],
-    voice: ['audio/webm', 'audio/ogg', 'audio/mp4']
+    image: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif'],
+    voice: ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/aac']
   };
-  if (type !== 'file' && !validTypes[type]?.includes(file.type)) {
-    showStatusMessage(`Error: Invalid file type for ${type}.`);
+  if (type === 'image' && file.type && !file.type.startsWith('image/') && !validTypes.image.includes(file.type)) {
+    showStatusMessage('That file is not a photo.');
     return;
   }
   await prepareAndSendMessage({ type, file });
-  document.getElementById(`${type}Button`)?.focus();
 }
-// Rest of the code remains the same...
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
   if (!features.enableP2P) {
@@ -793,7 +792,8 @@ async function startVoiceCall() {
     callBtn.title = 'End call';
     callBtn.setAttribute('aria-label', 'End call');
     document.getElementById('audioOutputButton')?.classList.remove('hidden');
-    updateSpeakerButton();
+    if (typeof updateAttachButton === 'function') updateAttachButton();
+    if (typeof updateSpeakerButton === 'function') updateSpeakerButton();
     showStatusMessage('Call started. Use speaker if you cannot hear them.');
   } catch (error) {
     console.error('Error starting voice call:', error);
@@ -823,6 +823,7 @@ function stopVoiceCall() {
     callBtn.setAttribute('aria-label', 'Start voice call');
   }
   document.getElementById('audioOutputButton')?.classList.add('hidden');
+  if (typeof updateAttachButton === 'function') updateAttachButton();
   showStatusMessage('Call ended.');
 }
 async function renegotiate(targetId) {
@@ -989,25 +990,20 @@ async function autoConnect(codeParam) {
   }
 }
 function updateFeaturesUI() {
-  const imageButton = document.getElementById('imageButton');
-  const voiceButton = document.getElementById('voiceButton');
+  const attachPhotos = document.getElementById('attachPhotos');
+  const attachCamera = document.getElementById('attachCamera');
+  const attachFile = document.getElementById('attachFile');
+  const attachVoice = document.getElementById('attachVoice');
   const voiceCallButton = document.getElementById('voiceCallButton');
   const audioOutputButton = document.getElementById('audioOutputButton');
   const grokButton = document.getElementById('grokButton');
-  if (imageButton) {
-    imageButton.classList.toggle('hidden', !features.enableImages);
-    imageButton.title = features.enableImages ? 'Send Image/File' : 'Images/Files disabled by admin';
-  }
-  if (voiceButton) {
-    voiceButton.classList.toggle('hidden', !features.enableVoice);
-    voiceButton.title = features.enableVoice ? 'Record Voice' : 'Voice disabled by admin';
-  }
+  if (attachPhotos) attachPhotos.classList.toggle('hidden', !features.enableImages);
+  if (attachCamera) attachCamera.classList.toggle('hidden', !features.enableImages);
+  if (attachFile) attachFile.classList.toggle('hidden', !features.enableImages);
+  if (attachVoice) attachVoice.classList.toggle('hidden', !features.enableVoice);
   if (voiceCallButton) {
     voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
-    voiceCallButton.title = features.enableVoiceCalls ? 'Start Voice Call' : 'Voice calls disabled by admin';
-    if (!features.enableVoiceCalls && voiceCallActive) {
-      stopVoiceCall();
-    }
+    if (!features.enableVoiceCalls && voiceCallActive) stopVoiceCall();
   }
   if (audioOutputButton) {
     const shouldHide = !voiceCallActive;
@@ -1115,12 +1111,8 @@ function toggleAudioOutput() {
   showStatusMessage(audioOutputMode === 'speaker' ? 'Speaker on' : 'Quieter output');
 }
 function resetVoiceRecordingUi() {
-  const btn = document.getElementById('voiceButton');
+  if (typeof setComposerRecording === 'function') setComposerRecording(false);
   const timer = document.getElementById('voiceTimer');
-  if (btn) {
-    btn.classList.remove('recording');
-    btn.title = 'Record voice note';
-  }
   if (timer) {
     timer.style.display = 'none';
     timer.textContent = '';
@@ -1130,6 +1122,8 @@ function resetVoiceRecordingUi() {
     clearInterval(voiceTimerInterval);
     voiceTimerInterval = null;
   }
+  if (typeof updateAttachButton === 'function') updateAttachButton();
+  if (typeof updateComposerSend === 'function') updateComposerSend();
 }
 function cleanupVoiceRecorder() {
   try {
@@ -1201,6 +1195,11 @@ function startVoiceRecording() {
       mediaRecorder = null;
       voiceChunks = [];
       resetVoiceRecordingUi();
+      if (typeof voiceCancelled !== 'undefined' && voiceCancelled) {
+        voiceCancelled = false;
+        voiceStopping = false;
+        return;
+      }
       const audioBlob = new Blob(chunks, { type: type.split(';')[0] });
       if (audioBlob.size < 200) {
         showStatusMessage('Voice note was empty. Hold the mic a second longer.');
@@ -1224,17 +1223,17 @@ function startVoiceRecording() {
         return;
       }
     }
-    const btn = document.getElementById('voiceButton');
-    btn.classList.add('recording');
-    btn.title = 'Stop recording';
+    if (typeof setComposerRecording === 'function') setComposerRecording(true);
     const timer = document.getElementById('voiceTimer');
-    timer.style.display = 'flex';
-    timer.classList.add('active');
+    if (timer) {
+      timer.style.display = 'flex';
+      timer.classList.add('active');
+      timer.textContent = '0:00';
+    }
     let time = 0;
-    timer.textContent = '0:00';
     voiceTimerInterval = setInterval(() => {
       time++;
-      timer.textContent = formatVoiceTime(time);
+      if (timer) timer.textContent = formatVoiceTime(time);
       if (time >= 30) stopVoiceRecording();
     }, 1000);
   }).catch(error => {

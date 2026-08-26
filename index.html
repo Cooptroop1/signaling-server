@@ -310,12 +310,9 @@
       width: 100%;
     }
     .button-row-below {
-      display: flex;
-      justify-content: flex-start;
-      gap: 0.75rem;
-      width: 100%;
+      display: none;
     }
-    #imageButton, #voiceButton, #voiceCallButton, #audioOutputButton, #grokButton, #sendButton {
+    #imageButton, #audioOutputButton, #sendButton, .composer-btn {
       width: 2.5rem;
       height: 2.5rem;
       border-radius: 50%;
@@ -326,38 +323,145 @@
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       transition: all 0.2s ease;
       flex-shrink: 0;
+      border: none;
     }
-    #imageButton, #voiceButton, #voiceCallButton, #audioOutputButton, #grokButton {
+    #imageButton, #audioOutputButton {
       background-color: #10b981;
       color: white;
     }
-    #imageButton:hover, #voiceButton:hover, #voiceCallButton:hover, #audioOutputButton:hover, #grokButton:hover {
+    #imageButton:hover, #audioOutputButton:hover {
       background-color: #059669;
     }
-    #voiceButton.recording, #voiceCallButton.active, #audioOutputButton.speaker, #grokButton.active {
+    #audioOutputButton.speaker, #imageButton.recording, #imageButton.active {
       background-color: #ef4444;
     }
-    #voiceButton.recording {
+    #imageButton.open {
+      background-color: #6b7280;
+      transform: rotate(45deg);
+    }
+    #voiceButton.recording, #imageButton.recording {
       animation: pulse-rec 1.2s ease-in-out infinite;
     }
     @keyframes pulse-rec {
       0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
       50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
     }
+    .attach-sheet {
+      display: none;
+      width: 100%;
+      background: #f4f4f5;
+      border-radius: 1.1rem;
+      padding: 0.9rem 0.55rem 0.7rem;
+      margin-bottom: 0.2rem;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.12);
+    }
+    .attach-sheet.open {
+      display: block;
+    }
+    .attach-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.85rem 0.4rem;
+    }
+    .attach-tile {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0;
+      cursor: pointer;
+    }
+    .attach-tile.hidden {
+      display: none;
+    }
+    .attach-icon {
+      width: 3.15rem;
+      height: 3.15rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      color: #fff;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.16);
+    }
+    .attach-icon.photos { background: #7c4dff; }
+    .attach-icon.camera { background: #e91e63; }
+    .attach-icon.file { background: #5c6bc0; }
+    .attach-icon.voice { background: #ff6f00; }
+    .attach-icon.call { background: #25d366; }
+    .attach-tile.active .attach-icon.call { background: #ef4444; }
+    .attach-icon.speaker { background: #546e7a; }
+    .attach-icon.grok { background: #111827; }
+    .attach-label {
+      font-size: 0.72rem;
+      color: #444;
+      font-weight: 600;
+    }
+    .record-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      width: 100%;
+      background: #fff1f2;
+      border-radius: 1.25rem;
+      padding: 0.35rem 0.45rem;
+      box-sizing: border-box;
+    }
+    .record-bar.hidden {
+      display: none;
+    }
+    .rec-dot {
+      width: 0.7rem;
+      height: 0.7rem;
+      background: #ef4444;
+      border-radius: 50%;
+      animation: pulse-rec 1s ease-in-out infinite;
+      flex-shrink: 0;
+    }
     #voiceTimer {
-      font-size: 0.8rem;
-      color: white;
-      background-color: #ef4444;
-      padding: 0.35rem 0.7rem;
-      border-radius: 999px;
+      font-size: 0.9rem;
+      color: #b91c1c;
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
       display: none;
       align-items: center;
       justify-content: center;
       font-variant-numeric: tabular-nums;
-      min-width: 3rem;
+      min-width: 2.6rem;
+      font-weight: 700;
     }
     #voiceTimer.active {
       display: flex;
+    }
+    .record-hint {
+      flex: 1;
+      color: #9f1239;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    #voiceCancelButton, #voiceSendButton {
+      border: none;
+      border-radius: 999px;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #voiceCancelButton {
+      background: #e5e7eb;
+      color: #374151;
+    }
+    #voiceSendButton {
+      background: #25d366;
+      color: white;
+    }
+    #sendButton.mic-mode {
+      background-color: #10b981;
     }
     .voice-note {
       display: flex;
@@ -572,7 +676,7 @@
       border-radius: 0.5rem;
       border: 1px solid #ccc;
     }
-    #imageInput {
+    #imageInput, #cameraInput, #fileInput {
       display: none;
     }
     #maxClientsContainer {
@@ -802,20 +906,52 @@
           <div id="userDots" class="user-dots"></div>
         </div>
         <div class="input-container hidden">
-          <div class="text-row">
-            <button id="imageButton" title="Send Image/File" aria-label="Send image or file">📷</button>
+          <div id="attachSheet" class="attach-sheet" role="menu" aria-label="Attach">
+            <div class="attach-grid">
+              <button type="button" class="attach-tile" id="attachPhotos" data-action="photos">
+                <span class="attach-icon photos">🖼️</span>
+                <span class="attach-label">Photos</span>
+              </button>
+              <button type="button" class="attach-tile" id="attachCamera" data-action="camera">
+                <span class="attach-icon camera">📸</span>
+                <span class="attach-label">Camera</span>
+              </button>
+              <button type="button" class="attach-tile" id="attachFile" data-action="file">
+                <span class="attach-icon file">📄</span>
+                <span class="attach-label">File</span>
+              </button>
+              <button type="button" class="attach-tile" id="attachVoice" data-action="voice">
+                <span class="attach-icon voice">🎤</span>
+                <span class="attach-label">Voice</span>
+              </button>
+              <button type="button" class="attach-tile" id="voiceCallButton" data-action="call">
+                <span class="attach-icon call">📞</span>
+                <span class="attach-label">Call</span>
+              </button>
+              <button type="button" class="attach-tile hidden" id="grokButton" data-action="grok">
+                <span class="attach-icon grok">🤖</span>
+                <span class="attach-label">Grok</span>
+              </button>
+            </div>
+          </div>
+          <div id="recordBar" class="record-bar hidden">
+            <span class="rec-dot"></span>
+            <span id="voiceTimer" aria-live="assertive"></span>
+            <span class="record-hint">Recording</span>
+            <button type="button" id="voiceCancelButton">Cancel</button>
+            <button type="button" id="voiceSendButton">Send</button>
+          </div>
+          <div class="text-row" id="composerRow">
+            <button id="imageButton" class="composer-btn" title="Attach photo, file, voice or call" aria-label="Attach">📷</button>
             <label for="messageInput" class="sr-only">Type a message</label>
             <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
-            <button id="sendButton" aria-label="Send message">📤</button>
+            <button id="audioOutputButton" title="Speaker" aria-label="Toggle speaker" class="composer-btn hidden">🔊</button>
+            <button id="sendButton" class="composer-btn mic-mode" data-mode="voice" title="Record voice note" aria-label="Send or record">🎤</button>
           </div>
-          <div class="button-row-below">
-            <input type="file" id="imageInput" aria-label="Upload image or file" />
-            <button id="voiceButton" title="Record voice note" aria-label="Record voice note">🎤</button>
-            <button id="voiceCallButton" title="Start voice call" aria-label="Start voice call">📞</button>
-            <button id="audioOutputButton" title="Speaker" aria-label="Toggle speaker" class="hidden">🔊</button>
-            <button id="grokButton" title="Toggle Grok Bot" aria-label="Toggle Grok bot">🤖</button>
-            <span id="voiceTimer" aria-live="assertive"></span>
-          </div>
+          <input type="file" id="imageInput" accept="image/*" aria-label="Choose photo" />
+          <input type="file" id="cameraInput" accept="image/*" capture="environment" aria-label="Take photo" />
+          <input type="file" id="fileInput" aria-label="Choose file" />
+          <button id="voiceButton" class="hidden" aria-hidden="true" tabindex="-1"></button>
         </div>
         <div id="remoteAudioContainer" class="hidden"></div>
         <div id="grokKeyContainer" class="hidden">
@@ -872,10 +1008,9 @@
       <p><strong>Send Code:</strong> This sends your code to Random chat board</p>
       <p><strong>Random Chat:</strong> This takes you to random chat board for a random chat</p>
       <p><strong>Copy Code:</strong> Copies the code so you can send to people in text or social chats</p>
-      <p><strong>Send Image/File:</strong> Send an image or file (max 5MB)</p>
-      <p><strong>Record Voice:</strong> Press to start/stop recording a voice message (max 30 seconds)</p>
-      <p><strong>Start Voice Call:</strong> Press to start/stop a voice call</p>
-      <p><strong>Toggle Speaker/Earpiece:</strong> Switch between speaker and earpiece for voice calls</p>
+      <p><strong>Attach (📷 left of the box):</strong> Opens Photos, Camera, File, Voice note and Call. The button then shows the last thing you picked. Type a message and it turns into Send; empty box is a mic, like WhatsApp.</p>
+      <p><strong>Voice note:</strong> Tap Voice, or the mic on the right when the box is empty. Tap Send to post, Cancel to drop it. Max 30 seconds.</p>
+      <p><strong>Call:</strong> Start from Attach. During a call the left button hangs up and the speaker button appears.</p>
       <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
       <p><strong>Text Code:</strong> Opens your own Messages app with the join link only. We never send SMS from our servers and we never store phone numbers. If that phone is taken later, the text only shows a code.</p>
       <p><strong>Moose (corner):</strong> Tap once to burn every message, image, voice note and draft on this phone. Tap twice quickly to tell everyone in the room to burn too, then leave. If they already closed the app, only this phone is wiped. Refreshing or closing the tab also burns this device. Live chats are never saved.</p>

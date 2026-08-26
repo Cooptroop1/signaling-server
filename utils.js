@@ -178,7 +178,7 @@ function inviteAnotherSeat() {
     showStatusMessage('Only the person who started the room can add someone.');
     return;
   }
-  const cap = (typeof features !== 'undefined' && features && !features.enableP2P) ? 50 : 10;
+  const cap = 50;
   if (maxClients >= cap) {
     showStatusMessage('Room is already at ' + cap + ' people. Same code still works for anyone already invited.');
     return;
@@ -196,7 +196,7 @@ function inviteAnotherSeat() {
 }
 
 function setMaxClients(n) {
-  const cap = (typeof features !== 'undefined' && features && !features.enableP2P) ? 50 : 10;
+  const cap = 50;
   if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
     maxClients = Math.min(n, cap);
     log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);

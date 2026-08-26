@@ -534,7 +534,7 @@ function validateMessage(data) {
       }
       break;
     case 'set-max-clients':
-      const maxLimit = !features.enableP2P ? 50 : (features.enableRelay ? 10 : 4);
+      const maxLimit = features.enableRelay || !features.enableP2P ? 50 : 4;
       if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > maxLimit) {
         return { valid: false, error: `set-max-clients: maxClients must be number between 2 and ${maxLimit}` };
       }
@@ -1202,7 +1202,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         if (data.clientId === rooms.get(data.code).initiator) {
-          const maxLimit = !features.enableP2P ? 50 : (features.enableRelay ? 10 : 4);
+          const maxLimit = features.enableRelay || !features.enableP2P ? 50 : 4;
           const room = rooms.get(data.code);
           room.maxClients = Math.min(data.maxClients, maxLimit);
           if (room.maxClients > 4) room.forceRelay = true;

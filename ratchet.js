@@ -341,7 +341,7 @@ async function skEncrypt(plaintext, messageId) {
   const aes = await importMk(mk);
   const aad = 'sk|' + mySk.epoch + '|' + n + '|' + messageId;
   const body = await encryptRaw(aes, plaintext, aad);
-  const out = { sk: { epoch: mySk.epoch, n }, encrypted: body.encrypted, iv: body.iv };
+  const out = { sk: { epoch: mySk.epoch, n, encrypted: body.encrypted, iv: body.iv } };
   if (seedCopy && typeof deriveMessageKey === 'function' && typeof roomMaster !== 'undefined' && roomMaster) {
     const wrap = await deriveMessageKey();
     const wrapped = await encryptRaw(wrap, arrayBufferToBase64(seedCopy), 'sk-seed|' + mySk.epoch);
@@ -371,9 +371,10 @@ async function skDecrypt(peerId, data) {
   st.chain = ck;
   st.n = sk.n + 1;
   const aes = await importMk(mk);
-  const aad = 'sk|' + sk.epoch + '|' + sk.n + '|' + data.messageId;
-  const blob = data.encryptedBlob || data.encrypted || data.encryptedContent || data.encryptedData;
-  return decryptRaw(aes, blob, data.iv, aad);
+  const aad = 'sk|' + sk.epoch + '|' + sk.n + '|' + (data.messageId || '');
+  const blob = sk.encrypted || data.encryptedBlob || data.encrypted || data.encryptedContent || data.encryptedData;
+  const iv = sk.iv || data.iv;
+  return decryptRaw(aes, blob, iv, aad);
 }
 
 const liveDrStates = new Map();

@@ -228,6 +228,12 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       payload.encryptedData = encrypted;
       if (file?.type) payload.mime = file.type;
     }
+    if (group && typeof skEncrypt === 'function') {
+      try {
+        const skp = await skEncrypt(rawData, messageId);
+        if (skp && skp.sk) payload.sk = skp.sk;
+      } catch (e) {}
+    }
     sendMessageViaSocket(type, payload, true);
     sent = true;
   } else {
@@ -323,10 +329,10 @@ async function startPeerConnection(targetId, isOfferer) {
     dataChannels.set(targetId, dataChannel);
   }
   peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      console.log(`Sending ICE candidate to ${targetId} for code: ${code}`);
-      sendSignalingMessage('candidate', { candidate: event.candidate, targetId });
-    }
+    if (!event.candidate) return;
+    const line = String(event.candidate.candidate || '');
+    if (/\styp\shost(\s|$)/.test(line) || /\styp\sprflx(\s|$)/.test(line)) return;
+    sendSignalingMessage('candidate', { candidate: event.candidate, targetId });
   };
   peerConnection.onicecandidateerror = (event) => {
     console.error(`ICE candidate error for ${targetId}: ${event.errorText}, code=${event.errorCode}`);
@@ -587,7 +593,16 @@ async function processReceivedMessage(data, targetId) {
   let senderUsername, timestamp, contentType, contentOrData;
   try {
     let rawData = null;
-    if (isDr || isSk) {
+    if (isSk) {
+      try {
+        rawData = await skDecrypt(targetId, data);
+      } catch (e) {
+        const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
+        if (!encrypted) throw e;
+        const messageKey = await deriveMessageKey();
+        rawData = await decryptRaw(messageKey, encrypted, data.iv, String(data.messageId) + '|' + String(data.nonce));
+      }
+    } else if (isDr) {
       const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
       if (encrypted) {
         const messageKey = await deriveMessageKey();
@@ -712,6 +727,8 @@ async function handleAnswer(answer, targetId) {
   }
 }
 async function handleCandidate(candidate, targetId) {
+  const line = String(candidate && candidate.candidate || '');
+  if (/\styp\shost(\s|$)/.test(line) || /\styp\sprflx(\s|$)/.test(line)) return;
   console.log(`Handling ICE candidate from ${targetId} for code: ${code}`);
   if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
     console.warn(`Ignoring invalid ICE candidate from ${targetId}: both sdpMid and sdpMLineIndex null`);

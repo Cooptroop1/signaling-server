@@ -117,13 +117,13 @@ const messageHandler = async (msg, channel) => {
         client.ws.send(clientMessage);
       }
     });
-    logger.info(`Relayed via pub/sub ${parsed.messageType} from ${senderId} in code ${code} to ${room.clients.size - 1} clients`);
+    logger.info('relay ok');
   } else if (parsed.type === 'unicast') {
     const { clientMessage, targetId, senderId } = parsed;
     room.clients.forEach((client, clientId) => {
       if (clientId === targetId && client.ws.readyState === WebSocket.OPEN) {
         client.ws.send(clientMessage);
-        logger.info(`Relayed unicast ${JSON.parse(clientMessage).type} from ${senderId} to ${clientId} in ${code}`);
+        logger.info('unicast ok');
       }
     });
   } else if (parsed.type === 'broadcast') {
@@ -224,8 +224,8 @@ server.on('request', (req, res) => {
         `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://static.cloudflareinsights.com https://www.anonomoose.com; " +
-        "object-src 'none'; base-uri 'self';";
+        "connect-src 'self' wss://signal.anonomoose.com wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://static.cloudflareinsights.com https://www.anonomoose.com; " +
+        "object-src 'none'; base-uri 'self'; form-action 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
       data = data.toString().replace(/<script(?! src)/g,
@@ -247,6 +247,7 @@ server.on('request', (req, res) => {
       res.setHeader('Content-Security-Policy', updatedCSP);
     } else if (filePath.endsWith('.js')) {
       contentType = 'application/javascript';
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(data);
@@ -325,7 +326,7 @@ async function destroyRoom(code) {
   randomCodes.delete(code);
   try { await redisClient.sRem('randomCodes', code); } catch (e) {}
   try { broadcastRandomCodes(); } catch (e) {}
-  logger.info('Destroyed burned room %s', code);
+  logger.info('Destroyed burned room');
 }
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
@@ -1136,7 +1137,7 @@ wss.on('connection', (ws, req) => {
         if (!subscribed.has(code)) {
           await subClient.subscribe(`room:${code}`, messageHandler);
           subscribed.add(code);
-          logger.info(`Subscribed to Redis channel room:${code}`);
+          logger.info('room subscribed');
         }
         // Create or get local room
         if (!rooms.has(code)) {
@@ -1183,7 +1184,7 @@ wss.on('connection', (ws, req) => {
           randomCodes.delete(code);
           await redisClient.sRem('randomCodes', code);
           broadcastRandomCodes();
-          logger.info(`Removed one-time random code ${code} after join by ${clientId}`);
+          logger.info('random join');
         }
         return;
       }
@@ -1301,7 +1302,7 @@ wss.on('connection', (ws, req) => {
           await redisClient.sRem('randomCodes', data.code);
           randomCodes.delete(data.code);
           broadcastRandomCodes();
-          logger.info(`Removed code ${data.code} from randomCodes`);
+          logger.info('random code removed');
         }
         return;
       }
@@ -1407,7 +1408,7 @@ wss.on('connection', (ws, req) => {
         };
         const pubJson = JSON.stringify(pubObj);
         pubClient.publish(`room:${data.code}`, pubJson).then(() => {
-          logger.info(`Published ${data.type} from ${senderId} to Redis channel room:${data.code}`);
+          logger.info('published %s', data.type);
         }).catch(err => {
           logger.error('Redis publish error: %o', err);
         });
@@ -1527,7 +1528,7 @@ wss.on('connection', (ws, req) => {
             'Failed to register username.'
           );
           ws.send(JSON.stringify({ type: 'username-registered', username }));
-          logger.info(`Registered username ${username} for clientId ${data.clientId}`);
+          logger.info('username registered');
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
         }
@@ -1583,9 +1584,9 @@ wss.on('connection', (ws, req) => {
               return null;
             }
           }).filter(msg => msg !== null);
-          logger.info(`Fetched ${offlineMessages.length} offline messages for user ${username} (id: ${user.id})`);
+          logger.info('offline fetch');
           ws.send(JSON.stringify({ type: 'login-success', username, offlineMessages }));
-          logger.info(`User ${username} logged in with clientId ${data.clientId}`);
+          logger.info('user login');
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Invalid username or password (min 8 chars).' }));
         }
@@ -1619,7 +1620,7 @@ wss.on('connection', (ws, req) => {
           public_key: user.public_key,
           identity_public_key: user.identity_public_key
         }));
-        logger.info(`User lookup for clientId ${data.clientId}, status: ${isOnline ? 'online' : 'offline'}`);
+        logger.info('user lookup');
         return;
       }
       if (data.type === 'send-offline-message') {
@@ -1657,7 +1658,7 @@ wss.on('connection', (ws, req) => {
           await pubClient.publish('inbox', JSON.stringify({ targetClientId: to_client_id, payload }));
         } catch (e) {}
         ws.send(JSON.stringify({ type: 'offline-message-sent', messageId }));
-        logger.info(`Sealed offline message stored for recipient id ${to_user_id}`);
+        logger.info('offline stored');
         return;
       }
       if (data.type === 'confirm-offline-message') {
@@ -1731,7 +1732,7 @@ wss.on('connection', (ws, req) => {
         if (subscribed.has(code)) {
           await subClient.unsubscribe(`room:${code}`);
           subscribed.delete(code);
-          logger.info(`Unsubscribed from Redis channel room:${code}`);
+          logger.info('room unsubscribed');
         }
       } else if (isInitiator) {
         const newInitiator = await redisClient.sRandMember(clientsKey);
@@ -1884,7 +1885,7 @@ async function broadcastRandomCodes() {
       client.send(JSON.stringify({ type: 'random-codes', codes }));
     }
   });
-  logger.info(`Broadcasted random codes to all clients: ${codes}`);
+  logger.info('broadcast random codes');
 }
 function hashIp(ip) {
   return crypto.createHmac('sha256', IP_SALT).update(ip).digest('hex');

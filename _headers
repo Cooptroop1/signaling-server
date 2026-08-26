@@ -1,2 +1,6 @@
-/
-  Content-Security-Policy: default-src 'self' *; script-src 'self' 'unsafe-inline' *; style-src 'self' 'unsafe-inline' *; connect-src 'self' *; img-src 'self' data: blob: *;
+/*
+  Cache-Control: no-store
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signal.anonomoose.com wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://www.anonomoose.com https://static.cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self';
+
+/*.js
+  Cache-Control: no-cache, must-revalidate

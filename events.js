@@ -244,10 +244,12 @@ let hideLocalTimer = null;
 let hideRoomTimer = null;
 if (typeof window !== 'undefined') {
 const serverUrls = [
+  'wss://signal.anonomoose.com',
   'wss://signaling-server-zc6m.onrender.com'
 ];
+let serverUrlIndex = 0;
 function serverForCode(roomCode) {
-  return serverUrls[0];
+  return serverUrls[Math.min(serverUrlIndex, serverUrls.length - 1)];
 }
 function notifyConnected() {
   const waiters = connectedWaiters.slice();
@@ -365,7 +367,15 @@ const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  inviteAnotherSeat();
+  inviteAnotherSeat(1);
+});
+['addUser5', 'addUser10', 'addUser20'].forEach((id) => {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    inviteAnotherSeat(parseInt(id.replace('addUser', ''), 10));
+  });
 });
 addUserModal.addEventListener('click', (e) => {
   if (e.target === addUserModal) {
@@ -470,13 +480,18 @@ function handleSocketOpen() {
 }
 function handleSocketError(error) {
   console.error('WebSocket error:', error);
-  showStatusMessage('Connection error, please try again later.');
-  connectionTimeouts.forEach((timeout) => clearTimeout(timeout));
 }
 function handleSocketClose() {
   console.log('WebSocket closed');
   stopKeepAlive();
   if (pinReconnect) return;
+  if (serverUrlIndex < serverUrls.length - 1 && reconnectAttempts === 0) {
+    serverUrlIndex += 1;
+    lastWsUrl = serverUrls[serverUrlIndex];
+    socket = new WebSocket(lastWsUrl);
+    bindSocketHandlers(socket);
+    return;
+  }
   if (reconnectAttempts >= maxReconnectAttempts) {
     showStatusMessage('Max reconnect attempts reached. Please refresh the page.', 10000);
     return;
@@ -1019,8 +1034,13 @@ async function handleSocketMessage(event) {
       rateMap.set(rateKey, rate);
       try {
         let rawData;
-        if (message.sk && typeof decryptLivePacket === 'function') {
-          rawData = await decryptLivePacket(message, message.senderId || 'relay');
+        if (message.sk && typeof skDecrypt === 'function') {
+          try {
+            rawData = await skDecrypt(message.senderId || 'relay', message);
+          } catch (e) {
+            const messageKey = await deriveMessageKey();
+            rawData = await decryptRaw(messageKey, encrypted, message.iv, String(message.messageId) + '|' + String(message.nonce));
+          }
         } else {
         const messageKey = await deriveMessageKey();
         rawData = await decryptRaw(messageKey, encrypted, message.iv, String(message.messageId) + '|' + String(message.nonce));
@@ -1342,6 +1362,7 @@ async function triggerRatchetPartial(failures, newKeyPair, newPub, newRoomMaster
   }
 }
 function updateDots() {
+  if (typeof updateRoomHeadcount === 'function') updateRoomHeadcount();
   const userDots = document.getElementById('userDots');
   if (!userDots) return;
   userDots.innerHTML = '';
@@ -1997,14 +2018,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   document.getElementById('button1').onclick = () => {
-    if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
-      socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
-      suppressAutoBurnUntil = Date.now() + 180000;
-      showStatusMessage(`Posted ${code} to the random board. Stay in this chat — others tap it to join you.`);
-      codeSentToRandom = true;
-    } else {
+    if (!(isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token)) {
       showStatusMessage('Start a chat first, then tap Send Code. Stay on this page.');
+      document.getElementById('button1')?.focus();
+      return;
     }
+    if (!window.confirm('This puts your room on the public random board. Anyone can tap the code. Text Code stays private. Post it?')) {
+      document.getElementById('button1')?.focus();
+      return;
+    }
+    socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
+    suppressAutoBurnUntil = Date.now() + 180000;
+    showStatusMessage('Posted to the public board. Stay in this chat — others tap it to join you.');
+    codeSentToRandom = true;
     document.getElementById('button1')?.focus();
   };
   document.getElementById('button2').onclick = () => {

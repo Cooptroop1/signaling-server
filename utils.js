@@ -3,7 +3,10 @@ function showStatusMessage(message, duration = 3000) {
     statusElement.textContent = message;
     statusElement.setAttribute('aria-live', 'assertive');
     setTimeout(() => {
-      statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
+      if (typeof updateRoomHeadcount === 'function') updateRoomHeadcount();
+      else if (statusElement) {
+        statusElement.textContent = isConnected ? (totalClients + ' / ' + maxClients + ' in this room') : 'Waiting for connection...';
+      }
       statusElement.setAttribute('aria-live', 'polite');
     }, duration);
   }
@@ -97,6 +100,8 @@ function initializeMaxClientsUI() {
   const addUserRadios = document.getElementById('addUserRadios');
   if (addUserText && addUserModal && addUserRadios) {
     addUserText.classList.toggle('hidden', !isInitiator);
+    const jumpInit = document.getElementById('addJumpRow');
+    if (jumpInit) jumpInit.classList.toggle('hidden', !isInitiator);
     if (isInitiator) {
       log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
       addUserRadios.innerHTML = '';
@@ -129,13 +134,13 @@ function initializeMaxClientsUI() {
 
 function updateMaxClientsUI() {
   log('info', `updateMaxClientsUI called, maxClients: ${maxClients}, isInitiator: ${isInitiator}`);
-  if (statusElement) {
-    statusElement.textContent = isConnected ? `Connected (${totalClients}/${maxClients} connections)` : 'Waiting for connection...';
-  }
+  updateRoomHeadcount();
   const addUserText = document.getElementById('addUserText');
   if (addUserText) {
     addUserText.classList.toggle('hidden', !isInitiator);
   }
+  const jump = document.getElementById('addJumpRow');
+  if (jump) jump.classList.toggle('hidden', !isInitiator);
   const buttons = document.querySelectorAll('#addUserRadios button');
   log('info', `Found buttons in modal: ${buttons.length}`);
   buttons.forEach(button => {
@@ -173,7 +178,22 @@ function applyGroupRelay(reason) {
   if (reason) showStatusMessage(reason);
 }
 
-function inviteAnotherSeat() {
+function updateRoomHeadcount() {
+  const n = totalClients || 0;
+  const cap = maxClients || 2;
+  const text = n + ' / ' + cap + ' in this room';
+  const el = document.getElementById('roomHeadcount');
+  const inChat = typeof chatContainer !== 'undefined' && chatContainer && !chatContainer.classList.contains('hidden');
+  if (el) {
+    el.textContent = text;
+    el.classList.toggle('hidden', !inChat);
+  }
+  if (typeof statusElement !== 'undefined' && statusElement && inChat && (isConnected || n > 0)) {
+    statusElement.textContent = text;
+  }
+}
+
+function inviteAnotherSeat(delta) {
   if (!isInitiator) {
     showStatusMessage('Only the person who started the room can add someone.');
     return;
@@ -183,7 +203,8 @@ function inviteAnotherSeat() {
     showStatusMessage('Room is already at ' + cap + ' people. Same code still works for anyone already invited.');
     return;
   }
-  const next = maxClients + 1;
+  const step = Math.max(1, parseInt(delta, 10) || 1);
+  const next = Math.min(maxClients + step, cap);
   if (next > 4) {
     if (typeof p2pOnly !== 'undefined' && p2pOnly) {
       showStatusMessage('Phone-to-phone only allows 4 people. Untick that, then add more.');
@@ -192,7 +213,7 @@ function inviteAnotherSeat() {
     applyGroupRelay('Room now uses server backup so more people can join. Same code.');
   }
   setMaxClients(next);
-  if (next <= 4) showStatusMessage('Room now allows ' + next + '. Same code — send it to the next person.');
+  showStatusMessage('Room now allows ' + next + '. Same code — send it to the next person.');
 }
 
 function setMaxClients(n) {

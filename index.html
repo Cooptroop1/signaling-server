@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com wss://signaling-server.onrender.com https://api.x.ai https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co; object-src 'none'; base-uri 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signal.anonomoose.com wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://www.anonomoose.com https://static.cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self';">
   <title>Anonomoose Chat</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
@@ -593,6 +593,12 @@
       background-color: #4f46e5;
       color: white;
     }
+    .add-jump {
+      background-color: #4338ca;
+      color: white;
+      flex: 1;
+    }
+    .add-jump:hover { background-color: #3730a3; color: white; }
     #helpText {
       color: #3b82f6;
       cursor: pointer;
@@ -901,6 +907,7 @@
       <p class="tagline">Encrypted chat. Code to join. Moose to burn. Nothing saved.</p>
       <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Start a new chat or connect to an existing one</div>
       <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">Phone to phone · encrypted</div>
+      <div id="roomHeadcount" class="text-center mb-3 text-gray-700 text-sm font-semibold hidden" role="status" aria-live="polite"></div>
       <div id="initialContainer">
         <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
         <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
@@ -927,6 +934,11 @@
           <button id="button2" aria-label="Join a random chat">Random Chat</button>
           <button id="textCodeButton" aria-label="Share chat code">Text Code</button>
           <button id="addUserText" class="hidden" aria-label="Add another person">Add User</button>
+        </div>
+        <div id="addJumpRow" class="button-group hidden" aria-label="Add several people">
+          <button type="button" id="addUser5" class="add-jump">+5</button>
+          <button type="button" id="addUser10" class="add-jump">+10</button>
+          <button type="button" id="addUser20" class="add-jump">+20</button>
         </div>
         <div class="messages-wrapper">
           <div id="messages" role="log" aria-live="polite"></div>
@@ -1033,15 +1045,15 @@
       <h2 class="text-xl font-bold mb-4">Button Help</h2>
       <p><strong>Start Chat:</strong> Starts New Chat</p>
       <p><strong>Connect to Chat:</strong> This connects you to a chat that you have code for</p>
-      <p><strong>Send Code:</strong> This sends your code to Random chat board</p>
-      <p><strong>Random Chat:</strong> This takes you to random chat board for a random chat</p>
+      <p><strong>Send Code:</strong> Asks before putting this room on the public random board. Default is off — Text Code is private.</p>
+      <p><strong>Random Chat:</strong> Public board of rooms people chose to post. Anyone can tap a code.</p>
       <p><strong>Copy Code:</strong> Copies the code so you can send to people in text or social chats</p>
       <p><strong>Attach (📷 left of the box):</strong> Opens Photos, Camera, File, Voice note and Call. The button then shows the last thing you picked. Send stays on the right.</p>
       <p><strong>Voice note:</strong> Tap Voice, or the mic on the right when the box is empty. Tap Send to post, Cancel to drop it. Max 30 seconds.</p>
       <p><strong>Call:</strong> Start from Attach. During a call the left button hangs up and the speaker button appears.</p>
       <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
       <p><strong>Text Code:</strong> Opens your own Messages app with the join link only. We never send SMS from our servers and we never store phone numbers. If that phone is taken later, the text only shows a code.</p>
-      <p><strong>Add User:</strong> One tap adds one more seat. Same code. Up to 4 stays phone-to-phone. Past 4 the room switches to encrypted server backup so a bigger group does not melt the phones (up to 50).</p>
+      <p><strong>Add User:</strong> +1 seat. +5 / +10 / +20 for bigger groups. Same code. Up to 4 stays phone-to-phone. Past 4 switches to encrypted server backup (up to 50).</p>
       <p><strong>Phone-to-phone only:</strong> Tick this if you never want the encrypted server backup. Green badge = phones talking directly. Amber = backup still encrypted.</p>
       <p><strong>Moose (corner):</strong> Tap once to burn this phone. Tap twice to wipe everyone still in the room, kill the code, and leave. Switching away for 20 seconds also burns a live room. Text Code and Random Board give you three minutes so you can pick a room or send a text without wiping. Refreshing or closing the tab burns this device.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
@@ -1182,14 +1194,14 @@
       <button id="cancelRecoverKeysButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-    <script src="crypto.js"></script>
-  <script src="ratchet.js"></script>
-  <script src="utils.js"></script>
-  <script src="main.js"></script>
-  <script src="init.js"></script>
-  <script src="events.js"></script>
+    <script src="crypto.js?v=260827a"></script>
+  <script src="ratchet.js?v=260827a"></script>
+  <script src="utils.js?v=260827a"></script>
+  <script src="main.js?v=260827a"></script>
+  <script src="init.js?v=260827a"></script>
+  <script src="events.js?v=260827a"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js"></script>
+  <script src="supabase-auth.js?v=260827a"></script>
 </body>
 </html>

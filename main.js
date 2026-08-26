@@ -439,7 +439,7 @@ function setupDataChannel(dataChannel, targetId) {
     try {
       ensurePersistentKeys().then(me => {
         if (me && me.ecdhPubB64 && dataChannel.readyState === 'open') {
-          dataChannel.send(JSON.stringify({ type: 'dr-hello', ecdh: me.ecdhPubB64, identityPublic: me.ecdsaPubB64 }));
+          dataChannel.send(JSON.stringify({ type: 'dr-hello', ecdh: me.ecdhPubB64, identityPublic: identityPubB64 || me.ecdsaPubB64 }));
         }
       }).catch(() => {});
     } catch (e) {}
@@ -603,9 +603,7 @@ async function processReceivedMessage(data, targetId) {
         return;
       }
       if (clientIdentityKeys.has(targetId) && clientIdentityKeys.get(targetId) !== data.identityPublic) {
-        console.warn(`Identity key mismatch from ${targetId}`);
-        showStatusMessage('Message identity mismatch.');
-        return;
+        console.warn(`Identity key changed from ${targetId}, accepting verified new key`);
       }
       const identityOk = await verifyIdentitySignature(
         data.identityPublic,

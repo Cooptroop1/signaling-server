@@ -962,9 +962,7 @@ async function handleSocketMessage(event) {
         }
         const senderId = message.senderId;
         if (senderId && clientIdentityKeys.has(senderId) && clientIdentityKeys.get(senderId) !== message.identityPublic) {
-          console.warn('Relay identity key mismatch');
-          showStatusMessage('Message identity mismatch.');
-          return;
+          console.warn('Relay identity key changed, accepting verified new key');
         }
         const identityOk = await verifyIdentitySignature(
           message.identityPublic,

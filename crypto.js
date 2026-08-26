@@ -40,7 +40,10 @@ async function exportPublicKey(key) {
   try {
     const exported = await window.crypto.subtle.exportKey('raw', key);
     const base64 = arrayBufferToBase64(exported);
-    if (base64.length < 128 || base64.length > 132) { // P-384 raw key ~128 chars
+    const curve = key.algorithm && key.algorithm.namedCurve;
+    if (curve === 'X25519') {
+      if (exported.byteLength !== 32) throw new Error('Invalid X25519 public key length');
+    } else if (base64.length < 40 || base64.length > 160) {
       throw new Error(`Invalid public key length: ${base64.length} chars`);
     }
     console.log('Exported public key:', base64);
@@ -54,6 +57,17 @@ async function exportPublicKey(key) {
 async function importPublicKey(base64) {
   try {
     let buffer = base64ToArrayBuffer(base64);
+    if (buffer.byteLength === 32) {
+      const key = await window.crypto.subtle.importKey(
+        'raw',
+        buffer,
+        { name: 'ECDH', namedCurve: 'X25519' },
+        false,
+        []
+      );
+      console.log('Imported X25519 public key successfully');
+      return key;
+    }
     if (buffer.byteLength === 96) {
       const newBuffer = new Uint8Array(97);
       newBuffer[0] = 4;
@@ -61,9 +75,8 @@ async function importPublicKey(base64) {
       buffer = newBuffer.buffer;
       console.log('Prepended 0x04 to public key buffer for import');
     } else if (buffer.byteLength !== 97) {
-      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 96 or 97 for P-384)`);
+      throw new Error(`Invalid public key length: ${buffer.byteLength} bytes (expected 32, 96 or 97)`);
     }
-    // Validate point on curve
     const bytes = new Uint8Array(buffer);
     if (bytes[0] !== 4) {
       throw new Error('Invalid uncompressed public key prefix');
@@ -137,10 +150,12 @@ async function decryptBytes(key, encrypted, iv) {
 
 async function deriveSharedKey(privateKey, publicKey) {
   try {
+    const curve = (privateKey.algorithm && privateKey.algorithm.namedCurve) || 'P-384';
+    const bitLen = curve === 'X25519' ? 256 : 384;
     const sharedBits = await window.crypto.subtle.deriveBits(
       { name: 'ECDH', public: publicKey },
       privateKey,
-      384
+      bitLen
     );
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
@@ -167,6 +182,30 @@ async function deriveSharedKey(privateKey, publicKey) {
     console.error('deriveSharedKey error:', error);
     throw new Error('Shared key derivation failed');
   }
+}
+
+async function derivePakeWrapKey(privateKey, publicKey, roomCode) {
+  const curve = (privateKey.algorithm && privateKey.algorithm.namedCurve) || 'P-384';
+  const bitLen = curve === 'X25519' ? 256 : 384;
+  const sharedBits = await window.crypto.subtle.deriveBits(
+    { name: 'ECDH', public: publicKey },
+    privateKey,
+    bitLen
+  );
+  const salt = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode('pake|' + (roomCode || '')));
+  const hkdfKey = await window.crypto.subtle.importKey('raw', sharedBits, { name: 'HKDF' }, false, ['deriveKey']);
+  return window.crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array(salt),
+      info: new TextEncoder().encode('anonomoose-pake-ecdh-v1')
+    },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
 }
 
 async function encryptRaw(key, data, aad) {

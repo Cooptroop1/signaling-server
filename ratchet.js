@@ -9,18 +9,27 @@ function concatBytes(a, b) {
 }
 
 async function generateRatchetDhPair() {
-  return window.crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-384' },
-    false,
-    ['deriveKey', 'deriveBits']
-  );
+  try {
+    return await window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'X25519' },
+      false,
+      ['deriveBits']
+    );
+  } catch (e) {
+    return window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-384' },
+      false,
+      ['deriveKey', 'deriveBits']
+    );
+  }
 }
 
 async function dhBytes(privateKey, publicKey) {
+  const curve = (privateKey.algorithm && privateKey.algorithm.namedCurve) || 'P-384';
   const bits = await window.crypto.subtle.deriveBits(
     { name: 'ECDH', public: publicKey },
     privateKey,
-    384
+    curve === 'X25519' ? 256 : 384
   );
   return new Uint8Array(bits);
 }
@@ -317,4 +326,71 @@ async function openOfflinePayload(msg) {
     return packet.inner;
   }
   return outer;
+}
+
+let mySk = { epoch: 0, chain: null, n: 0 };
+const skPeers = new Map();
+
+function skResetLocal() {
+  mySk = { epoch: (mySk.epoch || 0) + 1, chain: null, n: 0 };
+  skPeers.clear();
+}
+
+async function skEncrypt(plaintext, messageId) {
+  if (!mySk.chain) {
+    mySk.epoch = (mySk.epoch || 0) + 1;
+    mySk.chain = window.crypto.getRandomValues(new Uint8Array(32));
+    mySk.n = 0;
+  }
+  const sendSeed = mySk.n === 0;
+  const seedCopy = sendSeed ? new Uint8Array(mySk.chain) : null;
+  const n = mySk.n++;
+  const { mk, ck } = await kdfCk(mySk.chain);
+  mySk.chain = ck;
+  const aes = await importMk(mk);
+  const aad = 'sk|' + mySk.epoch + '|' + n + '|' + messageId;
+  const body = await encryptRaw(aes, plaintext, aad);
+  const out = { sk: { epoch: mySk.epoch, n }, encrypted: body.encrypted, iv: body.iv };
+  if (seedCopy && typeof deriveMessageKey === 'function' && typeof roomMaster !== 'undefined' && roomMaster) {
+    const wrap = await deriveMessageKey();
+    const wrapped = await encryptRaw(wrap, arrayBufferToBase64(seedCopy), 'sk-seed|' + mySk.epoch);
+    out.sk.seed = wrapped.encrypted;
+    out.sk.seedIv = wrapped.iv;
+  }
+  return out;
+}
+
+async function skDecrypt(peerId, data) {
+  const sk = data.sk;
+  if (!sk) throw new Error('No sender key header');
+  let st = skPeers.get(peerId);
+  if (sk.seed && sk.seedIv) {
+    const wrap = await deriveMessageKey();
+    const seedB64 = await decryptRaw(wrap, sk.seed, sk.seedIv, 'sk-seed|' + sk.epoch);
+    st = { epoch: sk.epoch, chain: new Uint8Array(base64ToArrayBuffer(seedB64)), n: 0 };
+    skPeers.set(peerId, st);
+  }
+  if (!st || st.epoch !== sk.epoch) throw new Error('Missing sender key for epoch');
+  while (st.n < sk.n) {
+    const step = await kdfCk(st.chain);
+    st.chain = step.ck;
+    st.n++;
+  }
+  const { mk, ck } = await kdfCk(st.chain);
+  st.chain = ck;
+  st.n = sk.n + 1;
+  const aes = await importMk(mk);
+  const aad = 'sk|' + sk.epoch + '|' + sk.n + '|' + data.messageId;
+  const blob = data.encryptedBlob || data.encrypted || data.encryptedContent || data.encryptedData;
+  return decryptRaw(aes, blob, data.iv, aad);
+}
+
+async function decryptLivePacket(data, peerId) {
+  if (data && data.header && data.body && data.identityEcdh) {
+    return drDecrypt(data, data.messageId, 'peer:' + peerId);
+  }
+  if (data && data.sk) {
+    return skDecrypt(peerId, data);
+  }
+  return null;
 }

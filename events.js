@@ -133,6 +133,7 @@ let refreshingToken = false;
 let signalingQueue = new Map();
 let connectedClients = new Set();
 let clientPublicKeys = new Map();
+let clientEcdhKeys = new Map();
 let clientIdentityKeys = new Map();
 let identityKeyPair = null;
 let identityPubB64 = null;
@@ -665,7 +666,12 @@ async function handleSocketMessage(event) {
       } else {
         const publicKey = await exportPublicKey(keyPair.publicKey);
         await initIdentityKeys();
-        socket.send(JSON.stringify({ type: 'public-key', publicKey, identityPublic: identityPubB64, clientId, code, token }));
+        let identityEcdh = null;
+        try {
+          const me = await ensurePersistentKeys();
+          identityEcdh = me && me.ecdhPubB64;
+        } catch (e) {}
+        socket.send(JSON.stringify({ type: 'public-key', publicKey, identityPublic: identityPubB64, identityEcdh, clientId, code, token }));
       }
       updateMaxClientsUI();
       updateDots();
@@ -768,14 +774,18 @@ async function handleSocketMessage(event) {
       handleCandidate(message.candidate, message.clientId);
       return;
     }
-    if (message.type === 'public-key' && isInitiator) {
+    if (message.type === 'public-key') {
       try {
         clientPublicKeys.set(message.clientId, message.publicKey);
         if (message.identityPublic) {
           clientIdentityKeys.set(message.clientId, message.identityPublic);
         }
+        if (message.identityEcdh) {
+          clientEcdhKeys.set(message.clientId, message.identityEcdh);
+        }
+        if (!isInitiator) return;
         const joinerPublic = await importPublicKey(message.publicKey);
-        const sharedKey = await deriveSharedKey(keyPair.privateKey, joinerPublic);
+        const sharedKey = await derivePakeWrapKey(keyPair.privateKey, joinerPublic, code);
         const payload = {
           roomMaster: arrayBufferToBase64(roomMaster),
           signingSalt: arrayBufferToBase64(signingSalt),
@@ -785,12 +795,18 @@ async function handleSocketMessage(event) {
         const { encrypted, iv } = await encryptRaw(sharedKey, payloadStr, 'room-key|' + code);
         const myPublic = await exportPublicKey(keyPair.publicKey);
         await initIdentityKeys();
+        let identityEcdh = null;
+        try {
+          const me = await ensurePersistentKeys();
+          identityEcdh = me && me.ecdhPubB64;
+        } catch (e) {}
         socket.send(JSON.stringify({
           type: 'encrypted-room-key',
           encryptedKey: encrypted,
           iv,
           publicKey: myPublic,
           identityPublic: identityPubB64,
+          identityEcdh,
           targetId: message.clientId,
           code,
           clientId,
@@ -808,8 +824,14 @@ async function handleSocketMessage(event) {
         if (message.identityPublic) {
           clientIdentityKeys.set(message.clientId || 'initiator', message.identityPublic);
         }
+        if (message.identityEcdh) {
+          clientEcdhKeys.set(message.clientId || 'initiator', message.identityEcdh);
+        }
+        if (message.publicKey && message.clientId) {
+          clientPublicKeys.set(message.clientId, message.publicKey);
+        }
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
-        const sharedKey = await deriveSharedKey(keyPair.privateKey, initiatorPublicImported);
+        const sharedKey = await derivePakeWrapKey(keyPair.privateKey, initiatorPublicImported, code);
         const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv, 'room-key|' + code);
         const payload = JSON.parse(decryptedStr);
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
@@ -845,7 +867,7 @@ async function handleSocketMessage(event) {
           throw new Error('No initiator public key available for ratchet');
         }
         const importedInitiatorPublic = await importPublicKey(dhPubB64);
-        const shared = await deriveSharedKey(keyPair.privateKey, importedInitiatorPublic);
+        const shared = await derivePakeWrapKey(keyPair.privateKey, importedInitiatorPublic, code);
         const decryptedStr = await decryptRaw(shared, message.encrypted, message.iv, 'new-room-key|' + code + '|' + message.version);
         const payload = JSON.parse(decryptedStr);
         roomMaster = base64ToArrayBuffer(payload.roomMaster);
@@ -853,6 +875,7 @@ async function handleSocketMessage(event) {
         messageSalt = base64ToArrayBuffer(payload.messageSalt);
         signingKey = await deriveSigningKey();
         keyVersion = message.version;
+        if (typeof skResetLocal === 'function') skResetLocal();
         if (message.publicKey) {
           initiatorPublic = message.publicKey;
         }
@@ -873,7 +896,12 @@ async function handleSocketMessage(event) {
       processedMessageIds.add(message.messageId);
       console.log('Received relay message:', message);
       const encrypted = message.encryptedContent || message.encryptedData; // Handle conditional
-      if (!message.messageId || !message.timestamp || !message.nonce || !message.iv || !message.signature || !encrypted) {
+      if (!message.messageId || !message.timestamp || !message.nonce || !message.iv || !encrypted) {
+        console.error('Invalid payload in relay message:', message);
+        showStatusMessage('Invalid message received.');
+        return;
+      }
+      if (!message.sk && !message.signature) {
         console.error('Invalid payload in relay message:', message);
         showStatusMessage('Invalid message received.');
         return;
@@ -913,8 +941,12 @@ async function handleSocketMessage(event) {
       }
       rateMap.set(rateKey, rate);
       try {
+        let rawData;
+        if (message.sk && typeof decryptLivePacket === 'function') {
+          rawData = await decryptLivePacket(message, message.senderId || 'relay');
+        } else {
         const messageKey = await deriveMessageKey();
-        let rawData = await decryptRaw(messageKey, encrypted, message.iv, String(message.messageId) + '|' + String(message.nonce));
+        rawData = await decryptRaw(messageKey, encrypted, message.iv, String(message.messageId) + '|' + String(message.nonce));
         const toVerify = rawData + message.nonce;
         const valid = await verifyMessage(signingKey, message.signature, toVerify);
         if (!valid) {
@@ -946,6 +978,7 @@ async function handleSocketMessage(event) {
         }
         if (senderId && message.identityPublic) {
           clientIdentityKeys.set(senderId, message.identityPublic);
+        }
         }
         // Parse metadata (same as P2P)
         let metadataStr = '';
@@ -1163,7 +1196,7 @@ async function triggerRatchet() {
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(newKeyPair.privateKey, importedPublic);
+      const shared = await derivePakeWrapKey(newKeyPair.privateKey, importedPublic, code);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),
@@ -1184,6 +1217,7 @@ async function triggerRatchet() {
     signingSalt = newSigningSalt;
     messageSalt = newMessageSalt;
     signingKey = await deriveSigningKey();
+    if (typeof skResetLocal === 'function') skResetLocal();
     console.log(`PFS ratchet complete (version ${keyVersion}), new roomMaster, salts, and DH key set.`);
     if (failures.length > 0) {
       console.warn(`Partial ratchet failure for clients: ${failures.join(', ')}. Retrying...`);
@@ -1213,7 +1247,7 @@ async function triggerRatchetPartial(failures, newKeyPair, newPub, newRoomMaster
     }
     try {
       const importedPublic = await importPublicKey(publicKey);
-      const shared = await deriveSharedKey(newKeyPair.privateKey, importedPublic);
+      const shared = await derivePakeWrapKey(newKeyPair.privateKey, importedPublic, code);
       const payload = {
         roomMaster: arrayBufferToBase64(newRoomMaster),
         signingSalt: arrayBufferToBase64(newSigningSalt),

@@ -562,7 +562,7 @@ function validateMessage(data) {
       if ((data.encryptedContent || data.encryptedData) && !data.iv) {
         return { valid: false, error: 'relay-message: iv required for encryptedContent or encryptedData' };
       }
-      if ((data.encryptedContent || data.encryptedData) && !data.signature) {
+      if ((data.encryptedContent || data.encryptedData) && !data.signature && !data.sk) {
         return { valid: false, error: 'relay-message: signature required for encryptedContent or encryptedData' };
       }
       if (!data.messageId || typeof data.messageId !== 'string') {
@@ -574,10 +574,10 @@ function validateMessage(data) {
       if (!data.nonce || typeof data.nonce !== 'string') {
         return { valid: false, error: 'relay-message: nonce required as string' };
       }
-      if (!data.identityPublic || !isValidBase64(data.identityPublic)) {
+      if (!data.sk && (!data.identityPublic || !isValidBase64(data.identityPublic))) {
         return { valid: false, error: 'relay-message: identityPublic required' };
       }
-      if (!data.identitySig || !isValidBase64(data.identitySig)) {
+      if (!data.sk && (!data.identitySig || !isValidBase64(data.identitySig))) {
         return { valid: false, error: 'relay-message: identitySig required' };
       }
       if (!data.code) {
@@ -870,8 +870,10 @@ wss.on('connection', (ws, req) => {
         'code',
         data.type === 'public-key' && 'publicKey',
         data.type === 'public-key' && 'identityPublic',
+        data.type === 'public-key' && 'identityEcdh',
         data.type === 'encrypted-room-key' && 'publicKey',
         data.type === 'encrypted-room-key' && 'identityPublic',
+        data.type === 'encrypted-room-key' && 'identityEcdh',
         data.type === 'encrypted-room-key' && 'encryptedKey',
         data.type === 'encrypted-room-key' && 'iv',
         data.type === 'new-room-key' && 'encrypted',
@@ -984,7 +986,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         const targetId = rooms.get(data.code).initiator;
-        const fwdMsg = { type: 'public-key', publicKey: data.publicKey, identityPublic: data.identityPublic, clientId: data.clientId, code: data.code };
+        const fwdMsg = { type: 'public-key', publicKey: data.publicKey, identityPublic: data.identityPublic, identityEcdh: data.identityEcdh, clientId: data.clientId, code: data.code };
         await forwardUnicast(data.code, targetId, fwdMsg, data.clientId);
         return;
       }
@@ -993,7 +995,7 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
           return;
         }
-        const fwdMsg = { type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, identityPublic: data.identityPublic, clientId: data.clientId, code: data.code };
+        const fwdMsg = { type: 'encrypted-room-key', encryptedKey: data.encryptedKey, iv: data.iv, publicKey: data.publicKey, identityPublic: data.identityPublic, identityEcdh: data.identityEcdh, clientId: data.clientId, code: data.code };
         await forwardUnicast(data.code, data.targetId, fwdMsg, data.clientId);
         return;
       }
@@ -1357,7 +1359,8 @@ wss.on('connection', (ws, req) => {
           mime: mime,
           senderId: senderId,
           identityPublic: data.identityPublic,
-          identitySig: data.identitySig
+          identitySig: data.identitySig,
+          sk: data.sk
         };
         const clientJson = JSON.stringify(clientMessageObj);
         // Publish to Redis

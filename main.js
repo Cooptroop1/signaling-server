@@ -168,73 +168,108 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const jitteredTimestamp = timestamp + jitter;
   const nonce = crypto.randomUUID();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
-  const messageKey = await deriveMessageKey();
   const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type });
   let rawData = metadata + (dataToSend || sanitizedContent);
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' ');
-  const { encrypted, iv } = await encryptRaw(messageKey, rawData, String(messageId) + '|' + String(nonce));
-  const toSign = rawData + nonce;
-  const signature = await signMessage(signingKey, toSign);
-  await initIdentityKeys();
-  const identitySig = await signIdentitySignature(identityKeyPair.privateKey, String(messageId) + String(nonce) + String(encrypted));
-  const payload = {
-    messageId,
-    nonce,
-    iv,
-    signature,
-    identityPublic: identityPubB64,
-    identitySig
-  };
   const sendViaP2p = p2pOpen;
   if (sendViaP2p) useRelay = false;
-  if (!sendViaP2p) {
-    payload.timestamp = jitteredTimestamp;
-    if (type === 'message') {
-      payload.encryptedContent = encrypted;
-    } else {
-      payload.encryptedData = encrypted;
-      if (file?.type) {
-        payload.mime = file.type;
-      }
-    }
-  } else {
-    payload.encryptedBlob = encrypted;
-    payload.timestamp = jitteredTimestamp;
-  }
-  if (type === 'file') {
-    payload.filename = file?.name;
-  }
-  const jsonString = JSON.stringify(payload);
   let sent = false;
   if (sendViaP2p) {
     updatePrivacyStatus('E2E Encrypted (P2P)');
-    dataChannels.forEach((dataChannel, id) => {
-      if (dataChannel.readyState === 'open') {
-        if (jsonString.length > CHUNK_SIZE) {
-          const chunkId = generateMessageId();
-          const chunks = [];
-          for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
-            chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
-          }
-          for (let index = 0; index < chunks.length; index++) {
-            const chunk = chunks[index];
-            dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunk }));
-          }
-        } else {
-          dataChannel.send(jsonString);
+    for (const [id, dataChannel] of dataChannels) {
+      if (!dataChannel || dataChannel.readyState !== 'open') continue;
+      let jsonString;
+      const theirEcdh = (typeof clientEcdhKeys !== 'undefined' && clientEcdhKeys.get(id)) || null;
+      try {
+        if (theirEcdh && typeof drEncrypt === 'function') {
+          const packet = await drEncrypt('peer:' + id, theirEcdh, rawData, messageId);
+          jsonString = JSON.stringify({
+            type: 'dr',
+            messageId,
+            timestamp: jitteredTimestamp,
+            nonce,
+            header: packet.header,
+            body: packet.body,
+            identityPublic: packet.identityPublic,
+            identityEcdh: packet.identityEcdh,
+            identitySig: packet.identitySig
+          });
         }
-        sent = true;
+      } catch (e) {
+        console.warn('DR encrypt failed, using room key', e);
       }
-    });
+      if (!jsonString) {
+        const messageKey = await deriveMessageKey();
+        const { encrypted, iv } = await encryptRaw(messageKey, rawData, String(messageId) + '|' + String(nonce));
+        const toSign = rawData + nonce;
+        const signature = await signMessage(signingKey, toSign);
+        await initIdentityKeys();
+        const identitySig = await signIdentitySignature(identityKeyPair.privateKey, String(messageId) + String(nonce) + String(encrypted));
+        jsonString = JSON.stringify({
+          messageId,
+          nonce,
+          iv,
+          signature,
+          identityPublic: identityPubB64,
+          identitySig,
+          encryptedBlob: encrypted,
+          timestamp: jitteredTimestamp
+        });
+      }
+      if (jsonString.length > CHUNK_SIZE) {
+        const chunkId = generateMessageId();
+        const chunks = [];
+        for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
+          chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
+        }
+        for (let index = 0; index < chunks.length; index++) {
+          dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunks[index] }));
+        }
+      } else {
+        dataChannel.send(jsonString);
+      }
+      sent = true;
+    }
     if (!sent) {
       console.log('No open data channels, queuing message for retry');
       if (!messageQueue.has('global')) messageQueue.set('global', []);
-      messageQueue.get('global').push({ type, payload });
+      messageQueue.get('global').push({ type, payload: { rawData, messageId, nonce, timestamp: jitteredTimestamp, filename: file?.name } });
     }
   } else if (features.enableRelay) {
     useRelay = true;
     updatePrivacyStatus('Relay Mode (E2EE)');
+    let payload;
+    try {
+      const sk = await skEncrypt(rawData, messageId);
+      payload = {
+        messageId,
+        nonce,
+        timestamp: jitteredTimestamp,
+        iv: sk.iv,
+        encryptedContent: sk.encrypted,
+        sk: sk.sk
+      };
+    } catch (e) {
+      const messageKey = await deriveMessageKey();
+      const { encrypted, iv } = await encryptRaw(messageKey, rawData, String(messageId) + '|' + String(nonce));
+      const toSign = rawData + nonce;
+      const signature = await signMessage(signingKey, toSign);
+      await initIdentityKeys();
+      const identitySig = await signIdentitySignature(identityKeyPair.privateKey, String(messageId) + String(nonce) + String(encrypted));
+      payload = {
+        messageId,
+        nonce,
+        iv,
+        signature,
+        identityPublic: identityPubB64,
+        identitySig,
+        timestamp: jitteredTimestamp
+      };
+      if (type === 'message') payload.encryptedContent = encrypted;
+      else payload.encryptedData = encrypted;
+    }
+    if (type === 'file') payload.filename = file?.name;
     sendMessageViaSocket(type, payload, true);
     sent = true;
   } else {
@@ -436,6 +471,13 @@ function setupDataChannel(dataChannel, targetId) {
     isConnected = true;
     useRelay = false;
     updatePrivacyStatus('E2E Encrypted (P2P)');
+    try {
+      ensurePersistentKeys().then(me => {
+        if (me && me.ecdhPubB64 && dataChannel.readyState === 'open') {
+          dataChannel.send(JSON.stringify({ type: 'dr-hello', ecdh: me.ecdhPubB64, identityPublic: me.ecdsaPubB64 }));
+        }
+      }).catch(() => {});
+    } catch (e) {}
     updateUIState(true, true);
     clearTimeout(connectionTimeouts.get(targetId));
     retryCounts.delete(targetId);
@@ -549,7 +591,14 @@ async function processReceivedMessage(data, targetId) {
     }
     return;
   }
-  if (!data.messageId || (!data.encryptedBlob && !data.encryptedContent && !data.encryptedData)) {
+  if (data.type === 'dr-hello') {
+    if (data.ecdh && typeof clientEcdhKeys !== 'undefined') clientEcdhKeys.set(targetId, data.ecdh);
+    if (data.identityPublic && typeof clientIdentityKeys !== 'undefined') clientIdentityKeys.set(targetId, data.identityPublic);
+    return;
+  }
+  const isDr = !!(data.header && data.body);
+  const isSk = !!data.sk;
+  if (!data.messageId || (!isDr && !isSk && !data.encryptedBlob && !data.encryptedContent && !data.encryptedData)) {
     console.log(`Invalid message format from ${targetId}:`, data);
     return;
   }
@@ -570,38 +619,46 @@ async function processReceivedMessage(data, targetId) {
   processedNonces.set(data.nonce, Date.now());
   let senderUsername, timestamp, contentType, contentOrData;
   try {
-    const messageKey = await deriveMessageKey();
-    const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
-    const rawData = await decryptRaw(messageKey, encrypted, data.iv, String(data.messageId) + '|' + String(data.nonce));
-    const toVerify = rawData + data.nonce;
-    const valid = await verifyMessage(signingKey, data.signature, toVerify);
-    if (!valid) {
-      console.warn(`Invalid signature for message from ${targetId}`);
-      showStatusMessage('Invalid message signature detected.');
-      return;
+    let rawData = null;
+    if (isDr || isSk) {
+      rawData = await decryptLivePacket(data, targetId);
+    } else {
+      const messageKey = await deriveMessageKey();
+      const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
+      rawData = await decryptRaw(messageKey, encrypted, data.iv, String(data.messageId) + '|' + String(data.nonce));
+      const toVerify = rawData + data.nonce;
+      const valid = await verifyMessage(signingKey, data.signature, toVerify);
+      if (!valid) {
+        console.warn(`Invalid signature for message from ${targetId}`);
+        showStatusMessage('Invalid message signature detected.');
+        return;
+      }
+      const encryptedVal = data.encryptedBlob || data.encryptedContent || data.encryptedData;
+      if (!data.identityPublic || !data.identitySig) {
+        console.warn(`Missing identity signature from ${targetId}`);
+        showStatusMessage('Unsigned message rejected.');
+        return;
+      }
+      if (clientIdentityKeys.has(targetId) && clientIdentityKeys.get(targetId) !== data.identityPublic) {
+        console.warn(`Identity key mismatch from ${targetId}`);
+        showStatusMessage('Message identity mismatch.');
+        return;
+      }
+      const identityOk = await verifyIdentitySignature(
+        data.identityPublic,
+        data.identitySig,
+        String(data.messageId) + String(data.nonce) + String(encryptedVal)
+      );
+      if (!identityOk) {
+        console.warn(`Invalid identity signature from ${targetId}`);
+        showStatusMessage('Message identity check failed.');
+        return;
+      }
+      clientIdentityKeys.set(targetId, data.identityPublic);
     }
-    const encryptedVal = data.encryptedBlob || data.encryptedContent || data.encryptedData;
-    if (!data.identityPublic || !data.identitySig) {
-      console.warn(`Missing identity signature from ${targetId}`);
-      showStatusMessage('Unsigned message rejected.');
-      return;
+    if (data.identityEcdh && typeof clientEcdhKeys !== 'undefined') {
+      clientEcdhKeys.set(targetId, data.identityEcdh);
     }
-    if (clientIdentityKeys.has(targetId) && clientIdentityKeys.get(targetId) !== data.identityPublic) {
-      console.warn(`Identity key mismatch from ${targetId}`);
-      showStatusMessage('Message identity mismatch.');
-      return;
-    }
-    const identityOk = await verifyIdentitySignature(
-      data.identityPublic,
-      data.identitySig,
-      String(data.messageId) + String(data.nonce) + String(encryptedVal)
-    );
-    if (!identityOk) {
-      console.warn(`Invalid identity signature from ${targetId}`);
-      showStatusMessage('Message identity check failed.');
-      return;
-    }
-    clientIdentityKeys.set(targetId, data.identityPublic);
     let metadataStr = '';
     let braceCount = 0;
     for (let i = 0; i < rawData.length; i++) {
@@ -621,10 +678,10 @@ async function processReceivedMessage(data, targetId) {
     return;
   }
   appendMessage({ username: senderUsername, timestamp, type: contentType, content: sanitizeMessage(contentOrData), isSelf: senderUsername === username, fileName: data.filename || 'file' });
-  if (isInitiator) {
+  if (isInitiator && !isDr && !isSk) {
     dataChannels.forEach((dc, id) => {
       if (id !== targetId && dc.readyState === 'open') {
-        dc.send(event.data);
+        try { dc.send(JSON.stringify(data)); } catch (e) {}
       }
     });
   }

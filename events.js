@@ -31,12 +31,12 @@ function detectImageMime(base64) {
 // generateUserKeypair moved to top to ensure it's defined before onclick handlers
 async function generateUserKeypair() {
   try {
-    const keys = await ensurePersistentKeys();
-    if (keys.recoveryKit) {
+    const keys = await getSessionKeys();
+    if (!isGuestUser() && keys.recoveryKit) {
       showRecoveryKitModal(keys.recoveryKit);
     }
     applyPersistentIdentity(keys);
-    console.log('Generated/loaded persistent user keypair');
+    console.log('Generated/loaded session user keypair');
     return keys.ecdhPubB64;
   } catch (error) {
     console.error('generateUserKeypair error:', error);
@@ -97,13 +97,13 @@ let code = generateCode();
 function readInitialClientId() {
   if (typeof window !== 'undefined' && window.__CLIENT_ID__) return window.__CLIENT_ID__;
   try {
-    const stored = localStorage.getItem('anonClientId');
+    const stored = sessionStorage.getItem('anonClientId');
     if (stored) return stored;
   } catch (e) {}
   return newClientId();
 }
 let clientId = readInitialClientId();
-try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
+try { sessionStorage.setItem('anonClientId', clientId); } catch (e) {}
 let username = '';
 let isInitiator = false;
 let isConnected = false;
@@ -237,19 +237,16 @@ let pinReconnect = false;
 let connectedWaiters = [];
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
+let p2pOnly = false;
+let suppressAutoBurnUntil = 0;
+let hideLocalTimer = null;
+let hideRoomTimer = null;
 if (typeof window !== 'undefined') {
 const serverUrls = [
-  'wss://signaling-server-zc6m.onrender.com',
-  'wss://signaling-server-1.onrender.com'
+  'wss://signaling-server-zc6m.onrender.com'
 ];
 function serverForCode(roomCode) {
-  const s = String(roomCode || '').replace(/-/g, '').toLowerCase();
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return serverUrls[(h >>> 0) % serverUrls.length];
+  return serverUrls[0];
 }
 function notifyConnected() {
   const waiters = connectedWaiters.slice();
@@ -294,17 +291,8 @@ async function ensureServerForCode(roomCode) {
 }
 async function initIdentityKeys() {
   if (identityKeyPair && identityPubB64) return;
-  const persistent = await loadPersistentKeys();
-  if (persistent) {
-    applyPersistentIdentity(persistent);
-    return;
-  }
-  identityKeyPair = await window.crypto.subtle.generateKey(
-    { name: 'ECDSA', namedCurve: 'P-384' },
-    false,
-    ['sign', 'verify']
-  );
-  identityPubB64 = await exportIdentityPublic(identityKeyPair.publicKey);
+  const keys = await getSessionKeys();
+  applyPersistentIdentity(keys);
 }
 function applyPersistentIdentity(keys) {
   persistentEcdhPrivate = keys.ecdhPrivate;
@@ -328,7 +316,7 @@ lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code
 socket = new WebSocket(lastWsUrl);
 bindSocketHandlers(socket);
 console.log(`WebSocket created, connected to ${lastWsUrl}`);
-  username = localStorage.getItem('username')?.trim() || '';
+  username = (sessionStorage.getItem('username') || localStorage.getItem('username') || '').trim();
   globalMessageRate.startTime = performance.now();
   statusElement = document.getElementById('status');
   codeDisplayElement = document.getElementById('codeDisplay');
@@ -375,12 +363,7 @@ const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  if (isInitiator) {
-    addUserModal.classList.add('active');
-    addUserModal.focus();
-  } else {
-    showStatusMessage('Only the person who started the room can raise the user limit.');
-  }
+  inviteAnotherSeat();
 });
 addUserModal.addEventListener('click', (e) => {
   if (e.target === addUserModal) {
@@ -412,7 +395,7 @@ function logout() {
   token = '';
   refreshToken = '';
   clientId = newClientId();
-  try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
+  try { sessionStorage.setItem('anonClientId', clientId); } catch (e) {}
   localStorage.removeItem('username');
   processedMessageIds.clear();
   connectedClients.clear();
@@ -524,7 +507,7 @@ async function handleSocketMessage(event) {
       if (message.turnCredential) turnCredential = message.turnCredential;
       if (message.clientId) {
         clientId = message.clientId;
-        try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
+        try { sessionStorage.setItem('anonClientId', clientId); } catch (e) {}
       }
       console.log('Received authentication tokens');
       startKeepAlive();
@@ -615,7 +598,7 @@ async function handleSocketMessage(event) {
         if (refreshFailures > 3) {
           console.log('Exceeded refresh failures, forcing full reconnect with new clientId');
           clientId = newClientId();
-          try { localStorage.setItem('anonClientId', clientId); } catch (e) {}
+          try { sessionStorage.setItem('anonClientId', clientId); } catch (e) {}
           token = '';
           refreshToken = '';
           refreshFailures = 0;
@@ -746,7 +729,7 @@ async function handleSocketMessage(event) {
         if (useRelay) {
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode (E2EE)';
+            privacyStatus.textContent = 'Server backup · still encrypted';
             privacyStatus.classList.remove('hidden');
           }
           isConnected = true;
@@ -934,7 +917,7 @@ async function handleSocketMessage(event) {
           isConnected = true;
           const privacyStatus = document.getElementById('privacyStatus');
           if (privacyStatus) {
-            privacyStatus.textContent = 'Relay Mode (E2EE)';
+            privacyStatus.textContent = 'Server backup · still encrypted';
             privacyStatus.classList.remove('hidden');
           }
           inputContainer.classList.remove('hidden');
@@ -1179,7 +1162,7 @@ async function handleSocketMessage(event) {
     }
     if (message.type === 'login-success') {
       username = message.username;
-      localStorage.setItem('username', username);
+      sessionStorage.setItem('username', username);
       const loginSuccess = document.getElementById('loginSuccess');
       loginSuccess.textContent = `Logged in as ${username}`;
       if (message.offlineMessages && message.offlineMessages.length > 0) {
@@ -1466,7 +1449,7 @@ function setupWaitingForJoin(codeParam) {
       showStatusMessage('Invalid username. Using "Guest".');
       username = 'Guest';
     }
-    localStorage.setItem('username', username);
+    sessionStorage.setItem('username', username);
   }
   // Set pendingCode to trigger autoConnect after token
   pendingCode = codeParam;
@@ -1716,7 +1699,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       username = usernameInput;
-      localStorage.setItem('username', username);
+      sessionStorage.setItem('username', username);
       code = inputCode;
       showTotpInputModal(code);
     };
@@ -1759,8 +1742,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     username = usernameInput;
-    localStorage.setItem('username', username);
-    console.log('Username set in localStorage:', username);
+    sessionStorage.setItem('username', username);
+    const p2pBox = document.getElementById('p2pOnlyCheck');
+    p2pOnly = !!(p2pBox && p2pBox.checked);
     code = generateCode();
     codeDisplayElement.textContent = `Your code: ${code}`;
     codeDisplayElement.classList.remove('hidden');
@@ -1791,8 +1775,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     username = usernameInput;
-    localStorage.setItem('username', username);
-    console.log('Username set in localStorage:', username);
+    sessionStorage.setItem('username', username);
+    const p2pBoxConnect = document.getElementById('p2pOnlyCheckConnect');
+    p2pOnly = !!(p2pBoxConnect && p2pBoxConnect.checked);
     code = inputCode;
     codeDisplayElement.textContent = `Using code: ${code}`;
     codeDisplayElement.classList.remove('hidden');
@@ -1983,6 +1968,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   document.getElementById('textCodeShareButton').onclick = async () => {
+    suppressAutoBurnUntil = Date.now() + 120000;
     const inviteCode = currentInviteCode();
     if (!inviteCode) {
       showStatusMessage('No code to send.');
@@ -2054,6 +2040,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   window.addEventListener('pagehide', (event) => {
     if (event.persisted) return;
+    if (Date.now() < suppressAutoBurnUntil) return;
     burnTranscript();
     try {
       if (socket && socket.readyState === WebSocket.OPEN && code && token) {
@@ -2065,9 +2052,27 @@ document.addEventListener('DOMContentLoaded', () => {
     burnTranscript();
   });
   window.addEventListener('pageshow', (event) => {
-    if (event.persisted && typeof showStatusMessage === 'function') {
-      showStatusMessage('Still in the room. Chat was kept while you switched apps.');
+    if (hideLocalTimer) { clearTimeout(hideLocalTimer); hideLocalTimer = null; }
+    if (hideRoomTimer) { clearTimeout(hideRoomTimer); hideRoomTimer = null; }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      if (hideLocalTimer) { clearTimeout(hideLocalTimer); hideLocalTimer = null; }
+      if (hideRoomTimer) { clearTimeout(hideRoomTimer); hideRoomTimer = null; }
+      return;
     }
+    if (Date.now() < suppressAutoBurnUntil) return;
+    hideLocalTimer = setTimeout(() => {
+      if (!document.hidden) return;
+      if (Date.now() < suppressAutoBurnUntil) return;
+      burnTranscript();
+    }, 4000);
+    hideRoomTimer = setTimeout(() => {
+      if (!document.hidden) return;
+      if (Date.now() < suppressAutoBurnUntil) return;
+      requestRoomWipe();
+      setTimeout(() => burnChatSession(), 300);
+    }, 20000);
   });
 });
 async function sendMessage(content) {
@@ -2213,7 +2218,7 @@ async function inviteEncryptedChat(toUsername, theirPub) {
   if (!validateUsername(username)) {
     username = prompt('Enter your username (1-16 alphanumeric characters):')?.trim() || 'Guest';
     if (!validateUsername(username)) username = 'Guest';
-    localStorage.setItem('username', username);
+    sessionStorage.setItem('username', username);
   }
   code = generateCode();
   const messageId = generateMessageId();

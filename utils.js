@@ -152,6 +152,20 @@ function updateMaxClientsUI() {
   }
 }
 
+function inviteAnotherSeat() {
+  if (!isInitiator) {
+    showStatusMessage('Only the person who started the room can add someone.');
+    return;
+  }
+  if (maxClients >= 10) {
+    showStatusMessage('Room is already at 10 people. Same code still works for anyone already invited.');
+    return;
+  }
+  const next = maxClients + 1;
+  setMaxClients(next);
+  showStatusMessage('Room now allows ' + next + '. Same code — send it to the next person.');
+}
+
 function setMaxClients(n) {
   if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
     maxClients = Math.min(n, 10);
@@ -344,6 +358,22 @@ function burnBlobUrls(root) {
   });
 }
 
+function burnCrumbs() {
+  try { localStorage.removeItem('username'); } catch (e) {}
+  try { localStorage.removeItem('anonClientId'); } catch (e) {}
+  try { localStorage.removeItem('recentCodes'); } catch (e) {}
+  try { sessionStorage.removeItem('username'); } catch (e) {}
+  try { sessionStorage.removeItem('anonClientId'); } catch (e) {}
+  try { sessionStorage.removeItem('anonomoose-draft'); } catch (e) {}
+  if (typeof isGuestUser === 'function' && isGuestUser()) {
+    if (typeof wipeSessionKeys === 'function') wipeSessionKeys();
+    identityKeyPair = null;
+    identityPubB64 = null;
+    persistentEcdhPrivate = null;
+  }
+  if (typeof wipeLiveDr === 'function') wipeLiveDr();
+}
+
 function burnTranscript() {
   const messagesEl = document.getElementById('messages');
   if (messagesEl) {
@@ -382,6 +412,7 @@ function burnTranscript() {
 
 function burnChatSession() {
   burnTranscript();
+  burnCrumbs();
   try { localStorage.removeItem('recentCodes'); } catch (e) {}
   const recent = document.getElementById('recentCodesList');
   if (recent) recent.innerHTML = '';

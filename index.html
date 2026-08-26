@@ -866,15 +866,35 @@
       padding: 0;
       margin-left: 0.5rem;
     }
+    #privacyStatus.mode-p2p { color: #059669; font-weight: 700; }
+    #privacyStatus.mode-relay { color: #d97706; font-weight: 700; }
+    #privacyStatus.mode-wait { color: #6b7280; }
+    .tagline {
+      text-align: center;
+      color: #4b5563;
+      font-size: 0.95rem;
+      margin: -1.5rem 0 1.5rem;
+      line-height: 1.4;
+    }
+    .p2p-only-row {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.85rem;
+      color: #374151;
+      margin: 0.4rem 0 0.75rem;
+    }
+    .p2p-only-row input { width: auto; }
   </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
-  <div id="cornerLogo" class="corner-logo" title="Tap to burn messages on this phone. Tap twice to wipe everyone in the room and leave." aria-label="Burn chat"></div>   <!-- ADD THIS LINE HERE -->
+  <div id="cornerLogo" class="corner-logo" title="Tap to burn messages on this phone. Tap twice to wipe everyone in the room and leave." aria-label="Burn chat"></div>
   <div class="flex w-full max-w-xl mx-auto">
     <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
-      <h1 class="text-3xl font-bold mb-8 text-center text-gray-800">Anonomoose Chat</h1>
+      <h1 class="text-3xl font-bold mb-2 text-center text-gray-800">Anonomoose Chat</h1>
+      <p class="tagline">Encrypted chat. Code to join. Moose to burn. Nothing saved.</p>
       <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Start a new chat or connect to an existing one</div>
-      <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">E2E Encrypted (P2P)</div>
+      <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">Phone to phone · encrypted</div>
       <div id="initialContainer">
         <button id="startChatToggleButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-blue-600 transition-colors" aria-label="Start a new chat">Start Chat</button>
         <button id="start2FAChatButton" class="bg-purple-500 text-white px-4 py-2 rounded w-full mb-2 hover:bg-purple-600 transition-colors" aria-label="Start 2FA Room">Start 2FA Room</button>
@@ -889,6 +909,7 @@
         <label for="usernameInput" class="sr-only">Enter your username</label>
         <input id="usernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameHelp" maxlength="16">
         <div id="usernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
+        <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheck"> Phone-to-phone only (never use the server backup)</label>
         <button id="joinWithUsernameButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Join chat with username">Join Chat</button>
         <button id="backButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
       </div>
@@ -899,7 +920,7 @@
           <button id="button1" aria-label="Send code to random chat board">Send Code</button>
           <button id="button2" aria-label="Join a random chat">Random Chat</button>
           <button id="textCodeButton" aria-label="Share chat code">Text Code</button>
-          <button id="addUserText" class="hidden" aria-label="Set maximum users">Add User</button>
+          <button id="addUserText" class="hidden" aria-label="Add another person">Add User</button>
         </div>
         <div class="messages-wrapper">
           <div id="messages" role="log" aria-live="polite"></div>
@@ -964,6 +985,7 @@
         <label for="usernameConnectInput" class="sr-only">Enter your username</label>
         <input id="usernameConnectInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameConnectHelp" maxlength="16">
         <div id="usernameConnectHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
+        <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheckConnect"> Phone-to-phone only (never use the server backup)</label>
         <label for="codeInput" class="sr-only">Enter chat code</label>
         <input id="codeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter code (xxxx-xxxx-xxxx-xxxx)" aria-describedby="codeHelp" maxlength="19">
         <div id="codeHelp" class="text-sm text-gray-600 mb-2">Code format: xxxx-xxxx-xxxx-xxxx</div>
@@ -1013,7 +1035,9 @@
       <p><strong>Call:</strong> Start from Attach. During a call the left button hangs up and the speaker button appears.</p>
       <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>
       <p><strong>Text Code:</strong> Opens your own Messages app with the join link only. We never send SMS from our servers and we never store phone numbers. If that phone is taken later, the text only shows a code.</p>
-      <p><strong>Moose (corner):</strong> Tap once to burn every message, image, voice note and draft on this phone. Tap twice quickly to tell everyone in the room to burn too, then leave. If they already closed the app, only this phone is wiped. Refreshing or closing the tab also burns this device. Live chats are never saved.</p>
+      <p><strong>Add User:</strong> One tap adds one more seat. Same code, send it to the next person.</p>
+      <p><strong>Phone-to-phone only:</strong> Tick this if you never want the encrypted server backup. Green badge = phones talking directly. Amber = backup still encrypted.</p>
+      <p><strong>Moose (corner):</strong> Tap once to burn this phone. Tap twice to wipe everyone still in the room, kill the code, and leave. Switching away for 20 seconds also burns the room. Sharing a text code gives you two minutes so Messages does not wipe you. Refreshing or closing the tab burns this device.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
       <p><strong>Login:</strong> Login with your claimed username to retrieve it on new devices and get offline messages.</p>
       <p><strong>Search User:</strong> Search for a claimed username. Invites and offline mail are end-to-end encrypted (Double Ratchet). The server cannot read them or see who mailed whom.</p>

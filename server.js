@@ -305,6 +305,28 @@ async function markOffline(id) {
   if (!id) return;
   try { await redisClient.del('online:' + id); } catch (e) {}
 }
+async function destroyRoom(code) {
+  if (!code) return;
+  try { await redisClient.set(`burned:${code}`, '1', { EX: 86400 }); } catch (e) {}
+  const room = rooms.get(code);
+  if (room && room.clients) {
+    room.clients.forEach((entry) => {
+      try { entry.ws.send(JSON.stringify({ type: 'room-wipe', clientId: 'server' })); } catch (e) {}
+      try { entry.ws.close(); } catch (e) {}
+    });
+    rooms.delete(code);
+  }
+  try {
+    await redisClient.del(`room:${code}`);
+    await redisClient.del(`room:${code}:clients`);
+    await redisClient.del(`room:${code}:totp`);
+    await redisClient.del(`room:${code}:nonces`);
+  } catch (e) {}
+  randomCodes.delete(code);
+  try { await redisClient.sRem('randomCodes', code); } catch (e) {}
+  try { broadcastRandomCodes(); } catch (e) {}
+  logger.info('Destroyed burned room %s', code);
+}
 const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
   enableService: true,
@@ -1043,6 +1065,11 @@ wss.on('connection', (ws, req) => {
           incrementFailure(clientIp, ws.userAgent);
           return;
         }
+        const burned = await redisClient.get(`burned:${code}`);
+        if (burned) {
+          ws.send(JSON.stringify({ type: 'error', message: 'That room was burned. Start a new chat.', code: data.code }));
+          return;
+        }
         const roomKey = `room:${code}`;
         const exists = await redisClient.exists(roomKey);
         let roomState;
@@ -1471,6 +1498,7 @@ wss.on('connection', (ws, req) => {
           type: 'broadcast',
           clientMessage: JSON.stringify({ type: 'room-wipe', clientId: data.clientId })
         }));
+        setTimeout(() => { destroyRoom(data.code).catch(() => {}); }, 400);
         return;
       }
       if (data.type === 'ping') {

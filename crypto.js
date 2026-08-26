@@ -641,9 +641,60 @@ async function migrateLegacyLocalStorageKeys() {
 }
 
 async function ensurePersistentKeys() {
+  if (sessionKeyBundle) return sessionKeyBundle;
   const existing = await loadPersistentKeys();
-  if (existing) return existing;
+  if (existing) {
+    sessionKeyBundle = existing;
+    return existing;
+  }
   const migrated = await migrateLegacyLocalStorageKeys();
-  if (migrated) return migrated;
-  return createPersistentKeys();
+  if (migrated) {
+    sessionKeyBundle = migrated;
+    return migrated;
+  }
+  if (isGuestUser()) {
+    sessionKeyBundle = await makeEphemeralIdentity();
+    return sessionKeyBundle;
+  }
+  sessionKeyBundle = await createPersistentKeys();
+  return sessionKeyBundle;
+}
+
+let sessionKeyBundle = null;
+
+function isGuestUser() {
+  try {
+    return !(window.sbAuth && typeof window.sbAuth.isLoggedIn === 'function' && window.sbAuth.isLoggedIn());
+  } catch (e) {
+    return true;
+  }
+}
+
+async function makeEphemeralIdentity() {
+  const ecdh = await window.crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-384' },
+    false,
+    ['deriveKey', 'deriveBits']
+  );
+  const ecdsa = await window.crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-384' },
+    false,
+    ['sign', 'verify']
+  );
+  return {
+    ecdhPrivate: ecdh.privateKey,
+    ecdhPublic: ecdh.publicKey,
+    ecdsaPrivate: ecdsa.privateKey,
+    ecdsaPublic: ecdsa.publicKey,
+    ecdhPubB64: await exportPublicKey(ecdh.publicKey),
+    ecdsaPubB64: await exportIdentityPublic(ecdsa.publicKey)
+  };
+}
+
+async function getSessionKeys() {
+  return ensurePersistentKeys();
+}
+
+function wipeSessionKeys() {
+  sessionKeyBundle = null;
 }

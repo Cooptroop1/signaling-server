@@ -84,8 +84,9 @@ function hasOpenDataChannel() {
 }
 async function prepareAndSendMessage({ content, type = 'message', file = null, base64 = null }) {
   const p2pOpen = hasOpenDataChannel();
-  if (!username || (!p2pOpen && !useRelay && !features.enableRelay)) {
-    showStatusMessage('Error: Ensure you are connected and have a username.');
+  const allowRelay = !p2pOnly && features.enableRelay;
+  if (!username || (!p2pOpen && !useRelay && !allowRelay)) {
+    showStatusMessage(p2pOnly ? 'Waiting for phone-to-phone. Relay is off.' : 'Error: Ensure you are connected and have a username.');
     return;
   }
   const now = performance.now();
@@ -196,33 +197,46 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   if (sendViaP2p) useRelay = false;
   let sent = false;
   if (sendViaP2p) {
-    updatePrivacyStatus('E2E Encrypted (P2P)');
-    payload.encryptedBlob = encrypted;
-    const jsonString = JSON.stringify(payload);
+    updatePrivacyStatus('Phone to phone · encrypted');
+    const openIds = [];
     dataChannels.forEach((dataChannel, id) => {
-      if (!dataChannel || dataChannel.readyState !== 'open') return;
+      if (dataChannel && dataChannel.readyState === 'open') openIds.push(id);
+    });
+    const pairwiseDr = openIds.length === 1 && typeof liveDrReady !== 'undefined' && liveDrReady.has(openIds[0]);
+    for (let i = 0; i < openIds.length; i++) {
+      const id = openIds[i];
+      const dataChannel = dataChannels.get(id);
+      let packet = Object.assign({}, payload);
+      if (pairwiseDr) {
+        try {
+          const dr = await drEncryptLive(id, rawData, messageId);
+          packet = Object.assign(packet, dr);
+        } catch (e) {
+          console.warn('Live DR encrypt fallback to room key', e);
+          packet.encryptedBlob = encrypted;
+        }
+      } else {
+        packet.encryptedBlob = encrypted;
+      }
+      const jsonString = JSON.stringify(packet);
       if (jsonString.length > CHUNK_SIZE) {
         const chunkId = generateMessageId();
-        const chunks = [];
-        for (let i = 0; i < jsonString.length; i += CHUNK_SIZE) {
-          chunks.push(jsonString.slice(i, i + CHUNK_SIZE));
-        }
-        for (let index = 0; index < chunks.length; index++) {
-          dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: chunks.length, data: chunks[index] }));
+        for (let offset = 0, index = 0; offset < jsonString.length; offset += CHUNK_SIZE, index++) {
+          dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: Math.ceil(jsonString.length / CHUNK_SIZE), data: jsonString.slice(offset, offset + CHUNK_SIZE) }));
         }
       } else {
         dataChannel.send(jsonString);
       }
       sent = true;
-    });
+    }
     if (!sent) {
       console.log('No open data channels, queuing message for retry');
       if (!messageQueue.has('global')) messageQueue.set('global', []);
       messageQueue.get('global').push({ type, payload });
     }
-  } else if (features.enableRelay) {
+  } else if (allowRelay) {
     useRelay = true;
-    updatePrivacyStatus('Relay Mode (E2EE)');
+    updatePrivacyStatus('Server backup · still encrypted');
     if (type === 'message') payload.encryptedContent = encrypted;
     else {
       payload.encryptedData = encrypted;
@@ -275,9 +289,14 @@ async function sendMedia(file, type) {
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
   if (!features.enableP2P) {
+    if (p2pOnly) {
+      showStatusMessage('Phone-to-phone only is on, but P2P is disabled.');
+      updatePrivacyStatus('Waiting for phone-to-phone');
+      return;
+    }
     console.log('P2P disabled by admin, forcing relay mode');
     useRelay = true;
-    updatePrivacyStatus('Relay Mode (E2EE)');
+    updatePrivacyStatus('Server backup · still encrypted');
     isConnected = true;
     updateUIState(true);
     updateMaxClientsUI();
@@ -287,10 +306,7 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Cleaning up existing connection with ${targetId}`);
     cleanupPeerConnection(targetId);
   }
-  const iceServers = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun.relay.metered.ca:80' }
-  ];
+  const iceServers = [];
   if (turnUsername && turnCredential) {
     iceServers.push(
       { urls: 'turn:global.relay.metered.ca:80', username: turnUsername, credential: turnCredential },
@@ -358,7 +374,7 @@ async function startPeerConnection(targetId, isOfferer) {
       retryCounts.delete(targetId);
       clearTimeout(connectionTimeouts.get(targetId));
       updateMaxClientsUI();
-      updatePrivacyStatus('E2E Encrypted (P2P)');
+      updatePrivacyStatus('Phone to phone · encrypted');
       processMessageQueue(targetId);
     }
   };
@@ -410,19 +426,19 @@ async function startPeerConnection(targetId, isOfferer) {
   const timeout = setTimeout(() => {
     if (hasOpenDataChannel()) {
       useRelay = false;
-      updatePrivacyStatus('E2E Encrypted (P2P)');
+      updatePrivacyStatus('Phone to phone · encrypted');
       return;
     }
     if (!dataChannels.get(targetId) || dataChannels.get(targetId).readyState !== 'open') {
       console.log(`P2P failed with ${targetId}, checking relay availability`);
-      if (features.enableRelay) {
+      if (!p2pOnly && features.enableRelay) {
         useRelay = true;
-        updatePrivacyStatus('Relay Mode (E2EE)');
+        updatePrivacyStatus('Server backup · still encrypted');
         isConnected = true;
         updateUIState(true);
       } else {
-        showStatusMessage('P2P connection failed and relay mode is disabled. Cannot send messages.');
-        cleanupPeerConnection(targetId);
+        showStatusMessage('Waiting for phone-to-phone. Relay is off.');
+        updatePrivacyStatus('Waiting for phone-to-phone');
       }
     }
   }, 10000);
@@ -434,13 +450,9 @@ function setupDataChannel(dataChannel, targetId) {
     console.log(`Data channel opened with ${targetId} for code: ${code}, state: ${dataChannel.readyState}`);
     isConnected = true;
     useRelay = false;
-    updatePrivacyStatus('E2E Encrypted (P2P)');
+    updatePrivacyStatus('Phone to phone · encrypted');
     try {
-      ensurePersistentKeys().then(me => {
-        if (me && me.ecdhPubB64 && dataChannel.readyState === 'open') {
-          dataChannel.send(JSON.stringify({ type: 'dr-hello', ecdh: me.ecdhPubB64, identityPublic: identityPubB64 || me.ecdsaPubB64 }));
-        }
-      }).catch(() => {});
+      sendLiveDrHello(targetId, dataChannel);
     } catch (e) {}
     updateUIState(true, true);
     clearTimeout(connectionTimeouts.get(targetId));
@@ -554,8 +566,7 @@ async function processReceivedMessage(data, targetId) {
     return;
   }
   if (data.type === 'dr-hello') {
-    if (data.ecdh && typeof clientEcdhKeys !== 'undefined') clientEcdhKeys.set(targetId, data.ecdh);
-    if (data.identityPublic && typeof clientIdentityKeys !== 'undefined') clientIdentityKeys.set(targetId, data.identityPublic);
+    handleLiveDrHello(targetId, data, dataChannels.get(targetId)).catch(() => {});
     return;
   }
   const isDr = !!(data.header && data.body);
@@ -583,7 +594,14 @@ async function processReceivedMessage(data, targetId) {
   try {
     let rawData = null;
     if (isDr || isSk) {
-      rawData = await decryptLivePacket(data, targetId);
+      try {
+        rawData = await decryptLivePacket(data, targetId);
+      } catch (e) {
+        const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
+        if (!encrypted) throw e;
+        const messageKey = await deriveMessageKey();
+        rawData = await decryptRaw(messageKey, encrypted, data.iv, String(data.messageId) + '|' + String(data.nonce));
+      }
     } else {
       const messageKey = await deriveMessageKey();
       const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
@@ -908,7 +926,10 @@ function updatePrivacyStatus(text) {
   const privacyStatus = document.getElementById('privacyStatus');
   if (privacyStatus) {
     privacyStatus.textContent = text;
-    privacyStatus.classList.remove('hidden');
+    privacyStatus.classList.remove('hidden', 'mode-p2p', 'mode-relay', 'mode-wait');
+    if (/phone to phone/i.test(text) || /P2P/i.test(text)) privacyStatus.classList.add('mode-p2p');
+    else if (/backup|Relay/i.test(text)) privacyStatus.classList.add('mode-relay');
+    else privacyStatus.classList.add('mode-wait');
   }
 }
 function updateUIState(isConnected = false, hasChat = false) {

@@ -376,9 +376,110 @@ async function skDecrypt(peerId, data) {
   return decryptRaw(aes, blob, data.iv, aad);
 }
 
+const liveDrStates = new Map();
+const liveDrReady = new Set();
+
+function wipeLiveDr() {
+  liveDrStates.clear();
+  liveDrReady.clear();
+}
+
+function iAmAlice(peerId) {
+  return String(clientId) < String(peerId);
+}
+
+async function sendLiveDrHello(peerId, dataChannel) {
+  if (!dataChannel || dataChannel.readyState !== 'open') return;
+  const me = await getSessionKeys();
+  const msg = { type: 'dr-hello', ecdh: me.ecdhPubB64, identityPublic: me.ecdsaPubB64 || identityPubB64 };
+  const their = clientEcdhKeys.get(peerId);
+  if (iAmAlice(peerId) && their) {
+    if (!liveDrStates.has(peerId)) {
+      const state = await drInitAlice(me, their);
+      liveDrStates.set(peerId, state);
+      liveDrReady.add(peerId);
+    }
+    msg.dh = liveDrStates.get(peerId).dhsPubB64;
+  }
+  try { dataChannel.send(JSON.stringify(msg)); } catch (e) {}
+}
+
+async function handleLiveDrHello(peerId, data, dataChannel) {
+  if (data.ecdh) clientEcdhKeys.set(peerId, data.ecdh);
+  if (data.identityPublic && typeof clientIdentityKeys !== 'undefined') {
+    clientIdentityKeys.set(peerId, data.identityPublic);
+  }
+  const me = await getSessionKeys();
+  if (!iAmAlice(peerId) && data.ecdh && data.dh && !liveDrReady.has(peerId)) {
+    const state = await drInitBob(me, data.ecdh, data.dh);
+    liveDrStates.set(peerId, state);
+    liveDrReady.add(peerId);
+  }
+  if (iAmAlice(peerId) && data.ecdh && !liveDrReady.has(peerId)) {
+    await sendLiveDrHello(peerId, dataChannel || dataChannels.get(peerId));
+  }
+}
+
+async function drEncryptLive(peerId, plaintext, messageId) {
+  const me = await getSessionKeys();
+  let state = liveDrStates.get(peerId);
+  if (!state || !state.cks) throw new Error('Live DR not ready');
+  const n = state.ns;
+  const pn = state.pn;
+  const dh = state.dhsPubB64;
+  const { ck, mk } = await kdfCk(state.cks);
+  state.cks = ck;
+  state.ns = n + 1;
+  const aes = await importMk(mk);
+  const aad = messageId + '|' + n + '|' + pn + '|' + dh;
+  const body = await encryptRaw(aes, plaintext, aad);
+  const identitySig = await signIdentitySignature(me.ecdsaPrivate, aad + body.encrypted);
+  return {
+    header: { dh, n, pn },
+    body,
+    identityPublic: me.ecdsaPubB64,
+    identityEcdh: me.ecdhPubB64,
+    identitySig
+  };
+}
+
+async function drDecryptLive(packet, peerId) {
+  const me = await getSessionKeys();
+  const header = packet.header;
+  if (!header || !packet.body || !packet.identityEcdh) throw new Error('Invalid live DR packet');
+  const aad = packet.messageId + '|' + header.n + '|' + header.pn + '|' + header.dh;
+  if (packet.identitySig) {
+    const sigOk = await verifyIdentitySignature(packet.identityPublic, packet.identitySig, aad + packet.body.encrypted);
+    if (!sigOk) throw new Error('Live DR identity signature failed');
+  }
+  let state = liveDrStates.get(peerId);
+  if (!state) {
+    state = await drInitBob(me, packet.identityEcdh, header.dh);
+    liveDrStates.set(peerId, state);
+    liveDrReady.add(peerId);
+  }
+  const skippedPlain = await trySkipped(state, header, packet.body.encrypted, packet.body.iv, packet.messageId);
+  if (skippedPlain !== null) return skippedPlain;
+  if (header.dh !== state.dhr) {
+    if (state.ckr) await skipKeys(state, header.pn);
+    await drDhRatchet(state, header.dh);
+  }
+  await skipKeys(state, header.n);
+  const { ck, mk } = await kdfCk(state.ckr);
+  state.ckr = ck;
+  state.nr = header.n + 1;
+  const aes = await importMk(mk);
+  return decryptRaw(aes, packet.body.encrypted, packet.body.iv, aad);
+}
+
 async function decryptLivePacket(data, peerId) {
   if (data && data.header && data.body && data.identityEcdh) {
-    return drDecrypt(data, data.messageId, 'peer:' + peerId);
+    try {
+      return await drDecryptLive(data, peerId);
+    } catch (e) {
+      console.warn('Live DR decrypt failed, trying stored DR', e);
+      return drDecrypt(data, data.messageId, 'peer:' + peerId);
+    }
   }
   if (data && data.sk) {
     return skDecrypt(peerId, data);

@@ -198,37 +198,21 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   let sent = false;
   if (sendViaP2p) {
     updatePrivacyStatus('Phone to phone · encrypted');
-    const openIds = [];
+    payload.encryptedBlob = encrypted;
+    const jsonString = JSON.stringify(payload);
     dataChannels.forEach((dataChannel, id) => {
-      if (dataChannel && dataChannel.readyState === 'open') openIds.push(id);
-    });
-    const pairwiseDr = openIds.length === 1 && typeof liveDrReady !== 'undefined' && liveDrReady.has(openIds[0]);
-    for (let i = 0; i < openIds.length; i++) {
-      const id = openIds[i];
-      const dataChannel = dataChannels.get(id);
-      let packet = Object.assign({}, payload);
-      if (pairwiseDr) {
-        try {
-          const dr = await drEncryptLive(id, rawData, messageId);
-          packet = Object.assign(packet, dr);
-        } catch (e) {
-          console.warn('Live DR encrypt fallback to room key', e);
-          packet.encryptedBlob = encrypted;
-        }
-      } else {
-        packet.encryptedBlob = encrypted;
-      }
-      const jsonString = JSON.stringify(packet);
+      if (!dataChannel || dataChannel.readyState !== 'open') return;
       if (jsonString.length > CHUNK_SIZE) {
         const chunkId = generateMessageId();
+        const total = Math.ceil(jsonString.length / CHUNK_SIZE);
         for (let offset = 0, index = 0; offset < jsonString.length; offset += CHUNK_SIZE, index++) {
-          dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total: Math.ceil(jsonString.length / CHUNK_SIZE), data: jsonString.slice(offset, offset + CHUNK_SIZE) }));
+          dataChannel.send(JSON.stringify({ chunk: true, chunkId, index, total, data: jsonString.slice(offset, offset + CHUNK_SIZE) }));
         }
       } else {
         dataChannel.send(jsonString);
       }
       sent = true;
-    }
+    });
     if (!sent) {
       console.log('No open data channels, queuing message for retry');
       if (!messageQueue.has('global')) messageQueue.set('global', []);
@@ -594,13 +578,12 @@ async function processReceivedMessage(data, targetId) {
   try {
     let rawData = null;
     if (isDr || isSk) {
-      try {
-        rawData = await decryptLivePacket(data, targetId);
-      } catch (e) {
-        const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
-        if (!encrypted) throw e;
+      const encrypted = data.encryptedBlob || data.encryptedContent || data.encryptedData;
+      if (encrypted) {
         const messageKey = await deriveMessageKey();
         rawData = await decryptRaw(messageKey, encrypted, data.iv, String(data.messageId) + '|' + String(data.nonce));
+      } else {
+        rawData = await decryptLivePacket(data, targetId);
       }
     } else {
       const messageKey = await deriveMessageKey();

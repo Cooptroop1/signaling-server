@@ -100,8 +100,6 @@ function initializeMaxClientsUI() {
   const addUserRadios = document.getElementById('addUserRadios');
   if (addUserText && addUserModal && addUserRadios) {
     addUserText.classList.toggle('hidden', !isInitiator);
-    const jumpInit = document.getElementById('addJumpRow');
-    if (jumpInit) jumpInit.classList.toggle('hidden', !isInitiator);
     if (isInitiator) {
       log('info', `Creating buttons for maxClients in modal, current maxClients: ${maxClients}`);
       addUserRadios.innerHTML = '';
@@ -139,8 +137,6 @@ function updateMaxClientsUI() {
   if (addUserText) {
     addUserText.classList.toggle('hidden', !isInitiator);
   }
-  const jump = document.getElementById('addJumpRow');
-  if (jump) jump.classList.toggle('hidden', !isInitiator);
   const buttons = document.querySelectorAll('#addUserRadios button');
   log('info', `Found buttons in modal: ${buttons.length}`);
   buttons.forEach(button => {
@@ -193,7 +189,7 @@ function updateRoomHeadcount() {
   }
 }
 
-function inviteAnotherSeat(delta) {
+function inviteAnotherSeat() {
   if (!isInitiator) {
     showStatusMessage('Only the person who started the room can add someone.');
     return;
@@ -203,8 +199,7 @@ function inviteAnotherSeat(delta) {
     showStatusMessage('Room is already at ' + cap + ' people. Same code still works for anyone already invited.');
     return;
   }
-  const step = Math.max(1, parseInt(delta, 10) || 1);
-  const next = Math.min(maxClients + step, cap);
+  const next = Math.min(maxClients + 1, cap);
   if (next > 4) {
     if (typeof p2pOnly !== 'undefined' && p2pOnly) {
       showStatusMessage('Phone-to-phone only allows 4 people. Untick that, then add more.');
@@ -219,7 +214,7 @@ function inviteAnotherSeat(delta) {
 function setMaxClients(n) {
   const cap = 50;
   if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
-    maxClients = Math.min(n, cap);
+    maxClients = Math.max(1, Math.min(n, cap));
     log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);
     socket.send(JSON.stringify({ type: 'set-max-clients', maxClients: maxClients, code, clientId, token }));
     updateMaxClientsUI();

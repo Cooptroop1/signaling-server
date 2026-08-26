@@ -536,7 +536,7 @@ function validateMessage(data) {
       break;
     case 'set-max-clients':
       const maxLimit = features.enableRelay || !features.enableP2P ? 50 : 4;
-      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > maxLimit) {
+      if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 1 || data.maxClients > maxLimit) {
         return { valid: false, error: `set-max-clients: maxClients must be number between 2 and ${maxLimit}` };
       }
       if (!data.code) {
@@ -1255,6 +1255,11 @@ wss.on('connection', (ws, req) => {
           return;
         }
         if (data.clientId === rooms.get(data.code).initiator) {
+          const room = rooms.get(data.code);
+          room.maxClients = Math.max(1, (room.maxClients || 2) - 1);
+          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients, forceRelay: !!room.forceRelay }), { EX: 86400 });
+          const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
+          pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify({ type: 'max-clients', maxClients: room.maxClients, totalClients, forceRelay: !!room.forceRelay }) }));
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: data.type, targetId: data.targetId, senderId: data.clientId }));
           logStats({ clientId: data.targetId, code: data.code, event: data.type });
         } else {

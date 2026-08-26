@@ -367,15 +367,7 @@ const addUserModal = document.getElementById('addUserModal');
 addUserText.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  inviteAnotherSeat(1);
-});
-['addUser5', 'addUser10', 'addUser20'].forEach((id) => {
-  const btn = document.getElementById(id);
-  if (!btn) return;
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    inviteAnotherSeat(parseInt(id.replace('addUser', ''), 10));
-  });
+  inviteAnotherSeat();
 });
 addUserModal.addEventListener('click', (e) => {
   if (e.target === addUserModal) {
@@ -387,6 +379,9 @@ addUserModal.addEventListener('keydown', (event) => {
     addUserModal.classList.remove('active');
     addUserText.focus();
   }
+});
+document.addEventListener('click', () => {
+  document.querySelectorAll('.user-dot.open').forEach((d) => d.classList.remove('open'));
 });
 let pendingCode = null;
 let pendingJoin = null;
@@ -1376,18 +1371,30 @@ function updateDots() {
     const dot = document.createElement('div');
     dot.className = 'user-dot online';
     dot.dataset.targetId = targetId;
+    const name = usernames.get(targetId) || 'User';
+    dot.title = name;
     if (isInitiator) {
       const menu = document.createElement('div');
       menu.className = 'user-menu';
+      const label = document.createElement('div');
+      label.textContent = name;
+      label.style.cssText = 'padding:0.4rem 0.6rem;font-size:0.75rem;color:#374151;border-bottom:1px solid #eee;';
       const kickButton = document.createElement('button');
       kickButton.textContent = 'Kick';
-      kickButton.onclick = () => kickUser(targetId);
+      kickButton.onclick = (e) => { e.stopPropagation(); kickUser(targetId); };
       const banButton = document.createElement('button');
       banButton.textContent = 'Ban';
-      banButton.onclick = () => banUser(targetId);
+      banButton.onclick = (e) => { e.stopPropagation(); banUser(targetId); };
+      menu.appendChild(label);
       menu.appendChild(kickButton);
       menu.appendChild(banButton);
       dot.appendChild(menu);
+      dot.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        userDots.querySelectorAll('.user-dot.open').forEach((d) => { if (d !== dot) d.classList.remove('open'); });
+        dot.classList.toggle('open');
+      });
     }
     userDots.appendChild(dot);
   });
@@ -1410,7 +1417,7 @@ async function kickUser(targetId) {
   const message = { type: 'kick', targetId, code, clientId, token, signature };
   console.log('Sending kick message:', message);
   socket.send(JSON.stringify(message));
-  showStatusMessage(`Kicked user ${usernames.get(targetId) || targetId}`);
+  showStatusMessage('Kicked. That seat is closed until you tap Add User.');
 }
 async function banUser(targetId) {
   if (!isInitiator) return;
@@ -1425,7 +1432,7 @@ async function banUser(targetId) {
   const message = { type: 'ban', targetId, code, clientId, token, signature };
   console.log('Sending ban message:', message);
   socket.send(JSON.stringify(message));
-  showStatusMessage(`Banned user ${usernames.get(targetId) || targetId}`);
+  showStatusMessage('Banned. That seat is closed until you tap Add User.');
 }
 function setupLazyObserver() {
   lazyObserver = new IntersectionObserver((entries) => {

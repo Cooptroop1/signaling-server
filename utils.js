@@ -178,13 +178,8 @@ function updateRoomHeadcount() {
   const n = totalClients || 0;
   const cap = maxClients || 2;
   const text = n + ' / ' + cap + ' in this room';
-  const el = document.getElementById('roomHeadcount');
   const inChat = typeof chatContainer !== 'undefined' && chatContainer && !chatContainer.classList.contains('hidden');
-  if (el) {
-    el.textContent = text;
-    el.classList.toggle('hidden', !inChat);
-  }
-  if (typeof statusElement !== 'undefined' && statusElement && inChat && (isConnected || n > 0)) {
+  if (typeof statusElement !== 'undefined' && statusElement && inChat) {
     statusElement.textContent = text;
   }
 }

@@ -946,7 +946,7 @@
             <label for="messageInput" class="sr-only">Type a message</label>
             <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
             <button id="audioOutputButton" title="Speaker" aria-label="Toggle speaker" class="composer-btn hidden">🔊</button>
-            <button id="sendButton" class="composer-btn mic-mode" data-mode="voice" title="Record voice note" aria-label="Send or record">🎤</button>
+            <button id="sendButton" class="composer-btn" data-mode="send" title="Send" aria-label="Send message">➤</button>
           </div>
           <input type="file" id="imageInput" accept="image/*" aria-label="Choose photo" />
           <input type="file" id="cameraInput" accept="image/*" capture="environment" aria-label="Take photo" />
@@ -1008,7 +1008,7 @@
       <p><strong>Send Code:</strong> This sends your code to Random chat board</p>
       <p><strong>Random Chat:</strong> This takes you to random chat board for a random chat</p>
       <p><strong>Copy Code:</strong> Copies the code so you can send to people in text or social chats</p>
-      <p><strong>Attach (📷 left of the box):</strong> Opens Photos, Camera, File, Voice note and Call. The button then shows the last thing you picked. Type a message and it turns into Send; empty box is a mic, like WhatsApp.</p>
+      <p><strong>Attach (📷 left of the box):</strong> Opens Photos, Camera, File, Voice note and Call. The button then shows the last thing you picked. Send stays on the right.</p>
       <p><strong>Voice note:</strong> Tap Voice, or the mic on the right when the box is empty. Tap Send to post, Cancel to drop it. Max 30 seconds.</p>
       <p><strong>Call:</strong> Start from Attach. During a call the left button hangs up and the speaker button appears.</p>
       <p><strong>Toggle Grok Bot:</strong> Enable/disable Grok bot mode. Requires xAI API key. For details, visit https://x.ai/api.</p>

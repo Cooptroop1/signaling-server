@@ -175,28 +175,12 @@ function updateAttachButton() {
 }
 function updateComposerSend() {
   const send = document.getElementById('sendButton');
-  const input = document.getElementById('messageInput');
-  if (!send || !input) return;
-  const hasText = input.value.trim().length > 0;
-  const voiceOk = !features || features.enableVoice !== false;
-  if (hasText) {
-    send.textContent = '➤';
-    send.dataset.mode = 'send';
-    send.title = 'Send';
-    send.setAttribute('aria-label', 'Send message');
-    send.classList.remove('mic-mode');
-  } else if (voiceOk) {
-    send.textContent = '🎤';
-    send.dataset.mode = 'voice';
-    send.title = 'Record voice note';
-    send.setAttribute('aria-label', 'Record voice note');
-    send.classList.add('mic-mode');
-  } else {
-    send.textContent = '➤';
-    send.dataset.mode = 'send';
-    send.title = 'Send';
-    send.classList.remove('mic-mode');
-  }
+  if (!send) return;
+  send.textContent = '➤';
+  send.dataset.mode = 'send';
+  send.title = 'Send';
+  send.setAttribute('aria-label', 'Send message');
+  send.classList.remove('mic-mode');
 }
 function setComposerRecording(on) {
   document.getElementById('composerRow')?.classList.toggle('hidden', on);
@@ -1857,9 +1841,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (message) {
       sendMessage(message);
       updateComposerSend();
-      return;
     }
-    if (features.enableVoice) startVoiceRecording();
   };
   document.getElementById('messageInput').addEventListener('input', updateComposerSend);
   document.getElementById('messageInput').addEventListener('keydown', (event) => {

@@ -126,34 +126,40 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   }
   rateLimitsMap.set(clientId, rateLimit);
   if (file && type === 'image') {
-    const maxWidth = 640;
-    const maxHeight = 360;
-    let quality = 0.4;
-    if (file.size > 3 * 1024 * 1024) quality = 0.3;
-    else if (file.size > 1 * 1024 * 1024) quality = 0.35;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
     const img = new Image();
     img.src = URL.createObjectURL(file);
-    await new Promise(resolve => img.onload = resolve);
-    let width = img.width;
-    let height = img.height;
-    if (width > height) {
-      if (width > maxWidth) {
-        height = Math.round((height * maxWidth) / width);
-        width = maxWidth;
-      }
-    } else {
-      if (height > maxHeight) {
-        width = Math.round((width * maxHeight) / height);
-        height = maxHeight;
-      }
-    }
-    canvas.width = width;
-    canvas.height = height;
-    ctx.drawImage(img, 0, 0, width, height);
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
     const format = await isWebPSupported() ? 'image/webp' : 'image/jpeg';
-    dataToSend = canvas.toDataURL(format, quality);
+    const maxBytes = 900000;
+    let maxEdge = 1600;
+    let quality = format === 'image/webp' ? 0.86 : 0.84;
+    let dataUrl = '';
+    for (let pass = 0; pass < 6; pass++) {
+      let width = img.width;
+      let height = img.height;
+      const longEdge = Math.max(width, height);
+      if (longEdge > maxEdge) {
+        const scale = maxEdge / longEdge;
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, width, height);
+      dataUrl = canvas.toDataURL(format, quality);
+      const bytes = Math.ceil((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75);
+      if (bytes <= maxBytes) break;
+      if (quality > 0.7) quality -= 0.06;
+      else maxEdge = Math.round(maxEdge * 0.85);
+    }
+    dataToSend = dataUrl;
     URL.revokeObjectURL(img.src);
   } else if (file) {
     dataToSend = await new Promise(resolve => {

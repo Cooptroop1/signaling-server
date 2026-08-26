@@ -242,7 +242,6 @@ let roomForceRelay = false;
 let suppressAutoBurnUntil = 0;
 let hideLocalTimer = null;
 let hideRoomTimer = null;
-if (typeof window !== 'undefined') {
 const serverUrls = [
   'wss://signal.anonomoose.com',
   'wss://signaling-server-zc6m.onrender.com'
@@ -251,6 +250,7 @@ let serverUrlIndex = 0;
 function serverForCode(roomCode) {
   return serverUrls[Math.min(serverUrlIndex, serverUrls.length - 1)];
 }
+if (typeof window !== 'undefined') {
 function notifyConnected() {
   const waiters = connectedWaiters.slice();
   connectedWaiters = [];

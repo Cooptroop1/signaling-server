@@ -16,7 +16,7 @@ let voiceRecordStream = null;
 let voiceRecordStartedAt = 0;
 let voiceStopping = false;
 let messageCount = 0;
-const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
+const CHUNK_SIZE = 32768;
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
 let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
@@ -96,8 +96,8 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   }
   // Client-side size limit check
   const payloadSize = (content || base64 || '').length * 3 / 4; // Approximate byte size
-  if (!checkAndUpdateRateLimit(globalSizeRate, 1048576, true, payloadSize)) {
-    showStatusMessage('Message size limit exceeded (1MB/min total). Please wait.');
+  if (!checkAndUpdateRateLimit(globalSizeRate, 6 * 1048576, true, payloadSize)) {
+    showStatusMessage('Too much data this minute. Wait a moment and send the photo again.');
     return;
   }
   let dataToSend = content || base64;
@@ -131,7 +131,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       img.onerror = reject;
     });
     const format = await isWebPSupported() ? 'image/webp' : 'image/jpeg';
-    const maxBytes = 900000;
+    const maxBytes = 1500000;
     let maxEdge = 1600;
     let quality = format === 'image/webp' ? 0.86 : 0.84;
     let dataUrl = '';
@@ -454,14 +454,6 @@ function setupDataChannel(dataChannel, targetId) {
     processMessageQueue(targetId);
   };
   dataChannel.onmessage = async (event) => {
-    const now = performance.now();
-    const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
-    if (!checkAndUpdateRateLimit(rateLimit, 50, false, 1, 1000)) {
-      console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
-      showStatusMessage('Message rate limit reached, please slow down.');
-      return;
-    }
-    messageRateLimits.set(targetId, rateLimit);
     let data;
     try {
       data = JSON.parse(event.data);
@@ -491,6 +483,14 @@ function setupDataChannel(dataChannel, targetId) {
       }
       return;
     }
+    const now = performance.now();
+    const rateLimit = messageRateLimits.get(targetId) || { count: 0, startTime: now };
+    if (!checkAndUpdateRateLimit(rateLimit, 30, false, 1, 1000)) {
+      console.warn(`Rate limit exceeded for ${targetId}: ${rateLimit.count} messages in 1s`);
+      showStatusMessage('Message rate limit reached, please slow down.');
+      return;
+    }
+    messageRateLimits.set(targetId, rateLimit);
     await processReceivedMessage(data, targetId);
   };
   dataChannel.onerror = (error) => {

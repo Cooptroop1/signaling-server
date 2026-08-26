@@ -1996,6 +1996,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('button1').onclick = () => {
     if (isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token) {
       socket.send(JSON.stringify({ type: 'submit-random', code, clientId, token }));
+      suppressAutoBurnUntil = Date.now() + 180000;
       showStatusMessage(`Posted ${code} to the random board. Stay in this chat — others tap it to join you.`);
       codeSentToRandom = true;
     } else {
@@ -2004,6 +2005,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('button1')?.focus();
   };
   document.getElementById('button2').onclick = () => {
+    suppressAutoBurnUntil = Date.now() + 180000;
     window.open('https://www.anonomoose.com/random.html', '_blank', 'noopener');
     document.getElementById('button2')?.focus();
   };
@@ -2065,11 +2067,15 @@ document.addEventListener('DOMContentLoaded', () => {
     hideLocalTimer = setTimeout(() => {
       if (!document.hidden) return;
       if (Date.now() < suppressAutoBurnUntil) return;
+      const chat = document.getElementById('chatContainer');
+      if (!chat || chat.classList.contains('hidden')) return;
       burnTranscript();
     }, 4000);
     hideRoomTimer = setTimeout(() => {
       if (!document.hidden) return;
       if (Date.now() < suppressAutoBurnUntil) return;
+      const chat = document.getElementById('chatContainer');
+      if (!chat || chat.classList.contains('hidden')) return;
       requestRoomWipe();
       setTimeout(() => burnChatSession(), 300);
     }, 20000);

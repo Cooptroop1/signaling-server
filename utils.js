@@ -158,23 +158,47 @@ function rememberUsername(name) {
   try { localStorage.setItem('username', username); } catch (e) {}
 }
 
+function groupRelayOn() {
+  return !!(typeof roomForceRelay !== 'undefined' && roomForceRelay) || maxClients > 4 || (typeof features !== 'undefined' && features && features.enableP2P === false);
+}
+
+function applyGroupRelay(reason) {
+  roomForceRelay = true;
+  useRelay = true;
+  isConnected = true;
+  updatePrivacyStatus('Group room · server backup · still encrypted');
+  if (typeof inputContainer !== 'undefined' && inputContainer) inputContainer.classList.remove('hidden');
+  if (typeof messages !== 'undefined' && messages) messages.classList.remove('waiting');
+  if (typeof updateUIState === 'function') updateUIState(true, true);
+  if (reason) showStatusMessage(reason);
+}
+
 function inviteAnotherSeat() {
   if (!isInitiator) {
     showStatusMessage('Only the person who started the room can add someone.');
     return;
   }
-  if (maxClients >= 10) {
-    showStatusMessage('Room is already at 10 people. Same code still works for anyone already invited.');
+  const cap = (typeof features !== 'undefined' && features && !features.enableP2P) ? 50 : 10;
+  if (maxClients >= cap) {
+    showStatusMessage('Room is already at ' + cap + ' people. Same code still works for anyone already invited.');
     return;
   }
   const next = maxClients + 1;
+  if (next > 4) {
+    if (typeof p2pOnly !== 'undefined' && p2pOnly) {
+      showStatusMessage('Phone-to-phone only allows 4 people. Untick that, then add more.');
+      return;
+    }
+    applyGroupRelay('Room now uses server backup so more people can join. Same code.');
+  }
   setMaxClients(next);
-  showStatusMessage('Room now allows ' + next + '. Same code — send it to the next person.');
+  if (next <= 4) showStatusMessage('Room now allows ' + next + '. Same code — send it to the next person.');
 }
 
 function setMaxClients(n) {
+  const cap = (typeof features !== 'undefined' && features && !features.enableP2P) ? 50 : 10;
   if (isInitiator && clientId && socket.readyState === WebSocket.OPEN && token) {
-    maxClients = Math.min(n, 10);
+    maxClients = Math.min(n, cap);
     log('info', `setMaxClients called with n: ${n}, new maxClients: ${maxClients}`);
     socket.send(JSON.stringify({ type: 'set-max-clients', maxClients: maxClients, code, clientId, token }));
     updateMaxClientsUI();

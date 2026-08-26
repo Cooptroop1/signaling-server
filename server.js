@@ -534,7 +534,7 @@ function validateMessage(data) {
       }
       break;
     case 'set-max-clients':
-      const maxLimit = features.enableP2P ? 4 : 50;
+      const maxLimit = !features.enableP2P ? 50 : (features.enableRelay ? 10 : 4);
       if (!data.maxClients || typeof data.maxClients !== 'number' || data.maxClients < 2 || data.maxClients > maxLimit) {
         return { valid: false, error: `set-max-clients: maxClients must be number between 2 and ${maxLimit}` };
       }
@@ -1074,7 +1074,7 @@ wss.on('connection', (ws, req) => {
         const exists = await redisClient.exists(roomKey);
         let roomState;
         if (!exists) {
-          roomState = { initiator: clientId, maxClients: 2 };
+          roomState = { initiator: clientId, maxClients: 2, forceRelay: false };
           await redisClient.set(roomKey, JSON.stringify(roomState), { EX: 86400 });
         } else {
           roomState = JSON.parse(await redisClient.get(roomKey));
@@ -1140,7 +1140,7 @@ wss.on('connection', (ws, req) => {
         }
         // Create or get local room
         if (!rooms.has(code)) {
-          rooms.set(code, { initiator: roomState.initiator, clients: new Map(), maxClients: roomState.maxClients });
+          rooms.set(code, { initiator: roomState.initiator, clients: new Map(), maxClients: roomState.maxClients, forceRelay: !!roomState.forceRelay });
         }
         const room = rooms.get(code);
         room.clients.set(clientId, { ws, username });
@@ -1159,7 +1159,7 @@ wss.on('connection', (ws, req) => {
           return;
         }
         const turn = issueTurnCredentials(clientId);
-        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, features, ...turn }));
+        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, forceRelay: !!room.forceRelay || room.maxClients > 4, features, ...turn }));
         logStats({ clientId, username, code, event: 'join', totalClients: currentSize });
         if (room.clients.size > 0) {
           room.clients.forEach((_, existingClientId) => {
@@ -1202,12 +1202,13 @@ wss.on('connection', (ws, req) => {
           return;
         }
         if (data.clientId === rooms.get(data.code).initiator) {
-          const maxLimit = features.enableP2P ? 4 : 50;
+          const maxLimit = !features.enableP2P ? 50 : (features.enableRelay ? 10 : 4);
           const room = rooms.get(data.code);
           room.maxClients = Math.min(data.maxClients, maxLimit);
-          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients }), { EX: 86400 });
+          if (room.maxClients > 4) room.forceRelay = true;
+          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients, forceRelay: !!room.forceRelay }), { EX: 86400 });
           const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
-          const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients };
+          const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients, forceRelay: !!room.forceRelay };
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(msg) }));
           logStats({ clientId: data.clientId, code: data.code, event: 'set-max-clients', totalClients });
         } else {

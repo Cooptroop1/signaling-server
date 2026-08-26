@@ -238,6 +238,7 @@ let connectedWaiters = [];
 let socket, statusElement, codeDisplayElement, copyCodeButton, initialContainer, usernameContainer, connectContainer, chatContainer, newSessionButton, maxClientsContainer, inputContainer, messages, cornerLogo, button2, helpText, helpModal;
 let lazyObserver;
 let p2pOnly = false;
+let roomForceRelay = false;
 let suppressAutoBurnUntil = 0;
 let hideLocalTimer = null;
 let hideRoomTimer = null;
@@ -690,11 +691,11 @@ async function handleSocketMessage(event) {
     }
     if (message.type === 'init') {
       clientId = message.clientId;
-      maxClients = Math.min(message.maxClients, 10);
+      maxClients = Math.min(message.maxClients, 50);
       isInitiator = message.isInitiator;
       features = message.features || features;
-      if (!features.enableP2P) {
-        useRelay = true;
+      if (!features.enableP2P || message.forceRelay || maxClients > 4) {
+        applyGroupRelay();
       }
       totalClients = 1;
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
@@ -774,7 +775,7 @@ async function handleSocketMessage(event) {
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
       updateDots();
-      if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId)) {
+      if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId) && !groupRelayOn()) {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
       }
@@ -825,8 +826,9 @@ async function handleSocketMessage(event) {
       return;
     }
     if (message.type === 'max-clients') {
-      maxClients = Math.min(message.maxClients, 10);
+      maxClients = Math.min(message.maxClients, 50);
       console.log(`Max clients updated to ${maxClients} for code: ${code}`);
+      if (message.forceRelay || maxClients > 4) applyGroupRelay();
       updateMaxClientsUI();
       updateDots();
       return;

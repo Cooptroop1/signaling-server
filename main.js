@@ -193,8 +193,10 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     timestamp: jitteredTimestamp
   };
   if (type === 'file') payload.filename = file?.name;
-  const sendViaP2p = p2pOpen;
+  const group = typeof groupRelayOn === 'function' && groupRelayOn();
+  const sendViaP2p = p2pOpen && !group;
   if (sendViaP2p) useRelay = false;
+  if (group) useRelay = true;
   let sent = false;
   if (sendViaP2p) {
     updatePrivacyStatus('Phone to phone · encrypted');
@@ -272,6 +274,14 @@ async function sendMedia(file, type) {
 }
 async function startPeerConnection(targetId, isOfferer) {
   console.log(`Starting peer connection with ${targetId} for code: ${code}, offerer: ${isOfferer}`);
+  if (typeof groupRelayOn === 'function' && groupRelayOn()) {
+    useRelay = true;
+    updatePrivacyStatus('Group room · server backup · still encrypted');
+    isConnected = true;
+    updateUIState(true);
+    updateMaxClientsUI();
+    return;
+  }
   if (!features.enableP2P) {
     if (p2pOnly) {
       showStatusMessage('Phone-to-phone only is on, but P2P is disabled.');

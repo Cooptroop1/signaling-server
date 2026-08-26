@@ -5,13 +5,16 @@ let voiceCallActive = false;
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map();
-let audioOutputMode = 'earpiece';
+let audioOutputMode = 'speaker';
 let totpEnabled = false;
 let totpSecret = '';
 let pendingTotpSecret = null;
 let mediaRecorder = null;
 let voiceChunks = [];
 let voiceTimerInterval = null;
+let voiceRecordStream = null;
+let voiceRecordStartedAt = 0;
+let voiceStopping = false;
 let messageCount = 0;
 const CHUNK_SIZE = 8192; // Reduced to 8KB for better mobile compatibility
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
@@ -44,12 +47,7 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
       element.addEventListener('click', () => createImageModal(content, `${type}Button`));
       lazyObserver.observe(element);
     } else if (type === 'voice') {
-      element = document.createElement('audio');
-      element.dataset.src = content;
-      element.controls = true;
-      element.setAttribute('alt', `${isSelf ? 'Sent' : 'Received'} voice message`);
-      element.addEventListener('click', () => createAudioModal(content, `${type}Button`));
-      lazyObserver.observe(element);
+      element = makeVoiceNotePlayer(content);
     } else {
       element = document.createElement('a');
       element.href = content;
@@ -367,16 +365,23 @@ async function startPeerConnection(targetId, isOfferer) {
   };
   peerConnection.ontrack = (event) => {
     console.log(`Received remote track from ${targetId}`);
-    if (!remoteAudios.has(targetId)) {
-      const audio = document.createElement('audio');
-      audio.srcObject = event.streams[0];
+    const stream = event.streams[0] || new MediaStream([event.track]);
+    let audio = remoteAudios.get(targetId);
+    if (!audio) {
+      audio = document.createElement('audio');
       audio.autoplay = true;
-      audio.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-      audio.play().catch(error => console.error('Error playing remote audio:', error));
-      remoteAudios.set(targetId, audio);
+      audio.playsInline = true;
+      audio.setAttribute('playsinline', '');
       document.getElementById('remoteAudioContainer').appendChild(audio);
       document.getElementById('remoteAudioContainer').classList.remove('hidden');
-      setAudioOutput(audio, targetId);
+      remoteAudios.set(targetId, audio);
+    }
+    audio.srcObject = stream;
+    audio.volume = audioOutputMode === 'earpiece' ? 0.55 : 1;
+    audio.play().catch(error => console.error('Error playing remote audio:', error));
+    setAudioOutput(audio, targetId);
+    if (voiceCallActive) {
+      document.getElementById('audioOutputButton')?.classList.remove('hidden');
     }
   };
   peerConnection.ondatachannel = (event) => {
@@ -443,10 +448,8 @@ function setupDataChannel(dataChannel, targetId) {
     retryCounts.delete(targetId);
     updateMaxClientsUI();
     document.getElementById('messageInput')?.focus();
-    if (features.enableVoiceCalls && features.enableAudioToggle) {
-      document.getElementById('audioOutputButton').classList.remove('hidden');
-    } else {
-      document.getElementById('audioOutputButton').classList.add('hidden');
+    if (voiceCallActive) {
+      document.getElementById('audioOutputButton')?.classList.remove('hidden');
     }
     processMessageQueue(targetId);
   };
@@ -752,35 +755,60 @@ async function toggleVoiceCall() {
 function updateAudioTracks(action) {
   peerConnections.forEach((peerConnection, targetId) => {
     if (action === 'add' && localStream) {
-      localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
+      localStream.getAudioTracks().forEach(track => {
+        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'audio');
+        if (sender) {
+          sender.replaceTrack(track).catch(() => {
+            try { peerConnection.addTrack(track, localStream); } catch (e) {}
+          });
+        } else {
+          try { peerConnection.addTrack(track, localStream); } catch (e) {}
+        }
       });
     } else if (action === 'remove') {
       peerConnection.getSenders().forEach(sender => {
         if (sender.track && sender.track.kind === 'audio') {
-          peerConnection.removeTrack(sender);
+          try { sender.replaceTrack(null); } catch (e) {}
+          try { peerConnection.removeTrack(sender); } catch (e) {}
         }
       });
     }
-    renegotiate(targetId);
+    if (peerConnection.signalingState === 'stable') {
+      renegotiate(targetId);
+    }
   });
 }
 async function startVoiceCall() {
+  if (voiceCallActive && localStream) return;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showStatusMessage('Microphone not supported.');
     return;
   }
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
     updateAudioTracks('add');
     voiceCallActive = true;
-    document.getElementById('voiceCallButton').classList.add('active');
-    document.getElementById('voiceCallButton').title = 'End Voice Call';
-    document.getElementById('audioOutputButton').classList.remove('hidden');
-    showStatusMessage('Voice call started.');
+    const callBtn = document.getElementById('voiceCallButton');
+    callBtn.classList.add('active');
+    callBtn.title = 'End call';
+    callBtn.setAttribute('aria-label', 'End call');
+    document.getElementById('audioOutputButton')?.classList.remove('hidden');
+    updateSpeakerButton();
+    showStatusMessage('Call started. Use speaker if you cannot hear them.');
   } catch (error) {
     console.error('Error starting voice call:', error);
-    showStatusMessage('Failed to access microphone for voice call.');
+    voiceCallActive = true;
+    document.getElementById('voiceCallButton')?.classList.add('active');
+    document.getElementById('audioOutputButton')?.classList.remove('hidden');
+    if (error && error.name === 'NotFoundError') {
+      showStatusMessage('No microphone on this device. You can still hear the other person.');
+    } else if (error && error.name === 'NotAllowedError') {
+      showStatusMessage('Microphone blocked. Allow mic in the browser, then tap call again.');
+    } else {
+      showStatusMessage('Could not start microphone. You can still hear them if they are in the call.');
+    }
   }
 }
 function stopVoiceCall() {
@@ -790,10 +818,14 @@ function stopVoiceCall() {
   }
   updateAudioTracks('remove');
   voiceCallActive = false;
-  document.getElementById('voiceCallButton').classList.remove('active');
-  document.getElementById('voiceCallButton').title = 'Start Voice Call';
-  document.getElementById('audioOutputButton').classList.add('hidden');
-  showStatusMessage('Voice call ended.');
+  const callBtn = document.getElementById('voiceCallButton');
+  if (callBtn) {
+    callBtn.classList.remove('active');
+    callBtn.title = 'Start voice call';
+    callBtn.setAttribute('aria-label', 'Start voice call');
+  }
+  document.getElementById('audioOutputButton')?.classList.add('hidden');
+  showStatusMessage('Call ended.');
 }
 async function renegotiate(targetId) {
   const peerConnection = peerConnections.get(targetId);
@@ -980,14 +1012,9 @@ function updateFeaturesUI() {
     }
   }
   if (audioOutputButton) {
-    const shouldHide = !features.enableAudioToggle || !voiceCallActive || !features.enableVoiceCalls;
+    const shouldHide = !voiceCallActive;
     audioOutputButton.classList.toggle('hidden', shouldHide);
-    if (shouldHide && voiceCallActive) {
-      stopVoiceCall();
-    }
-    audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
-    audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
-    audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
+    updateSpeakerButton();
   }
   if (grokButton) {
     grokButton.classList.toggle('hidden', !features.enableGrokBot);
@@ -1059,45 +1086,195 @@ function saveGrokKey() {
   }
 }
 async function setAudioOutput(audioElement, targetId) {
+  if (!audioElement) return;
+  audioElement.volume = audioOutputMode === 'earpiece' ? 0.55 : 1;
   try {
-    if ('setSinkId' in audioElement && navigator.mediaDevices.getUserMedia) {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioOutputs = devices.filter(device => device.kind === 'audiooutput');
-      if (audioOutputs.length > 0) {
-        const targetDevice = audioOutputMode === 'speaker'
-          ? audioOutputs.find(device => device.label.toLowerCase().includes('speaker') || device.deviceId === 'default')
-          : audioOutputs.find(device => device.label.toLowerCase().includes('earpiece') || device.deviceId === 'default') || audioOutputs[0];
-        if (targetDevice) {
-          await audioElement.setSinkId(targetDevice.deviceId);
-          console.log(`Set audio output for ${targetId} to ${targetDevice.label}`);
-        } else {
-          console.warn(`No suitable ${audioOutputMode} device found for ${targetId}, using default`);
-          audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-        }
-      } else {
-        console.warn(`No audio output devices available for ${targetId}`);
-        audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
-      }
-    } else {
-      console.log(`setSinkId not supported, using volume adjustment for ${targetId}`);
-      audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
+    if (typeof audioElement.setSinkId === 'function') {
+      const sink = audioOutputMode === 'speaker' ? 'default' : '';
+      if (sink) await audioElement.setSinkId('default');
     }
   } catch (error) {
-    console.error(`Error setting audio output for ${targetId}:`, error);
-    audioElement.volume = audioOutputMode === 'earpiece' ? 0.5 : 1.0;
+    console.warn(`Speaker routing not available on this phone (${targetId})`);
   }
+}
+function updateSpeakerButton() {
+  const audioOutputButton = document.getElementById('audioOutputButton');
+  if (!audioOutputButton) return;
+  const loud = audioOutputMode === 'speaker';
+  audioOutputButton.title = loud ? 'Speaker on — tap for quieter' : 'Quiet — tap for speaker';
+  audioOutputButton.setAttribute('aria-label', audioOutputButton.title);
+  audioOutputButton.textContent = loud ? '🔊' : '🔈';
+  audioOutputButton.classList.toggle('speaker', loud);
+  audioOutputButton.classList.toggle('hidden', !voiceCallActive);
 }
 function toggleAudioOutput() {
   audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
-  console.log(`Toggling audio output to ${audioOutputMode}`);
   remoteAudios.forEach((audio, targetId) => {
     setAudioOutput(audio, targetId);
+    audio.play().catch(() => {});
   });
-  const audioOutputButton = document.getElementById('audioOutputButton');
-  audioOutputButton.title = audioOutputMode === 'earpiece' ? 'Switch to Speaker' : 'Switch to Earpiece';
-  audioOutputButton.textContent = audioOutputMode === 'earpiece' ? '🔊' : '📞';
-  audioOutputButton.classList.toggle('speaker', audioOutputMode === 'speaker');
-  showStatusMessage(`Audio output set to ${audioOutputMode}`);
+  updateSpeakerButton();
+  showStatusMessage(audioOutputMode === 'speaker' ? 'Speaker on' : 'Quieter output');
+}
+function resetVoiceRecordingUi() {
+  const btn = document.getElementById('voiceButton');
+  const timer = document.getElementById('voiceTimer');
+  if (btn) {
+    btn.classList.remove('recording');
+    btn.title = 'Record voice note';
+  }
+  if (timer) {
+    timer.style.display = 'none';
+    timer.textContent = '';
+    timer.classList.remove('active');
+  }
+  if (voiceTimerInterval) {
+    clearInterval(voiceTimerInterval);
+    voiceTimerInterval = null;
+  }
+}
+function cleanupVoiceRecorder() {
+  try {
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  } catch (e) {}
+  if (voiceRecordStream) {
+    voiceRecordStream.getTracks().forEach(t => t.stop());
+    voiceRecordStream = null;
+  }
+  mediaRecorder = null;
+  voiceChunks = [];
+  voiceStopping = false;
+  voiceRecordStartedAt = 0;
+  resetVoiceRecordingUi();
+}
+function startVoiceRecording() {
+  if (!features.enableVoice) {
+    showStatusMessage('Voice notes are disabled by admin.');
+    return;
+  }
+  if (voiceCallActive) {
+    showStatusMessage('End the call before sending a voice note.');
+    return;
+  }
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+    showStatusMessage('Voice notes not supported in this browser.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  }).then(stream => {
+    voiceRecordStream = stream;
+    const mimeTypes = [
+      'audio/webm;codecs=opus',
+      'audio/mp4',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg'
+    ];
+    const mimeType = (MediaRecorder.isTypeSupported && mimeTypes.find(t => MediaRecorder.isTypeSupported(t))) || '';
+    try {
+      mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (e) {
+      stream.getTracks().forEach(t => t.stop());
+      showStatusMessage('Could not start recorder.');
+      return;
+    }
+    voiceChunks = [];
+    voiceStopping = false;
+    voiceRecordStartedAt = Date.now();
+    mediaRecorder.addEventListener('dataavailable', (event) => {
+      if (event.data && event.data.size > 0) voiceChunks.push(event.data);
+    });
+    mediaRecorder.addEventListener('error', () => {
+      showStatusMessage('Recording failed.');
+      cleanupVoiceRecorder();
+    });
+    mediaRecorder.addEventListener('stop', async () => {
+      const chunks = voiceChunks.slice();
+      const type = mediaRecorder && mediaRecorder.mimeType ? mediaRecorder.mimeType : (mimeType || 'audio/webm');
+      if (voiceRecordStream) {
+        voiceRecordStream.getTracks().forEach(t => t.stop());
+        voiceRecordStream = null;
+      }
+      mediaRecorder = null;
+      voiceChunks = [];
+      resetVoiceRecordingUi();
+      const audioBlob = new Blob(chunks, { type: type.split(';')[0] });
+      if (audioBlob.size < 200) {
+        showStatusMessage('Voice note was empty. Hold the mic a second longer.');
+        voiceStopping = false;
+        return;
+      }
+      try {
+        await prepareAndSendMessage({ type: 'voice', file: audioBlob });
+      } catch (e) {
+        console.error('Voice send failed', e);
+        showStatusMessage('Could not send voice note.');
+      }
+      voiceStopping = false;
+    });
+    try {
+      mediaRecorder.start(250);
+    } catch (e) {
+      try { mediaRecorder.start(); } catch (e2) {
+        showStatusMessage('Could not start recording.');
+        cleanupVoiceRecorder();
+        return;
+      }
+    }
+    const btn = document.getElementById('voiceButton');
+    btn.classList.add('recording');
+    btn.title = 'Stop recording';
+    const timer = document.getElementById('voiceTimer');
+    timer.style.display = 'flex';
+    timer.classList.add('active');
+    let time = 0;
+    timer.textContent = '0:00';
+    voiceTimerInterval = setInterval(() => {
+      time++;
+      timer.textContent = formatVoiceTime(time);
+      if (time >= 30) stopVoiceRecording();
+    }, 1000);
+  }).catch(error => {
+    console.error('Error starting voice recording:', error);
+    cleanupVoiceRecorder();
+    if (error && error.name === 'NotAllowedError') {
+      showStatusMessage('Allow the microphone, then tap the mic again.');
+    } else if (error && error.name === 'NotFoundError') {
+      showStatusMessage('No microphone found on this device.');
+    } else {
+      showStatusMessage('Could not start voice note.');
+    }
+  });
+}
+function stopVoiceRecording() {
+  if (voiceStopping) return;
+  if (!mediaRecorder) {
+    cleanupVoiceRecorder();
+    return;
+  }
+  if (Date.now() - voiceRecordStartedAt < 400) {
+    setTimeout(stopVoiceRecording, 400);
+    return;
+  }
+  voiceStopping = true;
+  try {
+    if (mediaRecorder.state === 'recording') {
+      try { mediaRecorder.requestData(); } catch (e) {}
+      mediaRecorder.stop();
+    } else {
+      cleanupVoiceRecorder();
+    }
+  } catch (e) {
+    cleanupVoiceRecorder();
+  }
+  setTimeout(() => {
+    if (voiceStopping) cleanupVoiceRecorder();
+  }, 2500);
 }
 async function startTotpRoom(serverGenerated) {
   const usernameInput = document.getElementById('totpUsernameInput').value.trim();
@@ -1155,77 +1332,6 @@ async function joinWithTotp(roomCode, totpCode) {
     console.error(err);
     showStatusMessage('Failed to join 2FA room.');
   });
-}
-function startVoiceRecording() {
-  if (!features.enableVoice) {
-    showStatusMessage('Voice messages are disabled by admin.');
-    return;
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showStatusMessage('Microphone not supported.');
-    return;
-  }
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-    const mimeTypes = [
-      'audio/mp4',
-      'audio/webm;codecs=opus',
-      'audio/ogg;codecs=opus',
-      'audio/webm',
-      'audio/ogg'
-    ];
-    const mimeType = mimeTypes.find(MediaRecorder.isTypeSupported) || 'audio/webm';
-    if (!mimeType) {
-      showStatusMessage('Voice recording not supported in this browser.');
-      return;
-    }
-    console.log('Using mimeType for recording:', mimeType);
-    mediaRecorder = new MediaRecorder(stream, { mimeType });
-    voiceChunks = [];
-    mediaRecorder.addEventListener('dataavailable', (event) => {
-      if (event.data.size > 0) {
-        voiceChunks.push(event.data);
-        console.log('Data available, chunk size:', event.data.size);
-      } else {
-        console.warn('Empty data chunk received');
-      }
-    });
-    mediaRecorder.addEventListener('stop', async () => {
-      console.log('Recorder stopped, chunks length:', voiceChunks.length);
-      const audioBlob = new Blob(voiceChunks, { type: mimeType });
-      console.log('Audio blob created, size:', audioBlob.size, 'type:', mimeType);
-      if (audioBlob.size === 0) {
-        showStatusMessage('No audio recorded. Speak louder or check microphone.');
-        return;
-      }
-      await prepareAndSendMessage({ type: 'voice', file: audioBlob });
-      stream.getTracks().forEach(track => track.stop());
-      mediaRecorder = null;
-      voiceChunks = [];
-      document.getElementById('voiceButton').classList.remove('recording');
-      document.getElementById('voiceTimer').style.display = 'none';
-      document.getElementById('voiceTimer').textContent = '';
-      clearInterval(voiceTimerInterval);
-    });
-    mediaRecorder.start(1000);
-    document.getElementById('voiceButton').classList.add('recording');
-    document.getElementById('voiceTimer').style.display = 'flex';
-    let time = 0;
-    voiceTimerInterval = setInterval(() => {
-      time++;
-      document.getElementById('voiceTimer').textContent = `00:${time < 10 ? '0' + time : time}`;
-      if (time >= 30) {
-        stopVoiceRecording();
-      }
-    }, 1000);
-  }).catch(error => {
-    console.error('Error starting voice recording:', error);
-    showStatusMessage('Failed to access microphone for voice message.');
-  });
-}
-function stopVoiceRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-  }
 }
 async function isWebPSupported() {
   const elem = document.createElement('canvas');

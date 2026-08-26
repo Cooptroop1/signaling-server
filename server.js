@@ -309,9 +309,9 @@ const IP_SALT = process.env.IP_SALT || 'your-random-salt-here';
 let features = {
   enableService: true,
   enableImages: true,
-  enableVoice: false,
-  enableVoiceCalls: false,
-  enableAudioToggle: false,
+  enableVoice: true,
+  enableVoiceCalls: true,
+  enableAudioToggle: true,
   enableGrokBot: false,
   enableP2P: true,
   enableRelay: true
@@ -346,6 +346,13 @@ async function loadFeatures() {
       };
     }
     logger.info('Loaded features from DB: %o', features);
+    if (!features.enableVoice || !features.enableVoiceCalls || !features.enableAudioToggle) {
+      features.enableVoice = true;
+      features.enableVoiceCalls = true;
+      features.enableAudioToggle = true;
+      await saveFeatures();
+      logger.info('Enabled voice notes, calls and speaker');
+    }
     // New: Publish initial features to Redis for sync
     pubClient.publish('global:features', JSON.stringify(features));
   } catch (err) {

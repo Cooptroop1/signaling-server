@@ -1036,13 +1036,7 @@ async function handleSocketMessage(event) {
           lazyObserver.observe(img);
           messageDiv.appendChild(img);
         } else if (contentType === 'voice') {
-          const audio = document.createElement('audio');
-          audio.dataset.src = contentOrData;
-          audio.controls = true;
-          audio.setAttribute('alt', 'Received voice message');
-          audio.addEventListener('click', () => createAudioModal(contentOrData, 'messageInput'));
-          lazyObserver.observe(audio);
-          messageDiv.appendChild(audio);
+          messageDiv.appendChild(makeVoiceNotePlayer(contentOrData));
         } else if (contentType === 'file') {
           const link = document.createElement('a');
           link.href = contentOrData;

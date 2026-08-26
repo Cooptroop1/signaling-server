@@ -223,6 +223,99 @@ function createAudioModal(base64, focusId) {
   createMediaModal('audio', base64, focusId);
 }
 
+function contentToPlayableUrl(content) {
+  if (!content) return '';
+  if (content.indexOf('blob:') === 0 || content.indexOf('http') === 0) return content;
+  if (content.indexOf('data:') !== 0) return content;
+  try {
+    const comma = content.indexOf(',');
+    const head = content.slice(0, comma);
+    const b64 = content.slice(comma + 1);
+    const mime = (head.match(/data:([^;]+)/) || [, 'audio/webm'])[1];
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([arr], { type: mime }));
+  } catch (e) {
+    return content;
+  }
+}
+
+function formatVoiceTime(secs) {
+  if (!isFinite(secs) || secs < 0) return '0:00';
+  const s = Math.floor(secs % 60);
+  const m = Math.floor(secs / 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function pauseOtherVoiceNotes(exceptAudio) {
+  document.querySelectorAll('.voice-note').forEach(note => {
+    const a = note.querySelector('audio');
+    const b = note.querySelector('.voice-note-play');
+    if (a && a !== exceptAudio) {
+      a.pause();
+      if (b) b.textContent = '▶';
+    }
+  });
+}
+
+function makeVoiceNotePlayer(content) {
+  const wrap = document.createElement('div');
+  wrap.className = 'voice-note';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'voice-note-play';
+  btn.setAttribute('aria-label', 'Play voice note');
+  btn.textContent = '▶';
+  const bar = document.createElement('div');
+  bar.className = 'voice-note-bar';
+  const fill = document.createElement('div');
+  fill.className = 'voice-note-fill';
+  bar.appendChild(fill);
+  const time = document.createElement('span');
+  time.className = 'voice-note-time';
+  time.textContent = '0:00';
+  const audio = document.createElement('audio');
+  audio.preload = 'metadata';
+  audio.playsInline = true;
+  audio.src = contentToPlayableUrl(content);
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    pauseOtherVoiceNotes(audio);
+    if (audio.paused) {
+      audio.play().then(() => { btn.textContent = '❚❚'; }).catch(() => {
+        showStatusMessage('Could not play voice note.');
+      });
+    } else {
+      audio.pause();
+      btn.textContent = '▶';
+    }
+  });
+  audio.addEventListener('timeupdate', () => {
+    const dur = audio.duration || 0;
+    const pct = dur ? (audio.currentTime / dur) * 100 : 0;
+    fill.style.width = pct + '%';
+    time.textContent = formatVoiceTime(audio.currentTime) + (dur ? ' / ' + formatVoiceTime(dur) : '');
+  });
+  audio.addEventListener('loadedmetadata', () => {
+    time.textContent = formatVoiceTime(audio.duration);
+  });
+  audio.addEventListener('ended', () => {
+    btn.textContent = '▶';
+    fill.style.width = '0%';
+    time.textContent = formatVoiceTime(audio.duration);
+  });
+  audio.addEventListener('error', () => {
+    time.textContent = 'error';
+  });
+  wrap.appendChild(btn);
+  wrap.appendChild(bar);
+  wrap.appendChild(time);
+  wrap.appendChild(audio);
+  return wrap;
+}
+
 function generateTotpSecret() {
   return otplib.authenticator.generateSecret(32);
 }

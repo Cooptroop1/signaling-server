@@ -337,15 +337,78 @@
     #voiceButton.recording, #voiceCallButton.active, #audioOutputButton.speaker, #grokButton.active {
       background-color: #ef4444;
     }
+    #voiceButton.recording {
+      animation: pulse-rec 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse-rec {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+      50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+    }
     #voiceTimer {
       font-size: 0.8rem;
       color: white;
-      background-color: #6b7280;
-      padding: 0.3rem 0.6rem;
-      border-radius: 0.5rem;
+      background-color: #ef4444;
+      padding: 0.35rem 0.7rem;
+      border-radius: 999px;
       display: none;
       align-items: center;
       justify-content: center;
+      font-variant-numeric: tabular-nums;
+      min-width: 3rem;
+    }
+    #voiceTimer.active {
+      display: flex;
+    }
+    .voice-note {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(0,0,0,0.08);
+      border-radius: 999px;
+      padding: 0.35rem 0.55rem 0.35rem 0.35rem;
+      max-width: 16rem;
+      margin-top: 0.25rem;
+    }
+    .voice-note audio {
+      display: none;
+    }
+    .voice-note-play {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      background: #2563eb;
+      color: white;
+      border: none;
+      font-size: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .voice-note-play:hover { background: #1d4ed8; }
+    .voice-note-bar {
+      flex: 1;
+      height: 0.35rem;
+      background: rgba(255,255,255,0.45);
+      border-radius: 999px;
+      overflow: hidden;
+      min-width: 4rem;
+    }
+    .voice-note-fill {
+      height: 100%;
+      width: 0;
+      background: #2563eb;
+      border-radius: 999px;
+    }
+    .voice-note-time {
+      font-size: 0.7rem;
+      min-width: 2.4rem;
+      text-align: right;
+      opacity: 0.85;
+    }
+    #remoteAudioContainer audio {
+      display: none;
     }
     @media (max-width: 640px) {
       .input-container {
@@ -747,9 +810,9 @@
           </div>
           <div class="button-row-below">
             <input type="file" id="imageInput" aria-label="Upload image or file" />
-            <button id="voiceButton" title="Record Voice" aria-label="Record voice message">🎤</button>
-            <button id="voiceCallButton" title="Start Voice Call" aria-label="Start voice call">📞</button>
-            <button id="audioOutputButton" title="Toggle Speaker/Earpiece" aria-label="Toggle audio output" class="hidden">🔊</button>
+            <button id="voiceButton" title="Record voice note" aria-label="Record voice note">🎤</button>
+            <button id="voiceCallButton" title="Start voice call" aria-label="Start voice call">📞</button>
+            <button id="audioOutputButton" title="Speaker" aria-label="Toggle speaker" class="hidden">🔊</button>
             <button id="grokButton" title="Toggle Grok Bot" aria-label="Toggle Grok bot">🤖</button>
             <span id="voiceTimer" aria-live="assertive"></span>
           </div>

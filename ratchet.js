@@ -277,31 +277,38 @@ async function drDecrypt(packet, messageId, usernameHint) {
 
 async function sealOfflinePayload(theirEcdhB64, username, plaintext, messageId) {
   if (!theirEcdhB64) throw new Error('That person has no public key yet');
-  const packet = await drEncrypt(username, theirEcdhB64, plaintext, messageId);
-  const me = await ensurePersistentKeys();
+  await ensurePersistentKeys();
   const eph = await generateRatchetDhPair();
   const theirPub = await importPublicKey(theirEcdhB64);
   const shared = await deriveSharedKey(eph.privateKey, theirPub);
-  const outer = JSON.stringify(packet);
-  const { encrypted, iv } = await encryptRaw(shared, outer, messageId);
+  const { encrypted, iv } = await encryptRaw(shared, plaintext, messageId || '');
   return {
     encrypted,
     iv,
     ephemeral_public: await exportPublicKey(eph.publicKey),
-    messageId
+    messageId,
+    v: 2
   };
 }
 
 async function openOfflinePayload(msg) {
   const me = await ensurePersistentKeys();
   if (!me || !me.ecdhPrivate) throw new Error('No identity keys on this phone');
+  if (!msg || !msg.encrypted || !msg.iv || !msg.ephemeral_public) {
+    throw new Error('That note is missing encryption fields');
+  }
   const eph = await importPublicKey(msg.ephemeral_public);
   const shared = await deriveSharedKey(me.ecdhPrivate, eph);
-  let outer;
-  try {
-    outer = await decryptRaw(shared, msg.encrypted, msg.iv, msg.messageId);
-  } catch (e) {
-    outer = await decryptRaw(shared, msg.encrypted, msg.iv);
+  const aads = [msg.messageId, '', msg.id && String(msg.id)].filter((v, i, a) => v !== undefined && v !== null && a.indexOf(v) === i);
+  let outer = null;
+  for (const aad of aads) {
+    try {
+      outer = await decryptRaw(shared, msg.encrypted, msg.iv, aad === '' ? undefined : aad);
+      break;
+    } catch (e) {}
+  }
+  if (outer == null) {
+    throw new Error('Could not open. Burn it and send a new note after both sides refresh.');
   }
   let packet;
   try {
@@ -310,7 +317,11 @@ async function openOfflinePayload(msg) {
     return outer;
   }
   if (packet.header && packet.body) {
-    return drDecrypt(packet, msg.messageId || String(msg.id || ''), msg.from);
+    try {
+      return await drDecrypt(packet, msg.messageId || String(msg.id || ''), msg.from);
+    } catch (e) {
+      return outer;
+    }
   }
   if (packet.inner && packet.identitySig) {
     const ok = await verifyIdentitySignature(packet.identityPublic, packet.identitySig, packet.inner);

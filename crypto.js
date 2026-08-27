@@ -240,16 +240,6 @@ async function decryptRaw(key, encrypted, iv, aad) {
     );
     return new TextDecoder().decode(decoded);
   } catch (error) {
-    if (aad) {
-      try {
-        const decoded = await window.crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: base64ToArrayBuffer(iv) },
-          key,
-          base64ToArrayBuffer(encrypted)
-        );
-        return new TextDecoder().decode(decoded);
-      } catch (e2) {}
-    }
     console.error('decryptRaw error');
     throw new Error('Raw decryption failed');
   }

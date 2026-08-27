@@ -95,21 +95,16 @@ async function applyLoggedInSession(session) {
 async function publishKeys() {
   if (!isLoggedIn()) return;
   try {
-    if (typeof initIdentityKeys === 'function') await initIdentityKeys();
-    if (typeof ensurePersistentKeys === 'function') await ensurePersistentKeys();
-    let pub = null;
-    if (typeof keyPair !== 'undefined' && keyPair && keyPair.publicKey && typeof exportPublicKey === 'function') {
-      pub = await exportPublicKey(keyPair.publicKey);
-    } else if (typeof generateUserKeypair === 'function') {
-      pub = await generateUserKeypair();
-    }
+    const me = (typeof ensurePersistentKeys === 'function') ? await ensurePersistentKeys() : null;
+    const pub = me && me.ecdhPubB64;
+    const ident = me && me.ecdsaPubB64;
     const uid = currentUser().id;
     const keysPatch = {
       last_active: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
     if (pub) keysPatch.public_key = pub;
-    if (typeof identityPubB64 !== 'undefined' && identityPubB64) keysPatch.identity_public_key = identityPubB64;
+    if (ident) keysPatch.identity_public_key = ident;
     if (typeof clientId !== 'undefined' && clientId) keysPatch.client_id = clientId;
     let { error } = await sb.from('profiles').update(keysPatch).eq('id', uid);
     if (error && /client_id|schema cache/i.test(error.message || '')) {

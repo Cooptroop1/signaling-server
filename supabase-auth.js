@@ -7,8 +7,7 @@ const sb = (window.supabase && window.supabase.createClient)
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: false,
-      storageKey: 'anonomoose-auth',
-      lock: async (_name, _timeout, fn) => fn()
+      storageKey: 'anonomoose-auth'
     }
   })
   : null;

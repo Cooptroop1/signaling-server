@@ -601,7 +601,7 @@ async function processReceivedMessage(data, targetId) {
   }
   processedMessageIds.add(data.messageId);
   processedNonces.set(data.nonce, Date.now());
-  let senderUsername, timestamp, contentType, contentOrData;
+  let senderUsername, timestamp, contentType, contentOrData, claimed = false;
   try {
     let rawData = null;
     if (isSk) {
@@ -665,10 +665,10 @@ async function processReceivedMessage(data, targetId) {
       if (braceCount === 0 && metadataStr.startsWith('{')) break;
     }
     const metadata = JSON.parse(metadataStr);
-  senderUsername = usernames.get(targetId) || metadata.username;
-  if (metadata.claimed) claimedClients.set(targetId, true);
-  const claimed = !!(claimedClients.get(targetId) || metadata.claimed);
-  timestamp = metadata.timestamp;
+    senderUsername = usernames.get(targetId) || metadata.username;
+    if (metadata.claimed) claimedClients.set(targetId, true);
+    claimed = !!(claimedClients.get(targetId) || metadata.claimed);
+    timestamp = metadata.timestamp;
     contentType = metadata.type;
     contentOrData = rawData.substring(metadataStr.length).trimEnd();
   } catch (error) {

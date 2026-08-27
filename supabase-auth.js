@@ -70,59 +70,43 @@ function withTimeout(promise, ms, message) {
 let applyingSession = false;
 
 async function applyLoggedInSession(session) {
-  if (applyingSession) return;
-  applyingSession = true;
-  try {
-    window.__sbSession = session;
-    if (session && session.user) closeAuthModals();
-    setAuthUi(session);
-    if (!session || !session.user) {
-      stopInbox();
-      return;
-    }
-    let display = (session.user.user_metadata && session.user.user_metadata.display_name)
-      || (session.user.email ? session.user.email.split('@')[0] : 'user');
-    try {
-      const { data: profile } = await withTimeout(
-        sb.from('profiles').select('display_name').eq('id', session.user.id).maybeSingle(),
-        8000,
-        'profile timeout'
-      );
-      if (profile && profile.display_name) display = profile.display_name;
-    } catch (e) {}
-    if (typeof username !== 'undefined') {
-      username = display;
-      try { sessionStorage.setItem('username', username); } catch (e) {}
-      try { localStorage.setItem('username', username); } catch (e) {}
-    }
-    if (typeof rememberUsername === 'function') rememberUsername(display);
-    if (typeof showStatusMessage === 'function') {
-      showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
-    }
-    if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
+  window.__sbSession = session;
+  if (session && session.user) closeAuthModals();
+  setAuthUi(session);
+  if (!session || !session.user) {
+    stopInbox();
+    return;
+  }
+  const display = (session.user.user_metadata && session.user.user_metadata.display_name)
+    || (session.user.email ? session.user.email.split('@')[0] : 'user');
+  if (typeof username !== 'undefined') {
+    username = display;
+    try { sessionStorage.setItem('username', username); } catch (e) {}
+    try { localStorage.setItem('username', username); } catch (e) {}
+  }
+  if (typeof rememberUsername === 'function') rememberUsername(display);
+  if (typeof showStatusMessage === 'function') {
+    showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
+  }
+  if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
+  setTimeout(() => {
     publishKeys().catch((e) => console.warn('publishKeys', e));
     loadInbox().catch((e) => console.warn('inbox', e));
     subscribeInbox(session.user.id);
     startHeartbeat();
     if (typeof renderMooseBook === 'function') renderMooseBook();
-    setTimeout(() => {
-      if (localStorage.getItem('moose_' + session.user.id + '_kitSaved')) return;
-      if (typeof loadPersistentKeys !== 'function' || typeof showRecoveryKitModal !== 'function') return;
-      loadPersistentKeys().then((keys) => {
-        if (keys && keys.recoveryKit) showRecoveryKitModal(keys.recoveryKit);
-      }).catch(() => {});
-    }, 400);
-  } finally {
-    applyingSession = false;
-  }
+    if (typeof schedulePersistKeys === 'function') schedulePersistKeys();
+  }, 1500);
 }
 
 async function publishKeys() {
   if (!isLoggedIn()) return;
   try {
-    const me = (typeof ensurePersistentKeys === 'function') ? await ensurePersistentKeys() : null;
-    const pub = me && me.ecdhPubB64;
-    const ident = me && me.ecdsaPubB64;
+    let me = (typeof sessionKeyBundle !== 'undefined' && sessionKeyBundle) ? sessionKeyBundle : null;
+    if (!me && typeof loadPersistentKeys === 'function') me = await loadPersistentKeys();
+    if (!me || !me.ecdhPubB64) return;
+    const pub = me.ecdhPubB64;
+    const ident = me.ecdsaPubB64;
     const uid = currentUser().id;
     const keysPatch = {
       last_active: new Date().toISOString(),
@@ -392,14 +376,21 @@ document.addEventListener('DOMContentLoaded', () => {
     location.reload();
   };
   sb.auth.onAuthStateChange((event, session) => {
-    setTimeout(() => {
-      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-        applyLoggedInSession(session);
-      } else if (event === 'SIGNED_OUT') {
-        window.__sbSession = null;
+    if (event === 'SIGNED_OUT') {
+      window.__sbSession = null;
+      setAuthUi(null);
+      stopInbox();
+      return;
+    }
+    if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+      window.__sbSession = session;
+      if (session && session.user) {
+        closeAuthModals();
+        setAuthUi(session);
+        setTimeout(() => applyLoggedInSession(session), 1500);
+      } else {
         setAuthUi(null);
-        stopInbox();
       }
-    }, 0);
+    }
   });
 });

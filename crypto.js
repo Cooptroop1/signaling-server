@@ -631,17 +631,7 @@ async function migrateLegacyLocalStorageKeys() {
 }
 
 async function ensurePersistentKeys() {
-  if (sessionKeyBundle && sessionKeyBundle.ecdhPrivate) {
-    if (!isGuestUser() && !sessionKeyBundle.wrapped && !sessionKeyBundle.recoveryKit) {
-      const existing = await loadPersistentKeys();
-      if (existing) {
-        sessionKeyBundle = existing;
-        return existing;
-      }
-      sessionKeyBundle = await createPersistentKeys();
-    }
-    return sessionKeyBundle;
-  }
+  if (sessionKeyBundle && sessionKeyBundle.ecdhPrivate) return sessionKeyBundle;
   const existing = await loadPersistentKeys();
   if (existing) {
     sessionKeyBundle = existing;
@@ -652,12 +642,25 @@ async function ensurePersistentKeys() {
     sessionKeyBundle = migrated;
     return migrated;
   }
-  if (isGuestUser()) {
-    sessionKeyBundle = await makeEphemeralIdentity();
-    return sessionKeyBundle;
-  }
-  sessionKeyBundle = await createPersistentKeys();
+  sessionKeyBundle = await makeEphemeralIdentity();
   return sessionKeyBundle;
+}
+
+function schedulePersistKeys() {
+  setTimeout(async () => {
+    try {
+      if (!(window.sbAuth && window.sbAuth.isLoggedIn())) return;
+      if (sessionKeyBundle && (sessionKeyBundle.wrapped || sessionKeyBundle.recoveryKit)) return;
+      const existing = await loadPersistentKeys();
+      if (existing) {
+        sessionKeyBundle = existing;
+        return;
+      }
+      sessionKeyBundle = await createPersistentKeys();
+    } catch (e) {
+      console.warn('schedulePersistKeys', e);
+    }
+  }, 2500);
 }
 
 let sessionKeyBundle = null;

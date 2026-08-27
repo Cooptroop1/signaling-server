@@ -25,6 +25,15 @@ async function getSession() {
   return window.__sbSession;
 }
 
+function closeAuthModals() {
+  ['supabaseLoginModal', 'supabaseSignUpModal'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('hidden');
+    el.classList.remove('active');
+  });
+}
+
 function setAuthUi(session) {
   const userInfo = document.getElementById('userInfo');
   const authLinks = document.getElementById('authLinks');
@@ -45,6 +54,7 @@ function setAuthUi(session) {
 
 async function applyLoggedInSession(session) {
   window.__sbSession = session;
+  if (session && session.user) closeAuthModals();
   setAuthUi(session);
   if (!session || !session.user) {
     stopInbox();
@@ -258,14 +268,20 @@ async function signUp(email, displayName, password) {
     options: { data: { display_name: displayName } }
   });
   if (error) throw error;
-  if (data.session) await applyLoggedInSession(data.session);
+  window.__sbSession = data.session;
+  closeAuthModals();
+  setAuthUi(data.session);
+  if (data.session) applyLoggedInSession(data.session);
   return data;
 }
 
 async function signIn(email, password) {
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) throw error;
-  await applyLoggedInSession(data.session);
+  window.__sbSession = data.session;
+  closeAuthModals();
+  setAuthUi(data.session);
+  if (data.session) applyLoggedInSession(data.session);
   return data;
 }
 
@@ -322,12 +338,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const password = document.getElementById('modalSignUpPassword').value;
     if (!email || !displayName || !password) return alert('All fields required');
     try {
+      signSubmit.disabled = true;
+      signSubmit.textContent = 'Creating…';
       const data = await signUp(email, displayName, password);
-      signUpModal.classList.add('hidden');
-      signUpModal.classList.remove('active');
+      closeAuthModals();
       if (!data.session) alert('Account created. Confirm your email, then log in.');
     } catch (err) {
       alert(err.message || 'Sign up failed');
+    } finally {
+      signSubmit.disabled = false;
+      signSubmit.textContent = 'Create Account';
     }
   };
   const loginSubmit = document.getElementById('modalLoginSubmit');
@@ -336,11 +356,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const password = document.getElementById('modalLoginPassword').value;
     if (!email || !password) return alert('Email and password required');
     try {
+      loginSubmit.disabled = true;
+      loginSubmit.textContent = 'Signing in…';
       await signIn(email, password);
-      loginModal.classList.add('hidden');
-      loginModal.classList.remove('active');
+      closeAuthModals();
     } catch (err) {
       alert(err.message || 'Login failed');
+    } finally {
+      loginSubmit.disabled = false;
+      loginSubmit.textContent = 'Login';
     }
   };
   const signOutBtn = document.getElementById('signOutBtn');

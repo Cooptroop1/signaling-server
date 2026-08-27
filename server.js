@@ -1177,7 +1177,7 @@ wss.on('connection', (ws, req) => {
         }
         // Broadcast join-notify
         const totalClients = currentSize;
-        const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients, identityPublic: data.identityPublic || null };
+        const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients, identityPublic: data.identityPublic || null, claimed: !!data.claimed };
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
         // New: Remove from randomCodes if this is a non-initiator joining a random code (one-time use)
         if (randomCodes.has(code) && clientId !== roomState.initiator) {

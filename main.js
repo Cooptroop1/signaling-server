@@ -26,7 +26,7 @@ let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
 let messageQueue = new Map(); // New: Per-target message queue for retries
-function appendMessage({ username, timestamp, type, content, isSelf, fileName = null }) {
+function appendMessage({ username, timestamp, type, content, isSelf, fileName = null, claimed = false }) {
   const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
@@ -34,7 +34,10 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
   timeSpan.className = 'timestamp';
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
-  messageDiv.appendChild(document.createTextNode(`${username}: `));
+  const nameSpan = document.createElement('span');
+  nameSpan.className = claimed ? 'claimed-name' : 'guest-name';
+  nameSpan.textContent = username + ': ';
+  messageDiv.appendChild(nameSpan);
   if (type === 'image' || type === 'voice' || type === 'file') {
     let element;
     if (type === 'image') {
@@ -173,7 +176,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const jitteredTimestamp = timestamp + jitter;
   const nonce = crypto.randomUUID();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
-  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type });
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type, claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn()) });
   let rawData = metadata + (dataToSend || sanitizedContent);
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' ');
@@ -654,8 +657,10 @@ async function processReceivedMessage(data, targetId) {
       if (braceCount === 0 && metadataStr.startsWith('{')) break;
     }
     const metadata = JSON.parse(metadataStr);
-    senderUsername = usernames.get(targetId) || metadata.username;
-    timestamp = metadata.timestamp;
+  senderUsername = usernames.get(targetId) || metadata.username;
+  if (metadata.claimed) claimedClients.set(targetId, true);
+  const claimed = !!(claimedClients.get(targetId) || metadata.claimed);
+  timestamp = metadata.timestamp;
     contentType = metadata.type;
     contentOrData = rawData.substring(metadataStr.length).trimEnd();
   } catch (error) {
@@ -663,7 +668,7 @@ async function processReceivedMessage(data, targetId) {
     showStatusMessage('Failed to decrypt/verify message.');
     return;
   }
-  appendMessage({ username: senderUsername, timestamp, type: contentType, content: sanitizeMessage(contentOrData), isSelf: senderUsername === username, fileName: data.filename || 'file' });
+  appendMessage({ username: senderUsername, timestamp, type: contentType, content: sanitizeMessage(contentOrData), isSelf: senderUsername === username, fileName: data.filename || 'file', claimed });
   if (isInitiator && !isDr && !isSk) {
     dataChannels.forEach((dc, id) => {
       if (id !== targetId && dc.readyState === 'open') {

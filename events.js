@@ -117,6 +117,7 @@ const maxRetries = 2;
 let candidatesQueues = new Map();
 let processedMessageIds = new Set();
 let usernames = new Map();
+let claimedClients = new Map();
 let messageRateLimits = new Map();
 let codeSentToRandom = false;
 let useRelay = false;
@@ -312,7 +313,8 @@ async function sendJoin(extra) {
     clientId,
     username,
     token,
-    identityPublic: identityPubB64
+    identityPublic: identityPubB64,
+    claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn())
   }, extra)));
 }
 lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code')) || code);
@@ -710,6 +712,7 @@ async function handleSocketMessage(event) {
       totalClients = 1;
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
+      claimedClients.set(clientId, !!(window.sbAuth && window.sbAuth.isLoggedIn()));
       connectedClients.add(clientId);
       if (identityPubB64) clientIdentityKeys.set(clientId, identityPubB64);
       initialContainer.classList.add('hidden');
@@ -779,6 +782,7 @@ async function handleSocketMessage(event) {
       if (message.username) {
         usernames.set(message.clientId, message.username);
       }
+      claimedClients.set(message.clientId, !!message.claimed);
       if (message.identityPublic) {
         clientIdentityKeys.set(message.clientId, message.identityPublic);
       }
@@ -1081,6 +1085,8 @@ async function handleSocketMessage(event) {
         }
         const metadata = JSON.parse(metadataStr);
         const senderUsername = (senderId && usernames.get(senderId)) || metadata.username;
+        if (metadata.claimed && senderId) claimedClients.set(senderId, true);
+        const claimed = !!(senderId && claimedClients.get(senderId)) || !!metadata.claimed;
         const timestamp = metadata.timestamp;
         const contentType = metadata.type;
         let base64Data = rawData.substring(metadataStr.length).trimEnd();
@@ -1093,7 +1099,10 @@ async function handleSocketMessage(event) {
         timeSpan.className = 'timestamp';
         timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
         messageDiv.appendChild(timeSpan);
-        messageDiv.appendChild(document.createTextNode(`${senderUsername}: `));
+        const nameSpan = document.createElement('span');
+        nameSpan.className = claimed ? 'claimed-name' : 'guest-name';
+        nameSpan.textContent = senderUsername + ': ';
+        messageDiv.appendChild(nameSpan);
         let mime = message.mime;
         if (contentType === 'message') {
           contentOrData = base64Data;
@@ -1372,13 +1381,14 @@ function updateDots() {
     dot.className = 'user-dot online';
     dot.dataset.targetId = targetId;
     const name = usernames.get(targetId) || 'User';
-    dot.title = name;
+    const claimed = !!claimedClients.get(targetId);
+    dot.title = claimed ? name + ' (logged in)' : name;
     if (isInitiator) {
       const menu = document.createElement('div');
       menu.className = 'user-menu';
       const label = document.createElement('div');
-      label.textContent = name;
-      label.style.cssText = 'padding:0.4rem 0.6rem;font-size:0.75rem;color:#374151;border-bottom:1px solid #eee;';
+      label.textContent = claimed ? name + ' · logged in' : name;
+      label.style.cssText = 'padding:0.4rem 0.6rem;font-size:0.75rem;border-bottom:1px solid #eee;color:' + (claimed ? '#dc2626' : '#374151') + ';font-weight:' + (claimed ? '800' : '500') + ';';
       const kickButton = document.createElement('button');
       kickButton.textContent = 'Kick';
       kickButton.onclick = (e) => { e.stopPropagation(); kickUser(targetId); };

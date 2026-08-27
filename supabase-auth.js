@@ -289,18 +289,11 @@ async function signUp(email, displayName, password) {
 }
 
 async function signIn(email, password) {
-  const { data, error } = await withTimeout(
-    sb.auth.signInWithPassword({ email, password }),
-    12000,
-    'Login timed out. Try again.'
-  );
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) throw error;
   window.__sbSession = data.session;
   closeAuthModals();
   setAuthUi(data.session);
-  setTimeout(() => {
-    if (data.session) applyLoggedInSession(data.session);
-  }, 0);
   return data;
 }
 

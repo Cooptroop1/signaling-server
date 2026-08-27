@@ -248,6 +248,21 @@ const serverUrls = [
   'wss://signaling-server-zc6m.onrender.com'
 ];
 let serverUrlIndex = 0;
+try {
+  const saved = sessionStorage.getItem('signalHost') || '';
+  const idx = serverUrls.findIndex((u) => saved.indexOf(u.replace('wss://', '')) !== -1);
+  if (idx >= 0) serverUrlIndex = idx;
+} catch (e) {}
+let wsWatchTimer = null;
+function watchSocketConnect(s) {
+  clearTimeout(wsWatchTimer);
+  wsWatchTimer = setTimeout(() => {
+    if (s && s.readyState !== WebSocket.OPEN) {
+      console.warn('WebSocket connect timeout, trying next server', s.url);
+      try { s.close(); } catch (e) {}
+    }
+  }, 2500);
+}
 function serverForCode(roomCode) {
   return serverUrls[Math.min(serverUrlIndex, serverUrls.length - 1)];
 }
@@ -290,6 +305,7 @@ async function ensureServerForCode(roomCode) {
   } catch (e) {}
   socket = new WebSocket(want);
   bindSocketHandlers(socket);
+  watchSocketConnect(socket);
   await waitForToken();
   pinReconnect = false;
 }
@@ -320,6 +336,7 @@ async function sendJoin(extra) {
 lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code')) || code);
 socket = new WebSocket(lastWsUrl);
 bindSocketHandlers(socket);
+watchSocketConnect(socket);
 console.log(`WebSocket created, connected to ${lastWsUrl}`);
   username = (sessionStorage.getItem('username') || localStorage.getItem('username') || new URLSearchParams(window.location.search).get('name') || '').trim();
   if (username) rememberUsername(username);
@@ -456,6 +473,8 @@ function endChat() {
   document.getElementById('startChatToggleButton')?.focus();
 }
 function handleSocketOpen() {
+  clearTimeout(wsWatchTimer);
+  try { sessionStorage.setItem('signalHost', socket.url); } catch (e) {}
   console.log('WebSocket opened');
   socket.send(JSON.stringify({ type: 'connect', clientId }));
   reconnectAttempts = 0;
@@ -487,6 +506,7 @@ function handleSocketClose() {
     lastWsUrl = serverUrls[serverUrlIndex];
     socket = new WebSocket(lastWsUrl);
     bindSocketHandlers(socket);
+    watchSocketConnect(socket);
     return;
   }
   if (reconnectAttempts >= maxReconnectAttempts) {
@@ -499,6 +519,7 @@ function handleSocketClose() {
     socket = new WebSocket(lastWsUrl || (window.serverForCode && window.serverForCode(code)) || 'wss://signaling-server-zc6m.onrender.com');
     if (window.bindSocketHandlers) window.bindSocketHandlers(socket);
     else bindSocketHandlers(socket);
+    watchSocketConnect(socket);
   }, delay);
 }
 async function handleSocketMessage(event) {

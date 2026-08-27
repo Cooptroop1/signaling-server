@@ -356,10 +356,6 @@ console.log(`WebSocket created, connected to ${lastWsUrl}`);
   button2 = document.getElementById('button2');
   helpText = document.getElementById('helpText');
   helpModal = document.getElementById('helpModal');
-  (async () => {
-    keyPair = await generateSessionKeyPair();
-    try { await initIdentityKeys(); } catch (e) { console.error('Identity init failed', e); }
-  })();
   window.sendJoin = sendJoin;
   window.ensureServerForCode = ensureServerForCode;
   window.initIdentityKeys = initIdentityKeys;

@@ -279,19 +279,37 @@ async function signUp(email, displayName, password) {
 }
 
 async function signIn(email, password) {
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
-  if (error) throw error;
-  window.__sbSession = data.session;
+  const res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: 'Bearer ' + SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error_description || data.msg || data.error || 'Login failed');
+  }
+  window.__sbSession = data;
   closeAuthModals();
-  setAuthUi(data.session);
+  setAuthUi(data);
+  if (sb && data.access_token && data.refresh_token) {
+    sb.auth.setSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token
+    }).catch((e) => console.warn('setSession', e));
+  }
+  setTimeout(() => applyLoggedInSession(data), 2000);
   return data;
 }
 
 async function signOut() {
   stopInbox();
-  if (sb) await sb.auth.signOut();
   window.__sbSession = null;
   setAuthUi(null);
+  if (sb) sb.auth.signOut().catch(() => {});
 }
 
 window.sbAuth = {
@@ -370,26 +388,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   const signOutBtn = document.getElementById('signOutBtn');
-  if (signOutBtn) signOutBtn.onclick = async () => {
-    await signOut();
-    location.reload();
+  if (signOutBtn) signOutBtn.onclick = () => {
+    signOut();
   };
+  setTimeout(async () => {
+    try {
+      const { data } = await sb.auth.getSession();
+      if (data && data.session && data.session.user) {
+        window.__sbSession = data.session;
+        closeAuthModals();
+        setAuthUi(data.session);
+        applyLoggedInSession(data.session);
+      }
+    } catch (e) {}
+  }, 2500);
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') {
       window.__sbSession = null;
       setAuthUi(null);
       stopInbox();
-      return;
-    }
-    if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-      window.__sbSession = session;
-      if (session && session.user) {
-        closeAuthModals();
-        setAuthUi(session);
-        setTimeout(() => applyLoggedInSession(session), 1500);
-      } else {
-        setAuthUi(null);
-      }
     }
   });
 });

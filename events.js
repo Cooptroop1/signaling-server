@@ -244,8 +244,8 @@ let suppressAutoBurnUntil = 0;
 let hideLocalTimer = null;
 let hideRoomTimer = null;
 const serverUrls = [
-  'wss://signal.anonomoose.com',
-  'wss://signaling-server-zc6m.onrender.com'
+  'wss://signaling-server-zc6m.onrender.com',
+  'wss://signaling-server-1.onrender.com'
 ];
 let serverUrlIndex = 0;
 try {

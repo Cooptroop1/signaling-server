@@ -2,7 +2,15 @@ const SUPABASE_URL = 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
 
 const sb = (window.supabase && window.supabase.createClient)
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      storageKey: 'anonomoose-auth',
+      lock: async (_name, _timeout, fn) => fn()
+    }
+  })
   : null;
 
 window.supabaseClient = sb;
@@ -97,14 +105,13 @@ async function applyLoggedInSession(session) {
     subscribeInbox(session.user.id);
     startHeartbeat();
     if (typeof renderMooseBook === 'function') renderMooseBook();
-    if (!localStorage.getItem('moose_' + session.user.id + '_kitSaved')) {
-      try {
-        if (typeof loadPersistentKeys === 'function') {
-          const keys = await loadPersistentKeys();
-          if (keys && keys.recoveryKit && typeof showRecoveryKitModal === 'function') showRecoveryKitModal(keys.recoveryKit);
-        }
-      } catch (e) {}
-    }
+    setTimeout(() => {
+      if (localStorage.getItem('moose_' + session.user.id + '_kitSaved')) return;
+      if (typeof loadPersistentKeys !== 'function' || typeof showRecoveryKitModal !== 'function') return;
+      loadPersistentKeys().then((keys) => {
+        if (keys && keys.recoveryKit) showRecoveryKitModal(keys.recoveryKit);
+      }).catch(() => {});
+    }, 400);
   } finally {
     applyingSession = false;
   }

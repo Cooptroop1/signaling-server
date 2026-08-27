@@ -198,6 +198,19 @@ window.rememberSafety = rememberSafety;
 window.lastSeenLabel = lastSeenLabel;
 
 document.addEventListener('DOMContentLoaded', () => {
+  const ethBtn = document.getElementById('copyEthDonate');
+  if (ethBtn) {
+    ethBtn.onclick = async () => {
+      const addr = '0x9D1AC5323583683666588B567C92FFCB1f41ba02';
+      try {
+        await navigator.clipboard.writeText(addr);
+        ethBtn.textContent = 'Copied ETH address';
+      } catch (e) {
+        window.prompt('Copy ETH address', addr);
+      }
+      setTimeout(() => { ethBtn.textContent = 'ETH ' + addr; }, 1600);
+    };
+  }
   const qrBtn = document.getElementById('myQrButton');
   if (qrBtn) qrBtn.onclick = showMooseQr;
   const closeQr = document.getElementById('closeMooseQrButton');

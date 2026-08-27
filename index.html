@@ -605,19 +605,27 @@
     .presence-off { color: #6b7280; }
     .claimed-name { color: #dc2626; font-weight: 800; }
     .guest-name { color: #111827; font-weight: 500; }
-    .claimed-badge {
-      display: inline-block;
-      margin: 0 0.35rem 0 0.15rem;
-      padding: 0 0.28rem;
-      font-size: 0.65rem;
-      font-weight: 800;
-      letter-spacing: 0.02em;
-      line-height: 1.3;
-      color: #fff;
-      background: #dc2626;
-      border-radius: 0.25rem;
-      vertical-align: middle;
+    .donate-box {
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid #e5e7eb;
+      text-align: center;
+      color: #6b7280;
+      font-size: 0.78rem;
+      line-height: 1.45;
     }
+    .donate-box button {
+      display: inline;
+      background: none;
+      border: 0;
+      padding: 0;
+      color: #4b5563;
+      font-family: ui-monospace, monospace;
+      font-size: 0.7rem;
+      word-break: break-all;
+      cursor: pointer;
+    }
+    .donate-box button:hover { color: #111827; }
     #helpText {
       color: #3b82f6;
       cursor: pointer;
@@ -1061,6 +1069,10 @@
             <div id="bookList"></div>
           </div>
         </div>
+        <div id="donateBox" class="donate-box">
+          <p>Donate for server upgrades and upkeep</p>
+          <button type="button" id="copyEthDonate" title="Copy address">ETH 0x9D1AC5323583683666588B567C92FFCB1f41ba02</button>
+        </div>
       </div>
     </div> <!-- ← THIS CLOSES THE WHITE CARD (bg-white) -->
 
@@ -1233,15 +1245,15 @@
       <button id="cancelRecoverKeysButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-    <script src="crypto.js?v=260827n"></script>
-  <script src="ratchet.js?v=260827n"></script>
-  <script src="utils.js?v=260827n"></script>
-  <script src="main.js?v=260827n"></script>
-  <script src="init.js?v=260827n"></script>
-  <script src="events.js?v=260827n"></script>
+    <script src="crypto.js?v=260827o"></script>
+  <script src="ratchet.js?v=260827o"></script>
+  <script src="utils.js?v=260827o"></script>
+  <script src="main.js?v=260827o"></script>
+  <script src="init.js?v=260827o"></script>
+  <script src="events.js?v=260827o"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260827n"></script>
-  <script src="account-ui.js?v=260827n"></script>
+  <script src="supabase-auth.js?v=260827o"></script>
+  <script src="account-ui.js?v=260827o"></script>
 </body>
 </html>

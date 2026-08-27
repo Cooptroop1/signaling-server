@@ -5,7 +5,7 @@ const sb = (window.supabase && window.supabase.createClient)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
-      autoRefreshToken: true,
+      autoRefreshToken: false,
       detectSessionInUrl: false,
       storageKey: 'anonomoose-auth'
     }
@@ -415,19 +415,17 @@ document.addEventListener('DOMContentLoaded', () => {
   if (signOutBtn) signOutBtn.onclick = () => {
     signOut();
   };
-  setTimeout(async () => {
-    if (signedOut) return;
-    try {
-      const { data } = await sb.auth.getSession();
-      if (signedOut) return;
-      if (data && data.session && data.session.user) {
-        window.__sbSession = data.session;
-        closeAuthModals();
-        setAuthUi(data.session);
-        applyLoggedInSession(data.session);
+  try {
+    const raw = localStorage.getItem('anonomoose-auth');
+    if (raw && !signedOut) {
+      const parsed = JSON.parse(raw);
+      const session = parsed.currentSession || parsed.session || parsed;
+      if (session && session.user && session.access_token) {
+        window.__sbSession = session;
+        setAuthUi(session);
       }
-    } catch (e) {}
-  }, 2500);
+    }
+  } catch (e) {}
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') {
       window.__sbSession = null;

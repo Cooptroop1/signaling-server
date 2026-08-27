@@ -52,43 +52,61 @@ function setAuthUi(session) {
   }
 }
 
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
+  ]);
+}
+
+let applyingSession = false;
+
 async function applyLoggedInSession(session) {
-  window.__sbSession = session;
-  if (session && session.user) closeAuthModals();
-  setAuthUi(session);
-  if (!session || !session.user) {
-    stopInbox();
-    return;
-  }
-  const { data: profile } = await sb.from('profiles')
-    .select('display_name')
-    .eq('id', session.user.id)
-    .maybeSingle();
-  const display = (profile && profile.display_name)
-    || (session.user.user_metadata && session.user.user_metadata.display_name)
-    || (session.user.email ? session.user.email.split('@')[0] : 'user');
-  if (typeof username !== 'undefined') {
-    username = display;
-    try { sessionStorage.setItem('username', username); } catch (e) {}
-    try { localStorage.setItem('username', username); } catch (e) {}
-  }
-  if (typeof rememberUsername === 'function') rememberUsername(display);
-  if (typeof showStatusMessage === 'function') {
-    showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
-  }
-  if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
-  await publishKeys();
-  await loadInbox();
-  subscribeInbox(session.user.id);
-  startHeartbeat();
-  if (typeof renderMooseBook === 'function') renderMooseBook();
-  if (!localStorage.getItem('moose_' + session.user.id + '_kitSaved')) {
+  if (applyingSession) return;
+  applyingSession = true;
+  try {
+    window.__sbSession = session;
+    if (session && session.user) closeAuthModals();
+    setAuthUi(session);
+    if (!session || !session.user) {
+      stopInbox();
+      return;
+    }
+    let display = (session.user.user_metadata && session.user.user_metadata.display_name)
+      || (session.user.email ? session.user.email.split('@')[0] : 'user');
     try {
-      if (typeof loadPersistentKeys === 'function') {
-        const keys = await loadPersistentKeys();
-        if (keys && keys.recoveryKit && typeof showRecoveryKitModal === 'function') showRecoveryKitModal(keys.recoveryKit);
-      }
+      const { data: profile } = await withTimeout(
+        sb.from('profiles').select('display_name').eq('id', session.user.id).maybeSingle(),
+        8000,
+        'profile timeout'
+      );
+      if (profile && profile.display_name) display = profile.display_name;
     } catch (e) {}
+    if (typeof username !== 'undefined') {
+      username = display;
+      try { sessionStorage.setItem('username', username); } catch (e) {}
+      try { localStorage.setItem('username', username); } catch (e) {}
+    }
+    if (typeof rememberUsername === 'function') rememberUsername(display);
+    if (typeof showStatusMessage === 'function') {
+      showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
+    }
+    if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
+    publishKeys().catch((e) => console.warn('publishKeys', e));
+    loadInbox().catch((e) => console.warn('inbox', e));
+    subscribeInbox(session.user.id);
+    startHeartbeat();
+    if (typeof renderMooseBook === 'function') renderMooseBook();
+    if (!localStorage.getItem('moose_' + session.user.id + '_kitSaved')) {
+      try {
+        if (typeof loadPersistentKeys === 'function') {
+          const keys = await loadPersistentKeys();
+          if (keys && keys.recoveryKit && typeof showRecoveryKitModal === 'function') showRecoveryKitModal(keys.recoveryKit);
+        }
+      } catch (e) {}
+    }
+  } finally {
+    applyingSession = false;
   }
 }
 
@@ -266,17 +284,23 @@ async function signUp(email, displayName, password) {
   window.__sbSession = data.session;
   closeAuthModals();
   setAuthUi(data.session);
-  if (data.session) applyLoggedInSession(data.session);
+  if (data.session) setTimeout(() => applyLoggedInSession(data.session), 0);
   return data;
 }
 
 async function signIn(email, password) {
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  const { data, error } = await withTimeout(
+    sb.auth.signInWithPassword({ email, password }),
+    12000,
+    'Login timed out. Try again.'
+  );
   if (error) throw error;
   window.__sbSession = data.session;
   closeAuthModals();
   setAuthUi(data.session);
-  if (data.session) applyLoggedInSession(data.session);
+  setTimeout(() => {
+    if (data.session) applyLoggedInSession(data.session);
+  }, 0);
   return data;
 }
 
@@ -368,12 +392,14 @@ document.addEventListener('DOMContentLoaded', () => {
     location.reload();
   };
   sb.auth.onAuthStateChange((event, session) => {
-    if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-      applyLoggedInSession(session);
-    } else if (event === 'SIGNED_OUT') {
-      window.__sbSession = null;
-      setAuthUi(null);
-      stopInbox();
-    }
+    setTimeout(() => {
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        applyLoggedInSession(session);
+      } else if (event === 'SIGNED_OUT') {
+        window.__sbSession = null;
+        setAuthUi(null);
+        stopInbox();
+      }
+    }, 0);
   });
 });

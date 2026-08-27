@@ -42,6 +42,7 @@ function closeAuthModals() {
 }
 
 function setAuthUi(session) {
+  if (signedOut && session && session.user) return;
   const userInfo = document.getElementById('userInfo');
   const authLinks = document.getElementById('authLinks');
   const nameEl = document.getElementById('userDisplayName');
@@ -54,8 +55,13 @@ function setAuthUi(session) {
     userInfo.classList.remove('hidden');
     authLinks.style.display = 'none';
   } else {
+    if (nameEl) nameEl.textContent = '';
     userInfo.classList.add('hidden');
     authLinks.style.display = 'block';
+    const inbox = document.getElementById('mooseInbox');
+    const book = document.getElementById('mooseBook');
+    if (inbox) inbox.classList.add('hidden');
+    if (book) book.classList.add('hidden');
   }
 }
 
@@ -66,9 +72,11 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
-let applyingSession = false;
+let signedOut = false;
+let afterLoginTimer = null;
 
 async function applyLoggedInSession(session) {
+  if (signedOut) return;
   window.__sbSession = session;
   if (session && session.user) closeAuthModals();
   setAuthUi(session);
@@ -293,6 +301,7 @@ async function signIn(email, password) {
     throw new Error(data.error_description || data.msg || data.error || 'Login failed');
   }
   window.__sbSession = data;
+  signedOut = false;
   closeAuthModals();
   setAuthUi(data);
   if (sb && data.access_token && data.refresh_token) {
@@ -301,15 +310,30 @@ async function signIn(email, password) {
       refresh_token: data.refresh_token
     }).catch((e) => console.warn('setSession', e));
   }
-  setTimeout(() => applyLoggedInSession(data), 2000);
+  if (afterLoginTimer) clearTimeout(afterLoginTimer);
+  afterLoginTimer = setTimeout(() => {
+    if (!signedOut) applyLoggedInSession(data);
+  }, 2000);
   return data;
 }
 
-async function signOut() {
+function signOut() {
+  signedOut = true;
+  if (afterLoginTimer) {
+    clearTimeout(afterLoginTimer);
+    afterLoginTimer = null;
+  }
   stopInbox();
+  stopHeartbeat();
   window.__sbSession = null;
   setAuthUi(null);
-  if (sb) sb.auth.signOut().catch(() => {});
+  try {
+    localStorage.removeItem('anonomoose-auth');
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('anonomoose-auth') !== -1) localStorage.removeItem(k);
+    }
+  } catch (e) {}
 }
 
 window.sbAuth = {
@@ -392,8 +416,10 @@ document.addEventListener('DOMContentLoaded', () => {
     signOut();
   };
   setTimeout(async () => {
+    if (signedOut) return;
     try {
       const { data } = await sb.auth.getSession();
+      if (signedOut) return;
       if (data && data.session && data.session.user) {
         window.__sbSession = data.session;
         closeAuthModals();

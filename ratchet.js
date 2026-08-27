@@ -316,11 +316,14 @@ async function openOfflinePayload(msg) {
   } catch (e) {
     return outer;
   }
+  if (packet && packet.type && (packet.text || packet.code) && !packet.header) {
+    return outer;
+  }
   if (packet.header && packet.body) {
     try {
       return await drDecrypt(packet, msg.messageId || String(msg.id || ''), msg.from);
     } catch (e) {
-      return outer;
+      throw new Error('Old sealed note. Burn it and send a new one.');
     }
   }
   if (packet.inner && packet.identitySig) {

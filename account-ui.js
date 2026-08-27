@@ -101,6 +101,9 @@ async function openInboxItem(msg) {
     const opened = await openOfflinePayload(msg);
     let parsed = null;
     try { parsed = JSON.parse(opened); } catch (e) {}
+    if (parsed && (parsed.header || parsed.body || parsed.identitySig) && !parsed.text && !parsed.code) {
+      throw new Error('Old sealed note. Burn it and send a new one.');
+    }
     const fromName = (parsed && parsed.from) || 'Someone';
     if (isBlocked(fromName)) {
       await burnInboxItem(msg);

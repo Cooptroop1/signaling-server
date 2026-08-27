@@ -252,7 +252,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     return;
   }
   if (sent) {
-    appendMessage({ username, timestamp, type, content: sanitizedContent || dataToSend, isSelf: true, fileName: file?.name });
+    appendMessage({ username, timestamp, type, content: sanitizedContent || dataToSend, isSelf: true, fileName: file?.name, claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn()) });
     processedMessageIds.add(messageId);
     processedNonces.set(nonce, Date.now());
     messageCount++;
@@ -666,8 +666,8 @@ async function processReceivedMessage(data, targetId) {
     }
     const metadata = JSON.parse(metadataStr);
     senderUsername = usernames.get(targetId) || metadata.username;
-    if (metadata.claimed) claimedClients.set(targetId, true);
-    claimed = !!(claimedClients.get(targetId) || metadata.claimed);
+    if (typeof claimedClients !== 'undefined' && metadata.claimed) claimedClients.set(targetId, true);
+    claimed = !!(typeof claimedClients !== 'undefined' && claimedClients.get(targetId)) || !!metadata.claimed;
     timestamp = metadata.timestamp;
     contentType = metadata.type;
     contentOrData = rawData.substring(metadataStr.length).trimEnd();

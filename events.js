@@ -1101,8 +1101,16 @@ async function handleSocketMessage(event) {
         messageDiv.appendChild(timeSpan);
         const nameSpan = document.createElement('span');
         nameSpan.className = claimed ? 'claimed-name' : 'guest-name';
-        nameSpan.textContent = senderUsername + ': ';
+        nameSpan.textContent = senderUsername;
         messageDiv.appendChild(nameSpan);
+        if (claimed) {
+          const badge = document.createElement('span');
+          badge.className = 'claimed-badge';
+          badge.textContent = 'in';
+          badge.title = 'Logged-in account';
+          messageDiv.appendChild(badge);
+        }
+        messageDiv.appendChild(document.createTextNode(': '));
         let mime = message.mime;
         if (contentType === 'message') {
           contentOrData = base64Data;

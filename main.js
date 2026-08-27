@@ -36,8 +36,16 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
   messageDiv.appendChild(timeSpan);
   const nameSpan = document.createElement('span');
   nameSpan.className = claimed ? 'claimed-name' : 'guest-name';
-  nameSpan.textContent = username + ': ';
+  nameSpan.textContent = username;
   messageDiv.appendChild(nameSpan);
+  if (claimed) {
+    const badge = document.createElement('span');
+    badge.className = 'claimed-badge';
+    badge.textContent = 'in';
+    badge.title = 'Logged-in account';
+    messageDiv.appendChild(badge);
+  }
+  messageDiv.appendChild(document.createTextNode(': '));
   if (type === 'image' || type === 'voice' || type === 'file') {
     let element;
     if (type === 'image') {

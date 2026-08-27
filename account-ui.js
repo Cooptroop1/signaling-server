@@ -122,7 +122,9 @@ async function openInboxItem(msg) {
     alert('From ' + fromName + ':\n\n' + text);
     await burnInboxItem(msg);
   } catch (e) {
-    showStatusMessage('Could not open that note. Need the recovery kit on this phone.');
+    const msgText = (e && e.message) ? e.message : 'Could not open that note.';
+    const burn = confirm(msgText + '\n\nBurn this note?');
+    if (burn) await burnInboxItem(msg);
   }
 }
 

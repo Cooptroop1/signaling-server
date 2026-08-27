@@ -641,7 +641,17 @@ async function migrateLegacyLocalStorageKeys() {
 }
 
 async function ensurePersistentKeys() {
-  if (sessionKeyBundle) return sessionKeyBundle;
+  if (sessionKeyBundle && sessionKeyBundle.ecdhPrivate) {
+    if (!isGuestUser() && !sessionKeyBundle.wrapped && !sessionKeyBundle.recoveryKit) {
+      const existing = await loadPersistentKeys();
+      if (existing) {
+        sessionKeyBundle = existing;
+        return existing;
+      }
+      sessionKeyBundle = await createPersistentKeys();
+    }
+    return sessionKeyBundle;
+  }
   const existing = await loadPersistentKeys();
   if (existing) {
     sessionKeyBundle = existing;

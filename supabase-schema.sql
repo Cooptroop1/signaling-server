@@ -21,9 +21,19 @@ alter table public.profiles add column if not exists updated_at timestamptz defa
 create table if not exists public.offline_messages (
   id uuid primary key default gen_random_uuid(),
   to_user_id uuid not null references public.profiles (id) on delete cascade,
-  payload jsonb not null,
+  from_user_id uuid,
+  payload jsonb,
+  message text,
   created_at timestamptz default now()
 );
+
+alter table public.offline_messages add column if not exists payload jsonb;
+alter table public.offline_messages add column if not exists from_user_id uuid;
+alter table public.offline_messages add column if not exists message text;
+do $$ begin
+  alter table public.offline_messages alter column from_user_id drop not null;
+exception when others then null;
+end $$;
 
 create index if not exists offline_messages_to_user_idx
   on public.offline_messages (to_user_id, created_at desc);

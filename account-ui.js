@@ -10,7 +10,10 @@ function accGet(key, fallback) {
 function accSet(key, val) {
   try { localStorage.setItem('moose_' + accUid() + '_' + key, JSON.stringify(val)); } catch (e) {}
 }
-function getBlocked() { return accGet('blocked', []); }
+function getBlocked() {
+  const v = accGet('blocked', []);
+  return Array.isArray(v) ? v : [];
+}
 function isBlocked(name) { return getBlocked().map(n => String(n).toLowerCase()).includes(String(name || '').toLowerCase()); }
 function blockName(name) {
   const list = getBlocked();

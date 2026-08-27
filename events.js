@@ -2325,7 +2325,7 @@ async function inviteEncryptedChat(toUsername, theirPub) {
     showStatusMessage('Sealed invite sent. They tap Open in their inbox to join.');
   } catch (err) {
     console.error(err);
-    showStatusMessage('Failed to send encrypted invite.');
+    showStatusMessage('Failed to send invite: ' + (err.message || 'unknown error'));
   }
 }
 

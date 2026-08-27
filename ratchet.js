@@ -214,8 +214,8 @@ async function trySkipped(state, header, bodyEnc, bodyIv, messageId) {
 }
 
 async function drEncrypt(username, theirEcdhB64, plaintext, messageId) {
-  const me = await loadPersistentKeys();
-  if (!me) throw new Error('No identity keys');
+  const me = await ensurePersistentKeys();
+  if (!me || !me.ecdhPrivate) throw new Error('No identity keys on this phone');
   let state = await loadDrState(username, theirEcdhB64);
   if (!state) {
     state = await drInitAlice(me, theirEcdhB64);
@@ -243,8 +243,8 @@ async function drEncrypt(username, theirEcdhB64, plaintext, messageId) {
 }
 
 async function drDecrypt(packet, messageId, usernameHint) {
-  const me = await loadPersistentKeys();
-  if (!me) throw new Error('No identity keys');
+  const me = await ensurePersistentKeys();
+  if (!me || !me.ecdhPrivate) throw new Error('No identity keys on this phone');
   const header = packet.header;
   if (!header || !packet.body || !packet.identityEcdh || !packet.identitySig) {
     throw new Error('Invalid ratchet packet');
@@ -276,8 +276,9 @@ async function drDecrypt(packet, messageId, usernameHint) {
 }
 
 async function sealOfflinePayload(theirEcdhB64, username, plaintext, messageId) {
+  if (!theirEcdhB64) throw new Error('That person has no public key yet');
   const packet = await drEncrypt(username, theirEcdhB64, plaintext, messageId);
-  const me = await loadPersistentKeys();
+  const me = await ensurePersistentKeys();
   const eph = await generateRatchetDhPair();
   const theirPub = await importPublicKey(theirEcdhB64);
   const shared = await deriveSharedKey(eph.privateKey, theirPub);
@@ -292,8 +293,8 @@ async function sealOfflinePayload(theirEcdhB64, username, plaintext, messageId) 
 }
 
 async function openOfflinePayload(msg) {
-  const me = await loadPersistentKeys();
-  if (!me) throw new Error('No identity keys');
+  const me = await ensurePersistentKeys();
+  if (!me || !me.ecdhPrivate) throw new Error('No identity keys on this phone');
   const eph = await importPublicKey(msg.ephemeral_public);
   const shared = await deriveSharedKey(me.ecdhPrivate, eph);
   let outer;

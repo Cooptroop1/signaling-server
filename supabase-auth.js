@@ -142,7 +142,13 @@ function stopInbox() {
 }
 
 function mapRow(row) {
-  const p = row.payload || {};
+  let p = row.payload || {};
+  if (typeof p === 'string') {
+    try { p = JSON.parse(p); } catch (e) { p = {}; }
+  }
+  if ((!p.encrypted) && row.message) {
+    try { p = typeof row.message === 'string' ? JSON.parse(row.message) : (row.message || {}); } catch (e) { p = {}; }
+  }
   return {
     id: row.id,
     type: 'message',
@@ -156,7 +162,7 @@ function mapRow(row) {
 async function loadInbox() {
   if (!isLoggedIn()) return;
   const { data, error } = await sb.from('offline_messages')
-    .select('id, payload, created_at')
+    .select('*')
     .eq('to_user_id', currentUser().id)
     .order('created_at', { ascending: true });
   if (error) {
@@ -208,17 +214,28 @@ async function sendOffline(toUsername, sealed) {
     .select('id')
     .eq('display_name', toUsername)
     .maybeSingle();
-  if (findErr || !dest) throw new Error('Recipient not found');
-  const { error } = await sb.from('offline_messages').insert({
-    to_user_id: dest.id,
-    payload: {
-      encrypted: sealed.encrypted,
-      iv: sealed.iv,
-      ephemeral_public: sealed.ephemeral_public,
-      messageId: sealed.messageId || null
-    }
-  });
-  if (error) throw error;
+  if (findErr) throw new Error(findErr.message || 'Could not look up that name');
+  if (!dest) throw new Error('Recipient not found');
+  const blob = {
+    encrypted: sealed.encrypted,
+    iv: sealed.iv,
+    ephemeral_public: sealed.ephemeral_public,
+    messageId: sealed.messageId || null
+  };
+  const uid = currentUser().id;
+  const tries = [
+    { to_user_id: dest.id, payload: blob },
+    { to_user_id: dest.id, from_user_id: uid, payload: blob },
+    { to_user_id: dest.id, from_user_id: uid, message: JSON.stringify(blob) },
+    { to_user_id: dest.id, message: JSON.stringify(blob) }
+  ];
+  let lastErr = null;
+  for (const row of tries) {
+    const { error } = await sb.from('offline_messages').insert(row);
+    if (!error) return;
+    lastErr = error;
+  }
+  throw new Error(lastErr && lastErr.message ? lastErr.message : 'Could not store sealed note');
 }
 
 async function confirmOffline(id) {

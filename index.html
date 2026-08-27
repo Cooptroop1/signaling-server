@@ -593,6 +593,17 @@
       background-color: #4f46e5;
       color: white;
     }
+    .account-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center; margin-bottom: 0.75rem; }
+    .account-actions button { background: #2563eb; color: #fff; border: 0; border-radius: 0.5rem; padding: 0.4rem 0.75rem; font-size: 0.85rem; cursor: pointer; }
+    .account-actions button.sign-out { background: #dc2626; }
+    .account-card { text-align: left; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 0.75rem; margin-top: 0.6rem; }
+    .account-card h3 { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.4rem; }
+    .inbox-row, .book-row { background: #fff; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.5rem; margin-bottom: 0.4rem; font-size: 0.85rem; }
+    .inbox-row button, .book-row button, #searchResult button { margin: 0.2rem 0.2rem 0 0; padding: 0.25rem 0.5rem; border-radius: 0.4rem; border: 0; background: #2563eb; color: #fff; font-size: 0.75rem; cursor: pointer; }
+    .inbox-row button.burn, .book-row button.block { background: #dc2626; }
+    .presence-on { color: #16a34a; font-weight: 700; }
+    .presence-off { color: #6b7280; }
+    .safety-num { font-family: ui-monospace, monospace; letter-spacing: 0.08em; font-size: 0.85rem; }
     #helpText {
       color: #3b82f6;
       cursor: pointer;
@@ -1020,9 +1031,21 @@
         
         <!-- Logged in state (always visible when logged in) -->
         <div id="userInfo" class="hidden mt-4 text-center">
-          <span id="userDisplayName" class="text-lg text-gray-700 block mb-3 font-medium"></span>
-          <button id="searchUserButton" class="text-blue-500 hover:underline text-lg mr-4" aria-label="Search for user">Search User</button>
-          <button id="signOutBtn" class="text-red-500 hover:underline text-lg">Sign Out</button>
+          <span id="userDisplayName" class="text-lg text-gray-700 block mb-2 font-medium"></span>
+          <p id="safetySelf" class="text-xs text-gray-500 mb-2 hidden"></p>
+          <div class="account-actions">
+            <button id="searchUserButton" type="button">Search</button>
+            <button id="myQrButton" type="button">My QR</button>
+            <button id="signOutBtn" type="button" class="sign-out">Sign Out</button>
+          </div>
+          <div id="mooseInbox" class="account-card hidden">
+            <h3>Sealed notes <span id="inboxCount"></span></h3>
+            <div id="inboxList"></div>
+          </div>
+          <div id="mooseBook" class="account-card hidden">
+            <h3>Moose book</h3>
+            <div id="bookList"></div>
+          </div>
         </div>
       </div>
     </div> <!-- ← THIS CLOSES THE WHITE CARD (bg-white) -->
@@ -1050,7 +1073,7 @@
       <p><strong>Moose (corner):</strong> Tap once to burn this phone. Tap twice to wipe everyone still in the room, kill the code, and leave. Switching away for 20 seconds also burns a live room. Text Code and Random Board give you three minutes so you can pick a room or send a text without wiping. Refreshing or closing the tab burns this device.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
       <p><strong>Login:</strong> Login with your claimed username to retrieve it on new devices and get offline messages.</p>
-      <p><strong>Search User:</strong> Search for a claimed username. Invites and offline mail are end-to-end encrypted (Double Ratchet). The server cannot read them or see who mailed whom.</p>
+      <p><strong>Search User:</strong> Find a signed-up name. Send a sealed invite or note. Inbox, moose book and QR stay on this phone. Rooms still burn.</p>
     </div>
   </div>
   <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
@@ -1169,11 +1192,21 @@
   </div>
   <div id="recoveryKitModal" class="totp-modal hidden" role="dialog" aria-label="Save recovery kit" tabindex="-1">
     <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-4">Save your recovery kit</h2>
-      <p class="text-sm mb-2">Copy this now. It is the only way to read old offline messages on a new device. We cannot recover it for you.</p>
+      <h2 class="text-xl font-bold mb-4">Save this kit or a new phone is a new you</h2>
+      <p class="text-sm mb-2 font-semibold text-red-600">Copy this now. We cannot get it back. Without it, offline notes on a new device stay locked.</p>
       <textarea id="recoveryKitValue" class="border border-gray-300 p-2 w-full mb-2 rounded font-mono text-xs" rows="5" readonly></textarea>
+      <label class="text-sm block mb-3"><input type="checkbox" id="recoveryKitAck"> I copied it somewhere safe</label>
       <button id="copyRecoveryKitButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600">Copy kit</button>
       <button id="closeRecoveryKitButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">I have saved it</button>
+    </div>
+  </div>
+  <div id="mooseQrModal" class="totp-modal hidden" role="dialog" aria-label="Your moose name QR">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-2">Your moose name</h2>
+      <p id="mooseQrName" class="text-center font-semibold mb-2"></p>
+      <div id="mooseQrBox" class="flex justify-center mb-3"></div>
+      <p class="text-sm text-gray-600 mb-3">They scan this, it opens Anonomoose and finds you. No chat is stored.</p>
+      <button id="closeMooseQrButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full">Close</button>
     </div>
   </div>
   <div id="recoverKeysModal" class="totp-modal hidden" role="dialog" aria-label="Restore keys" tabindex="-1">
@@ -1186,14 +1219,15 @@
       <button id="cancelRecoverKeysButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-    <script src="crypto.js?v=260827d"></script>
-  <script src="ratchet.js?v=260827d"></script>
-  <script src="utils.js?v=260827d"></script>
-  <script src="main.js?v=260827d"></script>
-  <script src="init.js?v=260827d"></script>
-  <script src="events.js?v=260827d"></script>
+    <script src="crypto.js?v=260827e"></script>
+  <script src="ratchet.js?v=260827e"></script>
+  <script src="utils.js?v=260827e"></script>
+  <script src="main.js?v=260827e"></script>
+  <script src="init.js?v=260827e"></script>
+  <script src="events.js?v=260827e"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260827d"></script>
+  <script src="supabase-auth.js?v=260827e"></script>
+  <script src="account-ui.js?v=260827e"></script>
 </body>
 </html>

@@ -59,8 +59,10 @@ async function applyLoggedInSession(session) {
     || (session.user.email ? session.user.email.split('@')[0] : 'user');
   if (typeof username !== 'undefined') {
     username = display;
+    try { sessionStorage.setItem('username', username); } catch (e) {}
     try { localStorage.setItem('username', username); } catch (e) {}
   }
+  if (typeof rememberUsername === 'function') rememberUsername(display);
   if (typeof showStatusMessage === 'function') {
     showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
   }
@@ -69,6 +71,15 @@ async function applyLoggedInSession(session) {
   await loadInbox();
   subscribeInbox(session.user.id);
   startHeartbeat();
+  if (typeof renderMooseBook === 'function') renderMooseBook();
+  if (!localStorage.getItem('moose_' + session.user.id + '_kitSaved')) {
+    try {
+      if (typeof loadPersistentKeys === 'function') {
+        const keys = await loadPersistentKeys();
+        if (keys && keys.recoveryKit && typeof showRecoveryKitModal === 'function') showRecoveryKitModal(keys.recoveryKit);
+      }
+    } catch (e) {}
+  }
 }
 
 async function publishKeys() {
@@ -152,9 +163,8 @@ async function loadInbox() {
     console.warn('inbox', error.message);
     return;
   }
-  if (data && data.length && typeof deliverOfflineMessages === 'function') {
-    deliverOfflineMessages(data.map(mapRow));
-  }
+  window.pendingInbox = (data || []).map(mapRow);
+  if (typeof renderMooseInbox === 'function') renderMooseInbox();
 }
 
 function subscribeInbox(uid) {
@@ -167,9 +177,9 @@ function subscribeInbox(uid) {
       table: 'offline_messages',
       filter: 'to_user_id=eq.' + uid
     }, (payload) => {
-      if (typeof deliverOfflineMessages === 'function') {
-        deliverOfflineMessages([mapRow(payload.new)]);
-      }
+      const row = mapRow(payload.new);
+      window.pendingInbox = (window.pendingInbox || []).concat([row]);
+      if (typeof renderMooseInbox === 'function') renderMooseInbox();
     })
     .subscribe();
 }
@@ -186,12 +196,14 @@ async function findUser(name) {
   return {
     status: online ? 'online' : 'offline',
     public_key: data.public_key,
-    identity_public_key: data.identity_public_key
+    identity_public_key: data.identity_public_key,
+    last_active: data.last_active
   };
 }
 
 async function sendOffline(toUsername, sealed) {
   if (!isLoggedIn()) throw new Error('Log in to send offline mail');
+  if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
   const { data: dest, error: findErr } = await sb.from('profiles')
     .select('id')
     .eq('display_name', toUsername)

@@ -1676,6 +1676,11 @@ document.addEventListener('DOMContentLoaded', () => {
   updateLogoutButtonVisibility();
   document.getElementById('startChatToggleButton').onclick = () => {
     console.log('Start chat toggle clicked');
+    if (window.sbAuth && window.sbAuth.isLoggedIn() && validateUsername(username)) {
+      document.getElementById('usernameInput').value = username;
+      document.getElementById('joinWithUsernameButton').click();
+      return;
+    }
     initialContainer.classList.add('hidden');
     usernameContainer.classList.remove('hidden');
     connectContainer.classList.add('hidden');
@@ -2191,22 +2196,53 @@ function deliverOfflineMessages(list) {
 function showUserSearchResult(searchedUsername, message) {
   const searchResult = document.getElementById('searchResult');
   searchResult.innerHTML = '';
-  searchResult.appendChild(document.createTextNode(`User ${searchedUsername} is ${message.status}. `));
+  if (typeof isBlocked === 'function' && isBlocked(searchedUsername)) {
+    searchResult.textContent = searchedUsername + ' is blocked. Unblock them from your moose book.';
+    return;
+  }
+  const on = message.status === 'online';
+  const seen = (typeof lastSeenLabel === 'function') ? lastSeenLabel(message.last_active, message.status) : message.status;
+  const line = document.createElement('p');
+  line.innerHTML = '<strong>' + searchedUsername + '</strong> · <span class="' + (on ? 'presence-on' : 'presence-off') + '">' + seen + '</span>';
+  searchResult.appendChild(line);
+  if (typeof saveBookEntry === 'function') {
+    saveBookEntry({ name: searchedUsername, public_key: message.public_key, identity_public_key: message.identity_public_key });
+  }
+  if (message.identity_public_key && typeof rememberSafety === 'function') {
+    rememberSafety(searchedUsername, message.identity_public_key).then((s) => {
+      if (!s.num) return;
+      const p = document.createElement('p');
+      p.className = 'safety-num';
+      p.textContent = (s.warn ? 'Safety number CHANGED: ' : 'Safety number: ') + s.num;
+      if (s.warn) p.style.color = '#dc2626';
+      searchResult.insertBefore(p, searchResult.children[1] || null);
+    });
+  }
   if (message.public_key) {
     userPublicKey = message.public_key;
     if (message.identity_public_key) userPublicKeyIdentity = message.identity_public_key;
     const inviteBtn = document.createElement('button');
-    inviteBtn.textContent = 'Start encrypted chat';
+    inviteBtn.textContent = 'Send room invite';
     inviteBtn.onclick = () => {
       inviteEncryptedChat(searchedUsername, message.public_key);
       document.getElementById('searchUserModal').classList.remove('active');
+      document.getElementById('searchUserModal').classList.add('hidden');
     };
     searchResult.appendChild(inviteBtn);
+    const blockBtn = document.createElement('button');
+    blockBtn.textContent = 'Block';
+    blockBtn.className = 'block';
+    blockBtn.onclick = () => {
+      if (typeof blockName === 'function') blockName(searchedUsername);
+      searchResult.textContent = searchedUsername + ' blocked.';
+    };
+    searchResult.appendChild(blockBtn);
     const offlineMsgContainer = document.createElement('div');
     const textarea = document.createElement('textarea');
-    textarea.placeholder = 'Send encrypted offline message...';
+    textarea.placeholder = 'Sealed note (they open it later)';
+    textarea.className = 'border border-gray-300 p-2 w-full mt-2 rounded';
     const sendBtn = document.createElement('button');
-    sendBtn.textContent = 'Send';
+    sendBtn.textContent = 'Send note';
     sendBtn.onclick = () => {
       const msgText = textarea.value.trim();
       if (msgText) {
@@ -2214,7 +2250,7 @@ function showUserSearchResult(searchedUsername, message) {
           textarea.value = '';
         }).catch(error => {
           console.error('Offline send error:', error);
-          showStatusMessage('Failed to send offline message.');
+          showStatusMessage(error.message || 'Failed to send offline message.');
         });
       }
     };
@@ -2228,10 +2264,11 @@ function showUserSearchResult(searchedUsername, message) {
 
 async function sendOfflineMessage(toUsername, messageText) {
   if (!toUsername || !messageText) throw new Error('Missing recipient or message');
+  if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
   if (!userPublicKey) throw new Error('No public key for recipient');
   await ensurePersistentKeys();
   const messageId = generateMessageId();
-  const plaintext = JSON.stringify({ type: 'message', from: username, text: messageText, timestamp: Date.now() });
+  const plaintext = JSON.stringify({ type: 'message', from: username, text: messageText, timestamp: Date.now(), identity: identityPubB64 || '' });
   const sealed = await sealOfflinePayload(userPublicKey, toUsername, plaintext, messageId);
   sealed.messageId = messageId;
   if (window.sbAuth && window.sbAuth.isLoggedIn()) {
@@ -2262,9 +2299,10 @@ async function inviteEncryptedChat(toUsername, theirPub) {
     if (!validateUsername(username)) username = 'Guest';
     rememberUsername(username);
   }
-  code = generateCode();
+  const alreadyInRoom = !!(code && chatContainer && !chatContainer.classList.contains('hidden'));
+  if (!alreadyInRoom) code = generateCode();
   const messageId = generateMessageId();
-  const plaintext = JSON.stringify({ type: 'connection-request', code, from: username });
+  const plaintext = JSON.stringify({ type: 'connection-request', code, from: username, identity: identityPubB64 || '' });
   try {
     await ensurePersistentKeys();
     const sealed = await sealOfflinePayload(theirPub, toUsername, plaintext, messageId);
@@ -2283,8 +2321,8 @@ async function inviteEncryptedChat(toUsername, theirPub) {
         token
       }));
     }
-    await sendJoin();
-    showStatusMessage('Encrypted invite sent. Waiting in a private room.');
+    if (!alreadyInRoom) await sendJoin();
+    showStatusMessage('Sealed invite sent. They tap Open in their inbox to join.');
   } catch (err) {
     console.error(err);
     showStatusMessage('Failed to send encrypted invite.');

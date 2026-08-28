@@ -451,9 +451,27 @@ function burnTranscript() {
   try { sessionStorage.removeItem('anonomoose-draft'); } catch (e) {}
 }
 
+function burnAccountLocal() {
+  try {
+    const drop = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.indexOf('moose_') === 0 || k.indexOf('anonomoose-auth') !== -1)) drop.push(k);
+    }
+    drop.forEach((k) => localStorage.removeItem(k));
+  } catch (e) {}
+  window.pendingInbox = [];
+  if (typeof renderMooseInbox === 'function') renderMooseInbox();
+  if (typeof renderMooseBook === 'function') renderMooseBook();
+  if (window.sbAuth && typeof window.sbAuth.signOut === 'function') {
+    try { window.sbAuth.signOut(); } catch (e) {}
+  }
+}
+
 function burnChatSession() {
   burnTranscript();
   burnCrumbs();
+  burnAccountLocal();
   try { localStorage.removeItem('recentCodes'); } catch (e) {}
   const recent = document.getElementById('recentCodesList');
   if (recent) recent.innerHTML = '';

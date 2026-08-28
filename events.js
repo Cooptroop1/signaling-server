@@ -2088,7 +2088,7 @@ document.addEventListener('DOMContentLoaded', () => {
         requestRoomWipe();
         setTimeout(() => {
           burnChatSession();
-          showStatusMessage('Chat burned on this phone and anyone still in the room.');
+          showStatusMessage('Chat burned, moose book wiped, signed out.');
         }, 300);
         return;
       }

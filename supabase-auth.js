@@ -5,7 +5,7 @@ const sb = (window.supabase && window.supabase.createClient)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
-      autoRefreshToken: false,
+      autoRefreshToken: true,
       detectSessionInUrl: false,
       storageKey: 'anonomoose-auth'
     }
@@ -150,12 +150,23 @@ async function publishKeys() {
 
 function startHeartbeat() {
   stopHeartbeat();
-  heartbeatTimer = setInterval(() => {
-    if (!isLoggedIn()) return;
-    const patch = { last_active: new Date().toISOString() };
-    if (typeof clientId !== 'undefined' && clientId) patch.client_id = clientId;
-    sb.from('profiles').update(patch).eq('id', currentUser().id).then(() => {});
-  }, 60000);
+  const beat = () => {
+    if (signedOut || !isLoggedIn()) return;
+    ensureSbSession().then(() => {
+      const patch = { last_active: new Date().toISOString() };
+      if (typeof clientId !== 'undefined' && clientId) patch.client_id = clientId;
+      return sb.from('profiles').update(patch).eq('id', currentUser().id);
+    }).then((res) => {
+      if (res && res.error && /client_id|schema cache/i.test(res.error.message || '')) {
+        return sb.from('profiles').update({ last_active: new Date().toISOString() }).eq('id', currentUser().id);
+      }
+    }).catch(() => {});
+  };
+  beat();
+  heartbeatTimer = setInterval(beat, 20000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') beat();
+  });
 }
 
 function stopHeartbeat() {
@@ -232,7 +243,7 @@ async function findUser(name) {
     .maybeSingle();
   if (error || !data) return null;
   const last = data.last_active ? new Date(data.last_active).getTime() : 0;
-  const online = Date.now() - last < 2 * 60 * 1000;
+  const online = last && (Date.now() - last < 5 * 60 * 1000);
   return {
     status: online ? 'online' : 'offline',
     public_key: data.public_key,
@@ -350,6 +361,48 @@ function signOut() {
   } catch (e) {}
 }
 
+async function restoreSessionQuiet() {
+  if (signedOut || !sb) return;
+  try {
+    let session = null;
+    const { data } = await sb.auth.getSession();
+    session = data && data.session;
+    if (!session) {
+      const raw = localStorage.getItem('anonomoose-auth');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const stored = parsed.currentSession || parsed.session || parsed;
+        if (stored && stored.access_token && stored.refresh_token) {
+          const set = await sb.auth.setSession({
+            access_token: stored.access_token,
+            refresh_token: stored.refresh_token
+          });
+          session = set.data && set.data.session;
+        }
+      }
+    }
+    if (!session || !session.user) {
+      window.__sbSession = null;
+      setAuthUi(null);
+      return;
+    }
+    const expMs = session.expires_at ? session.expires_at * 1000 : 0;
+    if (expMs && Date.now() > expMs - 20000 && session.refresh_token) {
+      const { data: refreshed, error } = await sb.auth.refreshSession();
+      if (error || !refreshed || !refreshed.session) {
+        signOut();
+        return;
+      }
+      session = refreshed.session;
+    }
+    window.__sbSession = session;
+    applyLoggedInSession(session);
+  } catch (e) {
+    window.__sbSession = null;
+    setAuthUi(null);
+  }
+}
+
 window.sbAuth = {
   isLoggedIn,
   getSession,
@@ -429,22 +482,16 @@ document.addEventListener('DOMContentLoaded', () => {
   if (signOutBtn) signOutBtn.onclick = () => {
     signOut();
   };
-  try {
-    const raw = localStorage.getItem('anonomoose-auth');
-    if (raw && !signedOut) {
-      const parsed = JSON.parse(raw);
-      const session = parsed.currentSession || parsed.session || parsed;
-      if (session && session.user && session.access_token) {
-        window.__sbSession = session;
-        setAuthUi(session);
-      }
-    }
-  } catch (e) {}
+  restoreSessionQuiet();
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') {
-      window.__sbSession = null;
-      setAuthUi(null);
-      stopInbox();
+      if (signedOut) {
+        window.__sbSession = null;
+        setAuthUi(null);
+        stopInbox();
+      }
+    } else if (event === 'TOKEN_REFRESHED' && session) {
+      if (!signedOut) window.__sbSession = session;
     }
   });
 });

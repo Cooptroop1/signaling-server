@@ -244,15 +244,10 @@ let suppressAutoBurnUntil = 0;
 let hideLocalTimer = null;
 let hideRoomTimer = null;
 const serverUrls = [
-  'wss://signal.anonomoose.com',
-  'wss://signaling-server-zc6m.onrender.com'
+  'wss://signaling-server-zc6m.onrender.com',
+  'wss://signal.anonomoose.com'
 ];
 let serverUrlIndex = 0;
-try {
-  const saved = sessionStorage.getItem('signalHost') || '';
-  const idx = serverUrls.findIndex((u) => saved.indexOf(u.replace('wss://', '')) !== -1);
-  if (idx >= 0) serverUrlIndex = idx;
-} catch (e) {}
 let wsWatchTimer = null;
 function watchSocketConnect(s) {
   clearTimeout(wsWatchTimer);
@@ -334,10 +329,15 @@ async function sendJoin(extra) {
   }, extra)));
 }
 lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code')) || code);
-socket = new WebSocket(lastWsUrl);
-bindSocketHandlers(socket);
-watchSocketConnect(socket);
-console.log(`WebSocket created, connected to ${lastWsUrl}`);
+const bootCode = new URLSearchParams(window.location.search).get('code');
+if (bootCode) {
+  socket = new WebSocket(lastWsUrl);
+  bindSocketHandlers(socket);
+  watchSocketConnect(socket);
+  console.log(`WebSocket created, connected to ${lastWsUrl}`);
+} else {
+  console.log('WebSocket deferred until a chat starts');
+}
   username = (sessionStorage.getItem('username') || localStorage.getItem('username') || new URLSearchParams(window.location.search).get('name') || '').trim();
   if (username) rememberUsername(username);
   globalMessageRate.startTime = performance.now();
@@ -410,7 +410,7 @@ function updateLogoutButtonVisibility() {
   }
 }
 function logout() {
-  if (socket.readyState === WebSocket.OPEN && token) {
+  if (socket && socket.readyState === WebSocket.OPEN && token) {
     socket.send(JSON.stringify({ type: 'logout', clientId, token }));
   }
   username = '';
@@ -425,7 +425,7 @@ function logout() {
   peerConnections.clear();
   dataChannels.forEach((dc) => dc.close());
   dataChannels.clear();
-  socket.close();
+  try { if (socket) socket.close(); } catch (e) {}
   initialContainer.classList.remove('hidden');
   usernameContainer.classList.add('hidden');
   connectContainer.classList.add('hidden');
@@ -444,7 +444,7 @@ function logout() {
 }
 function endChat() {
   burnTranscript();
-  if (socket.readyState === WebSocket.OPEN && code && token) {
+  if (socket && socket.readyState === WebSocket.OPEN && code && token) {
     socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));
   }
   processedMessageIds.clear();
@@ -497,6 +497,7 @@ function handleSocketClose() {
   console.log('WebSocket closed');
   stopKeepAlive();
   if (pinReconnect) return;
+  if (!code && !pendingCode && !pendingJoin) return;
   if (serverUrlIndex < serverUrls.length - 1 && reconnectAttempts === 0) {
     serverUrlIndex += 1;
     lastWsUrl = serverUrls[serverUrlIndex];

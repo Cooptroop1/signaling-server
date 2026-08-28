@@ -16,19 +16,19 @@
       "purpose": "any maskable"
     },
     {
-      "src": "/192.png",
+      "src": "/192.png?v=260828e",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
     },
     {
-      "src": "/256.png",
+      "src": "/256.png?v=260828e",
       "type": "image/png",
       "sizes": "256x256",
       "purpose": "any maskable"
     },
     {
-      "src": "/512.png",
+      "src": "/512.png?v=260828e",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"

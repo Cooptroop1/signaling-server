@@ -65,11 +65,22 @@ function setAuthUi(session) {
   }
 }
 
-function withTimeout(promise, ms, message) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
-  ]);
+async function ensureSbSession() {
+  if (signedOut) throw new Error('Log in first');
+  if (!sb) throw new Error('Not ready');
+  if (!window.__sbSession || !window.__sbSession.access_token) throw new Error('Log in first');
+  try {
+    const { data } = await sb.auth.getSession();
+    if (data && data.session && data.session.access_token) return data.session;
+  } catch (e) {}
+  if (!window.__sbSession.refresh_token) throw new Error('Log in first');
+  const { data, error } = await sb.auth.setSession({
+    access_token: window.__sbSession.access_token,
+    refresh_token: window.__sbSession.refresh_token
+  });
+  if (error) throw new Error(error.message || 'Session expired. Log in again.');
+  if (data && data.session) window.__sbSession = data.session;
+  return data && data.session;
 }
 
 let signedOut = false;
@@ -96,24 +107,24 @@ async function applyLoggedInSession(session) {
     showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
   }
   if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
-  setTimeout(() => {
+  ensureSbSession().then(() => {
+    if (signedOut) return;
     publishKeys().catch((e) => console.warn('publishKeys', e));
     loadInbox().catch((e) => console.warn('inbox', e));
     subscribeInbox(session.user.id);
     startHeartbeat();
     if (typeof renderMooseBook === 'function') renderMooseBook();
     if (typeof schedulePersistKeys === 'function') schedulePersistKeys();
-  }, 1500);
+  }).catch((e) => console.warn('post-login', e));
 }
 
 async function publishKeys() {
   if (!isLoggedIn()) return;
   try {
-    let me = (typeof sessionKeyBundle !== 'undefined' && sessionKeyBundle) ? sessionKeyBundle : null;
-    if (!me && typeof loadPersistentKeys === 'function') me = await loadPersistentKeys();
-    if (!me || !me.ecdhPubB64) return;
-    const pub = me.ecdhPubB64;
-    const ident = me.ecdsaPubB64;
+    await ensureSbSession();
+    const me = (typeof ensurePersistentKeys === 'function') ? await ensurePersistentKeys() : null;
+    const pub = me && me.ecdhPubB64;
+    const ident = me && me.ecdsaPubB64;
     const uid = currentUser().id;
     const keysPatch = {
       last_active: new Date().toISOString(),
@@ -182,6 +193,7 @@ function mapRow(row) {
 
 async function loadInbox() {
   if (!isLoggedIn()) return;
+  await ensureSbSession();
   const { data, error } = await sb.from('offline_messages')
     .select('*')
     .eq('to_user_id', currentUser().id)
@@ -213,6 +225,7 @@ function subscribeInbox(uid) {
 
 async function findUser(name) {
   if (!sb) return null;
+  try { await ensureSbSession(); } catch (e) {}
   const { data, error } = await sb.from('profiles')
     .select('display_name, public_key, identity_public_key, last_active')
     .eq('display_name', name)
@@ -230,6 +243,7 @@ async function findUser(name) {
 
 async function sendOffline(toUsername, sealed) {
   if (!isLoggedIn()) throw new Error('Log in to send offline mail');
+  await ensureSbSession();
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
   const { data: dest, error: findErr } = await sb.from('profiles')
     .select('id')
@@ -313,7 +327,7 @@ async function signIn(email, password) {
   if (afterLoginTimer) clearTimeout(afterLoginTimer);
   afterLoginTimer = setTimeout(() => {
     if (!signedOut) applyLoggedInSession(data);
-  }, 2000);
+  }, 0);
   return data;
 }
 

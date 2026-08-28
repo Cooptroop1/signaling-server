@@ -2251,10 +2251,19 @@ function showUserSearchResult(searchedUsername, message) {
     if (message.identity_public_key) userPublicKeyIdentity = message.identity_public_key;
     const inviteBtn = document.createElement('button');
     inviteBtn.textContent = 'Send room invite';
-    inviteBtn.onclick = () => {
-      inviteEncryptedChat(searchedUsername, message.public_key);
-      document.getElementById('searchUserModal').classList.remove('active');
-      document.getElementById('searchUserModal').classList.add('hidden');
+    inviteBtn.onclick = async () => {
+      if (inviteBtn.disabled) return;
+      inviteBtn.disabled = true;
+      const prev = inviteBtn.textContent;
+      inviteBtn.textContent = 'Sending…';
+      try {
+        await inviteEncryptedChat(searchedUsername, message.public_key);
+        document.getElementById('searchUserModal').classList.remove('active');
+        document.getElementById('searchUserModal').classList.add('hidden');
+      } finally {
+        inviteBtn.disabled = false;
+        inviteBtn.textContent = prev;
+      }
     };
     searchResult.appendChild(inviteBtn);
     const blockBtn = document.createElement('button');
@@ -2271,15 +2280,24 @@ function showUserSearchResult(searchedUsername, message) {
     textarea.className = 'border border-gray-300 p-2 w-full mt-2 rounded';
     const sendBtn = document.createElement('button');
     sendBtn.textContent = 'Send note';
-    sendBtn.onclick = () => {
+    sendBtn.onclick = async () => {
       const msgText = textarea.value.trim();
-      if (msgText) {
-        sendOfflineMessage(searchedUsername, msgText).then(() => {
-          textarea.value = '';
-        }).catch(error => {
-          console.error('Offline send error:', error);
-          showStatusMessage(error.message || 'Failed to send offline message.');
-        });
+      if (!msgText || sendBtn.disabled) return;
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Sending…';
+      try {
+        await sendOfflineMessage(searchedUsername, msgText);
+        textarea.value = '';
+        sendBtn.textContent = 'Sent';
+        setTimeout(() => {
+          sendBtn.textContent = 'Send note';
+          sendBtn.disabled = false;
+        }, 1200);
+      } catch (error) {
+        console.error('Offline send error:', error);
+        showStatusMessage(error.message || 'Failed to send offline message.');
+        sendBtn.textContent = 'Send note';
+        sendBtn.disabled = false;
       }
     };
     offlineMsgContainer.appendChild(textarea);
@@ -2290,8 +2308,14 @@ function showUserSearchResult(searchedUsername, message) {
   }
 }
 
+const offlineSendLock = new Set();
+
 async function sendOfflineMessage(toUsername, messageText) {
   if (!toUsername || !messageText) throw new Error('Missing recipient or message');
+  const lockKey = 'note:' + String(toUsername).toLowerCase() + ':' + messageText;
+  if (offlineSendLock.has(lockKey)) throw new Error('Already sending that note.');
+  offlineSendLock.add(lockKey);
+  try {
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
   if (!userPublicKey) throw new Error('No public key for recipient');
   await ensurePersistentKeys();
@@ -2314,6 +2338,9 @@ async function sendOfflineMessage(toUsername, messageText) {
     clientId,
     token
   }));
+  } finally {
+    setTimeout(() => offlineSendLock.delete(lockKey), 2500);
+  }
 }
 
 async function inviteEncryptedChat(toUsername, theirPub) {
@@ -2321,6 +2348,12 @@ async function inviteEncryptedChat(toUsername, theirPub) {
     showStatusMessage('That user has no encryption key.');
     return;
   }
+  const lockKey = 'invite:' + String(toUsername).toLowerCase();
+  if (offlineSendLock.has(lockKey)) {
+    showStatusMessage('Invite already sending.');
+    return;
+  }
+  offlineSendLock.add(lockKey);
   userPublicKey = theirPub;
   if (!validateUsername(username)) {
     username = prompt('Enter your username (1-16 alphanumeric characters):')?.trim() || 'Guest';
@@ -2354,6 +2387,9 @@ async function inviteEncryptedChat(toUsername, theirPub) {
   } catch (err) {
     console.error(err);
     showStatusMessage('Failed to send invite: ' + (err.message || 'unknown error'));
+    offlineSendLock.delete(lockKey);
+  } finally {
+    setTimeout(() => offlineSendLock.delete(lockKey), 2500);
   }
 }
 

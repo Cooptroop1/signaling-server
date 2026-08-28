@@ -248,6 +248,12 @@ server.on('request', (req, res) => {
     } else if (filePath.endsWith('.js')) {
       contentType = 'application/javascript';
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (filePath.endsWith('.png')) {
+      contentType = 'image/png';
+    } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
+      contentType = 'image/jpeg';
+    } else if (filePath.endsWith('.json')) {
+      contentType = 'application/json';
     }
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(data);

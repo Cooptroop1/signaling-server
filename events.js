@@ -991,7 +991,7 @@ async function handleSocketMessage(event) {
         console.log(`New room master and salts received and set for PFS (version ${keyVersion}).`);
         keyPair = await generateSessionKeyPair();
         const rotatedPub = await exportPublicKey(keyPair.publicKey);
-        if (socket.readyState === WebSocket.OPEN && token) {
+        if (socket && socket.readyState === WebSocket.OPEN && token) {
           socket.send(JSON.stringify({ type: 'public-key', publicKey: rotatedPub, identityPublic: identityPubB64, clientId, code, token }));
         }
       } catch (error) {
@@ -1279,7 +1279,7 @@ async function handleSocketMessage(event) {
   }
 };
 function refreshAccessToken() {
-  if (socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
+  if (socket && socket.readyState === WebSocket.OPEN && refreshToken && !refreshingToken) {
     refreshingToken = true;
     console.log('Proactively refreshing access token');
     socket.send(JSON.stringify({ type: 'refresh-token', clientId, refreshToken }));
@@ -2058,7 +2058,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
   document.getElementById('button1').onclick = () => {
-    if (!(isInitiator && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token)) {
+    if (!(isInitiator && socket && socket.readyState === WebSocket.OPEN && code && totalClients < maxClients && token)) {
       showStatusMessage('Start a chat first, then tap Send Code. Stay on this page.');
       document.getElementById('button1')?.focus();
       return;

@@ -907,7 +907,7 @@ function sendMessageViaSocket(type, additionalData, isRelay = false) {
     return;
   }
   const message = { type: isRelay ? `relay-${type}` : type, ...additionalData, code, clientId, token };
-  if (socket.readyState === WebSocket.OPEN) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
   } else {
     console.log('Socket not open, queuing message');
@@ -974,18 +974,18 @@ async function autoConnect(codeParam) {
       copyCodeButton?.classList.remove('hidden');
       messages.classList.add('waiting');
       statusElement.textContent = 'Waiting for connection...';
-      if (socket.readyState === WebSocket.OPEN) {
-        console.log('Sending check-totp');
-        ensureServerForCode(codeParam).then(() => {
+      pendingCode = codeParam;
+      try {
+        await ensureServerForCode(codeParam);
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          console.log('Sending check-totp');
           socket.send(JSON.stringify({ type: 'check-totp', code: codeParam, clientId, token }));
-        }).catch(err => {
-          console.error(err);
+        } else {
           showStatusMessage('Could not reach the server for this code.');
-        });
-      } else {
-        console.log('WebSocket not open, waiting for open event to send check-totp');
-        pendingCode = codeParam;
-        ensureServerForCode(codeParam).catch(() => {});
+        }
+      } catch (err) {
+        console.error(err);
+        showStatusMessage('Could not reach the server for this code.');
       }
       document.getElementById('messageInput')?.focus();
       updateFeaturesUI();

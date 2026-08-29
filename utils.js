@@ -415,6 +415,23 @@ function burnCrumbs() {
   if (typeof wipeLiveDr === 'function') wipeLiveDr();
 }
 
+function playBurnFlash() {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('burnFlash');
+    if (!overlay) {
+      resolve();
+      return;
+    }
+    overlay.classList.remove('play');
+    void overlay.offsetWidth;
+    overlay.classList.add('play');
+    setTimeout(() => {
+      overlay.classList.remove('play');
+      resolve();
+    }, 1050);
+  });
+}
+
 function burnTranscript() {
   const messagesEl = document.getElementById('messages');
   if (messagesEl) {
@@ -487,9 +504,11 @@ let remoteWipeInFlight = false;
 function applyRemoteRoomWipe() {
   if (remoteWipeInFlight) return;
   remoteWipeInFlight = true;
-  showStatusMessage('The other person burned the chat on every device in this room.');
-  burnChatSession();
-  setTimeout(() => { remoteWipeInFlight = false; }, 2000);
+  playBurnFlash().then(() => {
+    showStatusMessage('The other person burned the chat on every device in this room.');
+    burnChatSession();
+    setTimeout(() => { remoteWipeInFlight = false; }, 2000);
+  });
 }
 
 function requestRoomWipe() {

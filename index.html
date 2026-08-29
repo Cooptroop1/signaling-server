@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260828k">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260828k">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260828k">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260828k">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260828k">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260828k">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260828l">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260828l">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260828l">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260828l">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260828l">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260828l">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -931,9 +931,90 @@
       margin: 0.4rem 0 0.75rem;
     }
     .p2p-only-row input { width: auto; }
+    #burnFlash {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      display: none;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #burnFlash.play {
+      display: block;
+      pointer-events: auto;
+    }
+    .burn-flash-white, .burn-flash-fire {
+      position: absolute;
+      inset: 0;
+    }
+    .burn-flash-white {
+      background: #fff;
+      animation: burnWhite 1.05s ease-out forwards;
+    }
+    .burn-flash-fire {
+      background: radial-gradient(circle at 50% 62%, #fff7ed 0%, #fb923c 22%, #dc2626 52%, #111827 100%);
+      animation: burnFire 1.05s ease-in forwards;
+    }
+    .burn-flash-word {
+      position: absolute;
+      left: 50%;
+      top: 48%;
+      transform: translate(-50%, -50%);
+      font-weight: 900;
+      letter-spacing: 0.35em;
+      font-size: clamp(1.8rem, 8vw, 3.6rem);
+      color: #fff;
+      text-shadow: 0 0 18px #f97316, 0 0 40px #b91c1c;
+      animation: burnWord 1.05s ease-out forwards;
+    }
+    .burn-ash {
+      position: absolute;
+      bottom: -10px;
+      width: 7px;
+      height: 7px;
+      background: #1f2937;
+      border-radius: 1px;
+      opacity: 0;
+    }
+    #burnFlash.play .burn-ash { animation: burnAsh 1.05s ease-out forwards; }
+    .burn-ash:nth-child(1) { left: 8%; animation-delay: 0.02s; }
+    .burn-ash:nth-child(2) { left: 18%; width: 5px; height: 9px; animation-delay: 0.08s; }
+    .burn-ash:nth-child(3) { left: 31%; animation-delay: 0.12s; }
+    .burn-ash:nth-child(4) { left: 44%; width: 8px; height: 5px; animation-delay: 0.05s; }
+    .burn-ash:nth-child(5) { left: 56%; animation-delay: 0.15s; }
+    .burn-ash:nth-child(6) { left: 68%; width: 4px; height: 8px; animation-delay: 0.09s; }
+    .burn-ash:nth-child(7) { left: 79%; animation-delay: 0.18s; }
+    .burn-ash:nth-child(8) { left: 90%; animation-delay: 0.04s; }
+    @keyframes burnWhite {
+      0%, 16% { opacity: 1; }
+      42%, 100% { opacity: 0; }
+    }
+    @keyframes burnFire {
+      0% { opacity: 0; }
+      14%, 62% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    @keyframes burnWord {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+      18% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); }
+      58% { opacity: 1; }
+      100% { opacity: 0; transform: translate(-50%, -38%) scale(1.18); }
+    }
+    @keyframes burnAsh {
+      0% { opacity: 0; transform: translateY(0) rotate(0deg); }
+      12% { opacity: 1; }
+      100% { opacity: 0; transform: translateY(-110vh) rotate(210deg); }
+    }
   </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
+  <div id="burnFlash" aria-hidden="true">
+    <div class="burn-flash-white"></div>
+    <div class="burn-flash-fire"></div>
+    <div class="burn-flash-word">BURNED</div>
+    <span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span>
+    <span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span>
+  </div>
   <div id="cornerLogo" class="corner-logo" title="Tap to burn messages on this phone. Tap twice to wipe everyone in the room and leave." aria-label="Burn chat"></div>
   <div class="flex w-full max-w-xl mx-auto">
     <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
@@ -1252,15 +1333,15 @@
       <button id="cancelRecoverKeysButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-    <script src="crypto.js?v=260828k"></script>
-  <script src="ratchet.js?v=260828k"></script>
-  <script src="utils.js?v=260828k"></script>
-  <script src="main.js?v=260828k"></script>
-  <script src="init.js?v=260828k"></script>
-  <script src="events.js?v=260828k"></script>
+    <script src="crypto.js?v=260828l"></script>
+  <script src="ratchet.js?v=260828l"></script>
+  <script src="utils.js?v=260828l"></script>
+  <script src="main.js?v=260828l"></script>
+  <script src="init.js?v=260828l"></script>
+  <script src="events.js?v=260828l"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260828k"></script>
-  <script src="account-ui.js?v=260828k"></script>
+  <script src="supabase-auth.js?v=260828l"></script>
+  <script src="account-ui.js?v=260828l"></script>
 </body>
 </html>

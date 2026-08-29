@@ -89,7 +89,10 @@ function renderMooseInbox() {
     const burnBtn = document.createElement('button');
     burnBtn.textContent = 'Burn';
     burnBtn.className = 'burn';
-    burnBtn.onclick = () => burnInboxItem(msg);
+    burnBtn.onclick = async () => {
+      await playBurnFlash();
+      await burnInboxItem(msg);
+    };
     row.appendChild(openBtn);
     row.appendChild(burnBtn);
     list.appendChild(row);
@@ -106,6 +109,7 @@ async function openInboxItem(msg) {
     }
     const fromName = (parsed && parsed.from) || 'Someone';
     if (isBlocked(fromName)) {
+      await playBurnFlash();
       await burnInboxItem(msg);
       showStatusMessage('Blocked note burned.');
       return;
@@ -113,6 +117,7 @@ async function openInboxItem(msg) {
     if (parsed && parsed.identity) await rememberSafety(fromName, parsed.identity);
     if (parsed && parsed.type === 'connection-request' && parsed.code) {
       if (confirm(fromName + ' sent a room code. Join?')) {
+        await playBurnFlash();
         await burnInboxItem(msg);
         if (typeof autoConnect === 'function') autoConnect(parsed.code);
       }
@@ -120,11 +125,15 @@ async function openInboxItem(msg) {
     }
     const text = (parsed && parsed.text) || opened;
     alert('From ' + fromName + ':\n\n' + text);
+    await playBurnFlash();
     await burnInboxItem(msg);
   } catch (e) {
     const msgText = (e && e.message) ? e.message : 'Could not open that note.';
     const burn = confirm(msgText + '\n\nBurn this note?');
-    if (burn) await burnInboxItem(msg);
+    if (burn) {
+      await playBurnFlash();
+      await burnInboxItem(msg);
+    }
   }
 }
 

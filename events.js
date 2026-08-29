@@ -2086,25 +2086,27 @@ document.addEventListener('DOMContentLoaded', () => {
       if (now - mooseTapAt < 700) {
         mooseTapAt = 0;
         requestRoomWipe();
-        setTimeout(() => {
+        playBurnFlash().then(() => {
           burnChatSession();
           showStatusMessage('Chat burned, moose book wiped, signed out.');
-        }, 300);
+        });
         return;
       }
       mooseTapAt = now;
-      burnTranscript();
-      showStatusMessage('Messages burned here. Tap the moose again to wipe everyone in the room and leave.');
+      playBurnFlash().then(() => {
+        burnTranscript();
+        showStatusMessage('Messages burned here. Tap the moose again to wipe everyone in the room and leave.');
+      });
     };
     cornerLogo.addEventListener('click', onMoose);
     cornerLogo.addEventListener('dblclick', (e) => {
       e.preventDefault();
       mooseTapAt = 0;
       requestRoomWipe();
-      setTimeout(() => {
+      playBurnFlash().then(() => {
         burnChatSession();
         showStatusMessage('Chat burned on this phone and anyone still in the room.');
-      }, 300);
+      });
     });
   } else {
     console.error('cornerLogo element not found—check ID in index.html');

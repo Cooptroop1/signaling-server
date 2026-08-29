@@ -7,7 +7,8 @@ const sb = (window.supabase && window.supabase.createClient)
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: false,
-      storageKey: 'anonomoose-auth'
+      storageKey: 'anonomoose-auth',
+      experimental: { passkey: true }
     }
   })
   : null;
@@ -115,6 +116,7 @@ async function applyLoggedInSession(session) {
     startHeartbeat();
     if (typeof renderMooseBook === 'function') renderMooseBook();
     if (typeof schedulePersistKeys === 'function') schedulePersistKeys();
+    offerPasskeyOnce();
   }).catch((e) => console.warn('post-login', e));
 }
 
@@ -403,6 +405,64 @@ async function restoreSessionQuiet() {
   }
 }
 
+function passkeySupported() {
+  return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+}
+
+function passkeyApiReady() {
+  return !!(sb && sb.auth && (typeof sb.auth.signInWithPasskey === 'function' || (sb.auth.passkey && typeof sb.auth.passkey.startAuthentication === 'function')));
+}
+
+async function signInWithPasskey() {
+  if (!passkeySupported()) throw new Error('This phone does not support fingerprint / Face ID login');
+  if (!sb || typeof sb.auth.signInWithPasskey !== 'function') {
+    throw new Error('Passkeys are not on yet. In Supabase: Authentication → Passkeys. RP ID: anonomoose.com. Origins: https://www.anonomoose.com');
+  }
+  const { data, error } = await sb.auth.signInWithPasskey();
+  if (error) throw error;
+  signedOut = false;
+  window.__sbSession = data.session;
+  closeAuthModals();
+  setAuthUi(data.session);
+  if (data.session) applyLoggedInSession(data.session);
+  return data;
+}
+
+async function registerPasskey() {
+  if (!passkeySupported()) throw new Error('This phone does not support fingerprint / Face ID');
+  await ensureSbSession();
+  if (!sb || typeof sb.auth.registerPasskey !== 'function') {
+    throw new Error('Passkeys are not on yet. In Supabase: Authentication → Passkeys. RP ID: anonomoose.com');
+  }
+  const { data, error } = await sb.auth.registerPasskey({ friendlyName: 'This phone' });
+  if (error) throw error;
+  return data;
+}
+
+function offerPasskeyOnce() {
+  if (!passkeySupported() || !passkeyApiReady()) return;
+  try {
+    if (sessionStorage.getItem('moosePasskeyAsked')) return;
+    sessionStorage.setItem('moosePasskeyAsked', '1');
+  } catch (e) {}
+  setTimeout(async () => {
+    if (signedOut || !isLoggedIn()) return;
+    try {
+      if (sb.auth.passkey && typeof sb.auth.passkey.list === 'function') {
+        const { data } = await sb.auth.passkey.list();
+        if (data && data.length) return;
+      }
+    } catch (e) {}
+    if (!confirm('Save Face ID / fingerprint for this phone? Next time you can skip the password.')) return;
+    try {
+      await registerPasskey();
+      if (typeof showStatusMessage === 'function') showStatusMessage('Passkey saved. Next login can use fingerprint.');
+    } catch (err) {
+      alert(err.message || 'Could not save passkey');
+    }
+  }, 1200);
+}
+
 window.sbAuth = {
   isLoggedIn,
   getSession,
@@ -412,6 +472,8 @@ window.sbAuth = {
   publishKeys,
   signUp,
   signIn,
+  signInWithPasskey,
+  registerPasskey,
   signOut
 };
 
@@ -482,6 +544,52 @@ document.addEventListener('DOMContentLoaded', () => {
   if (signOutBtn) signOutBtn.onclick = () => {
     signOut();
   };
+  const passkeyLogin = document.getElementById('modalPasskeyLogin');
+  if (passkeyLogin) {
+    if (!passkeySupported()) passkeyLogin.classList.add('hidden');
+    passkeyLogin.onclick = async () => {
+      try {
+        passkeyLogin.disabled = true;
+        passkeyLogin.textContent = 'Waiting for fingerprint…';
+        await signInWithPasskey();
+        closeAuthModals();
+      } catch (err) {
+        const msg = (err && err.message) ? err.message : 'Passkey login failed';
+        if (/not enabled|not on yet|feature/i.test(msg)) {
+          alert('Turn on Passkeys in Supabase first:\nAuthentication → Passkeys → Enable\nRP ID: anonomoose.com\nOrigins: https://www.anonomoose.com,https://anonomoose.com');
+        } else {
+          alert(msg);
+        }
+      } finally {
+        passkeyLogin.disabled = false;
+        passkeyLogin.textContent = 'Fingerprint / Face ID';
+      }
+    };
+  }
+  const savePasskeyBtn = document.getElementById('savePasskeyBtn');
+  if (savePasskeyBtn) {
+    if (!passkeySupported()) savePasskeyBtn.classList.add('hidden');
+    savePasskeyBtn.onclick = async () => {
+      try {
+        savePasskeyBtn.disabled = true;
+        savePasskeyBtn.textContent = 'Saving…';
+        await registerPasskey();
+        savePasskeyBtn.textContent = 'Saved';
+        if (typeof showStatusMessage === 'function') showStatusMessage('Passkey saved on this phone.');
+      } catch (err) {
+        savePasskeyBtn.textContent = 'Save fingerprint';
+        const msg = (err && err.message) ? err.message : 'Could not save passkey';
+        if (/not enabled|not on yet|feature/i.test(msg)) {
+          alert('Turn on Passkeys in Supabase first:\nAuthentication → Passkeys → Enable\nRP ID: anonomoose.com\nOrigins: https://www.anonomoose.com,https://anonomoose.com');
+        } else {
+          alert(msg);
+        }
+      } finally {
+        savePasskeyBtn.disabled = false;
+        if (savePasskeyBtn.textContent === 'Saving…') savePasskeyBtn.textContent = 'Save fingerprint';
+      }
+    };
+  }
   restoreSessionQuiet();
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') {

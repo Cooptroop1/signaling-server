@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260828j">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260828j">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260828j">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260828j">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260828j">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260828j">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260828k">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260828k">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260828k">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260828k">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260828k">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260828k">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1060,6 +1060,7 @@
           <span id="userDisplayName" class="text-lg text-gray-700 block mb-2 font-medium"></span>
           <p id="safetySelf" class="text-xs text-gray-500 mb-2 hidden"></p>
           <div class="account-actions">
+          <button id="savePasskeyBtn" type="button">Save fingerprint</button>
             <button id="searchUserButton" type="button">Search</button>
             <button id="myQrButton" type="button">My QR</button>
             <button id="signOutBtn" type="button" class="sign-out">Sign Out</button>
@@ -1102,7 +1103,7 @@
       <p><strong>Phone-to-phone only:</strong> Tick this if you never want the encrypted server backup. Green badge = phones talking directly. Amber = backup still encrypted.</p>
       <p><strong>Moose (corner):</strong> Tap once to burn this phone. Tap twice to wipe everyone still in the room, kill the code, and leave. Switching away for 20 seconds also burns a live room. Text Code and Random Board give you three minutes so you can pick a room or send a text without wiping. Refreshing or closing the tab burns this device.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
-      <p><strong>Login:</strong> Login with your claimed username to retrieve it on new devices and get offline messages.</p>
+      <p><strong>Fingerprint / Face ID:</strong> After Sign Up, tap Save fingerprint. Next time tap Login then Fingerprint / Face ID — no password. First time only: in Supabase go Authentication → Passkeys, turn it on, RP ID <code>anonomoose.com</code>, origins <code>https://www.anonomoose.com</code> and <code>https://anonomoose.com</code>.</p>
       <p><strong>Search User:</strong> Find a signed-up name. Send a sealed invite or note. Inbox, moose book and QR stay on this phone. Rooms still burn.</p>
     </div>
   </div>
@@ -1214,6 +1215,8 @@
   <div id="supabaseLoginModal" class="totp-modal hidden" role="dialog" aria-label="Login" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Login</h2>
+      <button id="modalPasskeyLogin" class="bg-black text-white px-4 py-3 rounded w-full mb-3">Fingerprint / Face ID</button>
+      <p class="text-xs text-gray-500 mb-3">or use email</p>
       <input id="modalLoginEmail" type="email" placeholder="Email" class="border border-gray-300 p-3 w-full mb-3 rounded">
       <input id="modalLoginPassword" type="password" placeholder="Password" class="border border-gray-300 p-3 w-full mb-4 rounded">
       <button id="modalLoginSubmit" class="bg-blue-500 text-white px-4 py-3 rounded w-full mb-2">Login</button>
@@ -1249,15 +1252,15 @@
       <button id="cancelRecoverKeysButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-    <script src="crypto.js?v=260828j"></script>
-  <script src="ratchet.js?v=260828j"></script>
-  <script src="utils.js?v=260828j"></script>
-  <script src="main.js?v=260828j"></script>
-  <script src="init.js?v=260828j"></script>
-  <script src="events.js?v=260828j"></script>
+    <script src="crypto.js?v=260828k"></script>
+  <script src="ratchet.js?v=260828k"></script>
+  <script src="utils.js?v=260828k"></script>
+  <script src="main.js?v=260828k"></script>
+  <script src="init.js?v=260828k"></script>
+  <script src="events.js?v=260828k"></script>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260828j"></script>
-  <script src="account-ui.js?v=260828j"></script>
+  <script src="supabase-auth.js?v=260828k"></script>
+  <script src="account-ui.js?v=260828k"></script>
 </body>
 </html>

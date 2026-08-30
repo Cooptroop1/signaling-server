@@ -338,23 +338,30 @@ async function sendOffline(toUsername, sealed, meta) {
     iv: sealed.iv,
     ephemeral_public: sealed.ephemeral_public,
     messageId: sealed.messageId || null,
-    kind: (meta && meta.kind) || 'note'
+    kind: (meta && meta.kind) || 'note',
+    expires_at: (meta && meta.expiresAt) ? new Date(meta.expiresAt).toISOString() : null
   };
   const uid = currentUser().id;
-  const expiresAt = (meta && meta.expiresAt) ? new Date(meta.expiresAt).toISOString() : null;
-  const tries = [
-    { to_user_id: dest.id, from_user_id: uid, payload: blob, expires_at: expiresAt, kind: blob.kind },
-    { to_user_id: dest.id, payload: blob, expires_at: expiresAt, kind: blob.kind },
-    { to_user_id: dest.id, from_user_id: uid, payload: blob },
-    { to_user_id: dest.id, payload: blob },
-    { to_user_id: dest.id, from_user_id: uid, message: JSON.stringify(blob) },
-    { to_user_id: dest.id, message: JSON.stringify(blob) }
-  ];
+  const fromOk = uid && uid !== 'duress-local' && /^[0-9a-f-]{36}$/i.test(uid);
+  const full = { to_user_id: dest.id, payload: blob, message: JSON.stringify(blob) };
+  if (fromOk) full.from_user_id = uid;
+  const shapes = window.__mailInsertKeys
+    ? [Object.fromEntries(window.__mailInsertKeys.filter((k) => full[k] != null).map((k) => [k, full[k]]))]
+    : [
+      full,
+      { to_user_id: dest.id, payload: blob, message: JSON.stringify(blob) },
+      { to_user_id: dest.id, payload: blob },
+      { to_user_id: dest.id, message: JSON.stringify(blob) }
+    ];
   let lastErr = null;
-  for (const row of tries) {
+  for (const row of shapes) {
     const { error } = await sb.from('offline_messages').insert(row);
-    if (!error) return;
+    if (!error) {
+      window.__mailInsertKeys = Object.keys(row);
+      return;
+    }
     lastErr = error;
+    if (error && /column/i.test(error.message || '')) window.__mailInsertKeys = null;
   }
   throw new Error(lastErr && lastErr.message ? lastErr.message : 'Could not store sealed note');
 }

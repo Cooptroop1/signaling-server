@@ -733,30 +733,14 @@ function pounds(cents) {
   return '£' + (Number(cents || 0) / 100).toFixed(2);
 }
 
-async function applyBoughtName(name) {
+async function applyBoughtName(name, alreadyApplied) {
   if (!name) return false;
   if (!isLoggedIn()) {
     window.__pendingBoughtName = name;
     return false;
   }
-  const uid = currentUser().id;
-  const nm = String(name).trim();
-  let saved = false;
-  try {
-    const { data, error } = await sb.rpc('moose_apply_purchase', { p_name: nm });
-    const row = typeof data === 'string' ? JSON.parse(data) : data;
-    if (!error && row && row.ok !== false) saved = true;
-  } catch (e) {}
-  if (!saved) {
-    try {
-      const kind = /^\d+$/.test(nm) ? 'number' : (nm.length <= 3 ? 'letter' : 'signup');
-      const { error } = await sb.from('owned_names').insert({ name: nm, user_id: uid, kind });
-      if (!error) saved = true;
-      else if (error.message && /duplicate|unique/i.test(error.message)) saved = true;
-    } catch (e) {}
-  }
-  if (!saved) {
-    const msg = 'Payment received, but ' + nm + ' is not on your account yet. Run the owned-names SQL in Supabase, then open this page again.';
+  if (!alreadyApplied) {
+    const msg = 'Payment is in, but the name is not attached yet. Add SUPABASE_SERVICE_ROLE_KEY on Render, then open this page again.';
     shopNote(msg);
     if (typeof showStatusMessage === 'function') showStatusMessage(msg);
     return false;
@@ -764,7 +748,7 @@ async function applyBoughtName(name) {
   window.__pendingBoughtName = '';
   try { localStorage.removeItem('vanitySession'); localStorage.removeItem('vanityPendingName'); } catch (e) {}
   await loadMyNames();
-  const msg = nm + ' is yours. Still chatting as ' + (typeof username !== 'undefined' ? username : 'your current name') + '. Tap it under Your names to use it in chat.';
+  const msg = name + ' is yours. Still chatting as ' + (typeof username !== 'undefined' ? username : 'your current name') + '. Tap it under Your names to use it in chat.';
   shopNote(msg);
   if (typeof showStatusMessage === 'function') showStatusMessage(msg);
   return true;
@@ -804,9 +788,14 @@ async function finishVanityReturn() {
       });
       const data = await r.json();
       if (data && data.name) paidName = data.name;
+      const ok = await applyBoughtName(paidName, !!(data && data.applied));
+      if (ok) {
+        try { history.replaceState({}, '', location.pathname); } catch (e) {}
+      }
+      return;
     }
     if (!paidName) return;
-    const ok = await applyBoughtName(paidName);
+    const ok = await applyBoughtName(paidName, false);
     if (ok) {
       try { history.replaceState({}, '', location.pathname); } catch (e) {}
     }

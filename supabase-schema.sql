@@ -529,6 +529,82 @@ where not exists (
 );
 
 alter table public.profiles add column if not exists wipe_epoch bigint;
+
+create table if not exists public.vanity_receipts (
+  session_id text primary key,
+  user_id uuid not null,
+  name text not null,
+  amount_cents int not null,
+  created_at timestamptz default now()
+);
+alter table public.vanity_receipts enable row level security;
+drop policy if exists "receipts read own" on public.vanity_receipts;
+create policy "receipts read own" on public.vanity_receipts
+  for select to authenticated using (user_id = auth.uid());
+
+drop policy if exists "owned names own" on public.owned_names;
+create policy "owned names read own" on public.owned_names
+  for select to authenticated using (user_id = auth.uid());
+
+create or replace function public.moose_apply_paid(p_user uuid, p_name text, p_session text, p_amount int)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  nm text;
+  n int;
+begin
+  if auth.role() is distinct from 'service_role' then
+    return jsonb_build_object('ok', false, 'error', 'forbidden');
+  end if;
+  if p_user is null or p_session is null or p_amount is null or p_amount < 100 then
+    return jsonb_build_object('ok', false, 'error', 'Bad payment');
+  end if;
+  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
+  if char_length(nm) < 1 or char_length(nm) > 16 then
+    return jsonb_build_object('ok', false, 'error', 'Bad name');
+  end if;
+  insert into public.vanity_receipts (session_id, user_id, name, amount_cents)
+  values (p_session, p_user, nm, p_amount)
+  on conflict (session_id) do nothing;
+  if exists (select 1 from public.owned_names o where lower(o.name) = lower(nm) and o.user_id <> p_user) then
+    return jsonb_build_object('ok', false, 'error', 'Already owned');
+  end if;
+  if nm ~ '^[0-9]+$' then
+    n := nm::int;
+    if n in (1, 7) then
+      return jsonb_build_object('ok', false, 'error', 'Not for sale');
+    end if;
+    update public.vanity_numbers
+      set status = 'sold', owner_id = p_user, updated_at = now()
+      where vanity_numbers.n = n and coalesce(held_forever, false) = false
+        and (coalesce(status, 'held') <> 'sold' or owner_id = p_user);
+  else
+    insert into public.vanity_letters (name, status, owner_id, price_cents)
+    values (nm, 'sold', p_user, p_amount)
+    on conflict (name) do update
+      set status = 'sold', owner_id = p_user
+      where vanity_letters.owner_id is null or vanity_letters.owner_id = p_user;
+  end if;
+  insert into public.owned_names (name, user_id, kind)
+  values (nm, p_user, case when nm ~ '^[0-9]+$' then 'number' else 'letter' end)
+  on conflict do nothing;
+  return jsonb_build_object('ok', true, 'name', nm);
+end;
+$$;
+revoke all on function public.moose_apply_paid(uuid, text, text, int) from public, anon, authenticated;
+grant execute on function public.moose_apply_paid(uuid, text, text, int) to service_role;
+
+create or replace function public.moose_apply_purchase(p_name text)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+begin
+  return jsonb_build_object('ok', false, 'error', 'Pay first');
+end;
+$$;
+revoke all on function public.moose_apply_purchase(text) from public, anon;
+grant execute on function public.moose_apply_purchase(text) to authenticated;
 do $$
 begin
   alter publication supabase_realtime add table public.profiles;

@@ -134,6 +134,82 @@ let stripe = null;
 try {
   if (process.env.STRIPE_SECRET_KEY) stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 } catch (e) { logger.warn('stripe %s', e.message); }
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+async function supabaseAdmin(path, method, payload) {
+  const key = SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+  const r = await fetch(SUPABASE_URL + path, {
+    method: method || 'POST',
+    headers: {
+      apikey: key,
+      Authorization: 'Bearer ' + key,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation'
+    },
+    body: payload ? JSON.stringify(payload) : undefined
+  });
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
+  if (!r.ok) throw new Error((data && (data.message || data.error)) || text || ('Supabase ' + r.status));
+  return data;
+}
+
+async function lookupVanityAmount(kind, name) {
+  const headers = { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY };
+  if (kind === 'number') {
+    const n = parseInt(name, 10);
+    if (!n || n === 1 || n === 7) return { error: 'That number is not for sale' };
+    const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + n + '&select=buy_now_cents,price_cents,held_forever,status', { headers });
+    const rows = await vr.json();
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (row && (row.held_forever || row.status === 'sold')) return { error: 'That number is not for sale' };
+    const amount = Math.max(Number(row && row.buy_now_cents) || 0, Number(row && row.price_cents) || 0) || (n <= 9 ? 25000 : n <= 99 ? 10000 : 5000);
+    return { amount: Math.max(100, amount), sold: !!(row && row.status === 'sold') };
+  }
+  const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(name) + '&select=price_cents,status', { headers });
+  const rows = await vr.json();
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (row && row.status === 'sold') return { error: 'Already sold' };
+  return { amount: Math.max(100, Number(row && row.price_cents) || 10000) };
+}
+
+async function fulfillPaidSession(session) {
+  const paid = session && (session.payment_status === 'paid' || session.status === 'complete');
+  if (!paid) return { ok: false, error: 'Payment not complete yet' };
+  const name = session.metadata && session.metadata.name;
+  const userId = session.metadata && session.metadata.userId;
+  const kind = (session.metadata && session.metadata.kind) === 'letter' ? 'letter' : 'number';
+  const locked = parseInt(session.metadata && session.metadata.amount, 10) || 0;
+  const paidAmount = Number(session.amount_total) || 0;
+  if (!name || !userId) return { ok: false, error: 'Missing payment details' };
+  let expected = locked;
+  if (!expected) {
+    const live = await lookupVanityAmount(kind, name);
+    expected = live.amount || 0;
+  }
+  if (!expected || paidAmount < expected) return { ok: false, error: 'Paid amount does not match the shop price' };
+  const doneKey = 'vanity:done:' + session.id;
+  try {
+    const already = await redisClient.get(doneKey);
+    if (already) return { ok: true, name, userId, applied: true };
+  } catch (e) {}
+  await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
+  try {
+    await supabaseAdmin('/rest/v1/rpc/moose_apply_paid', 'POST', {
+      p_user: userId,
+      p_name: name,
+      p_session: session.id,
+      p_amount: paidAmount
+    });
+    await redisClient.set(doneKey, name, { EX: 30 * 24 * 3600 });
+    return { ok: true, name, userId, applied: true };
+  } catch (e) {
+    logger.warn('vanity fulfill %s', e && e.message);
+    return { ok: false, error: e.message || 'Could not attach name. Add SUPABASE_SERVICE_ROLE_KEY on Render.', name, userId, applied: false };
+  }
+}
 function readJsonBody(req, limit) {
   return new Promise((resolve, reject) => {
     let raw = '';
@@ -293,9 +369,11 @@ server.on('request', (req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ received: true }));
         try {
-          const name = (body.data && body.data.object && body.data.object.metadata && body.data.object.metadata.name) || '';
-          const userId = (body.data && body.data.object && body.data.object.metadata && body.data.object.metadata.userId) || '';
-          if (name && userId) await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
+          const eventId = (body.data && body.data.object && body.data.object.id) || '';
+          if (eventId && stripe) {
+            const session = await stripe.checkout.sessions.retrieve(eventId);
+            await fulfillPaidSession(session);
+          }
         } catch (e) {}
       }).catch(() => { if (!res.headersSent) { res.writeHead(400); res.end(); } });
       return;
@@ -308,55 +386,26 @@ server.on('request', (req, res) => {
           return;
         }
         const kind = body.kind === 'letter' ? 'letter' : 'number';
-        const name = String(body.name || body.n || '').trim();
+        const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
         const userId = String(body.userId || '');
         if (!name || !userId) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Missing name' }));
           return;
         }
-        let amount = 500;
-        try {
-          const headers = { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY };
-          if (kind === 'number') {
-            const n = parseInt(name, 10);
-            if (n === 1 || n === 7) {
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ ok: false, error: 'That number is not for sale' }));
-              return;
-            }
-            const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + n + '&select=buy_now_cents,price_cents,held_forever,status', { headers });
-            const rows = await vr.json();
-            const row = Array.isArray(rows) ? rows[0] : null;
-            if (row && (row.held_forever || row.status === 'sold')) {
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ ok: false, error: 'That number is not for sale' }));
-              return;
-            }
-            const a = Number(row && row.buy_now_cents) || 0;
-            const b = Number(row && row.price_cents) || 0;
-            amount = Math.max(a, b) || (n <= 9 ? 25000 : n <= 99 ? 10000 : 5000);
-          } else {
-            const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(name) + '&select=price_cents,status', { headers });
-            const rows = await vr.json();
-            const row = Array.isArray(rows) ? rows[0] : null;
-            if (row && row.status === 'sold') {
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ ok: false, error: 'Already sold' }));
-              return;
-            }
-            amount = (row && row.price_cents) || 10000;
-          }
-        } catch (e) {
-          logger.warn('vanity price lookup %s', e && e.message);
+        const priced = await lookupVanityAmount(kind, name);
+        if (priced.error) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: priced.error }));
+          return;
         }
-        amount = Math.max(100, parseInt(amount, 10) || 500);
+        const amount = priced.amount;
         try {
           const session = await stripe.checkout.sessions.create({
             mode: 'payment',
             success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
             cancel_url: 'https://www.anonomoose.com/',
-            metadata: { kind, name, userId },
+            metadata: { kind, name, userId, amount: String(amount) },
             line_items: [{
               quantity: 1,
               price_data: {
@@ -387,17 +436,15 @@ server.on('request', (req, res) => {
           return;
         }
         const session = await stripe.checkout.sessions.retrieve(sessionId);
-        const paid = session && (session.payment_status === 'paid' || session.status === 'complete');
-        if (!paid) {
+        const claimedUser = String(body.userId || '');
+        const result = await fulfillPaidSession(session);
+        if (claimedUser && result.userId && claimedUser !== result.userId) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'Payment not complete yet' }));
+          res.end(JSON.stringify({ ok: false, error: 'This payment belongs to another account' }));
           return;
         }
-        const name = session.metadata && session.metadata.name;
-        const userId = session.metadata && session.metadata.userId;
-        if (name && userId) await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, name, userId }));
+        res.end(JSON.stringify(result));
         return;
       }
       if (fullUrl.pathname === '/push-sub') {

@@ -452,6 +452,10 @@ function updateLogoutButtonVisibility() {
   if (logoutButton) {
     logoutButton.classList.toggle('hidden', !(username && token));
   }
+  const logged = !!(window.sbAuth && typeof window.sbAuth.isLoggedIn === 'function' && window.sbAuth.isLoggedIn());
+  document.querySelectorAll('.logged-only-opt').forEach((el) => {
+    el.classList.toggle('hidden', !logged);
+  });
 }
 function logout() {
   if (socket && socket.readyState === WebSocket.OPEN && token) {

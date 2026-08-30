@@ -55,10 +55,12 @@ function setAuthUi(session) {
     if (nameEl) nameEl.textContent = label;
     userInfo.classList.remove('hidden');
     authLinks.style.display = 'none';
+    if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
   } else {
     if (nameEl) nameEl.textContent = '';
     userInfo.classList.add('hidden');
     authLinks.style.display = 'block';
+    if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
     const inbox = document.getElementById('mooseInbox');
     const book = document.getElementById('mooseBook');
     if (inbox) inbox.classList.add('hidden');

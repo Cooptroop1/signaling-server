@@ -65,6 +65,21 @@ drop policy if exists "mail delete own" on public.offline_messages;
 create policy "mail delete own" on public.offline_messages
   for delete to authenticated using (to_user_id = auth.uid());
 
+create table if not exists public.owned_names (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (name ~ '^[a-zA-Z0-9]{1,16}$'),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  kind text not null default 'signup',
+  listed_for_sale boolean not null default false,
+  created_at timestamptz default now()
+);
+create unique index if not exists owned_names_ci on public.owned_names (lower(name));
+create index if not exists owned_names_user_idx on public.owned_names (user_id);
+alter table public.owned_names enable row level security;
+drop policy if exists "owned names own" on public.owned_names;
+create policy "owned names own" on public.owned_names
+  for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -84,12 +99,16 @@ begin
   if name ~ '^[0-9]+$' and name::int >= 1 and name::int <= 999 then
     raise exception 'Numbers 1-999 are reserved';
   end if;
-  if exists (select 1 from public.profiles where lower(display_name) = lower(name)) then
+  if exists (select 1 from public.profiles p where lower(p.display_name) = lower(name))
+     or exists (select 1 from public.owned_names o where lower(o.name) = lower(name)) then
     raise exception 'Display name already taken';
   end if;
   insert into public.profiles (id, display_name)
   values (new.id, name)
   on conflict (id) do nothing;
+  insert into public.owned_names (name, user_id, kind)
+  values (name, new.id, 'signup')
+  on conflict do nothing;
   return new;
 end;
 $$;
@@ -156,7 +175,13 @@ begin
   if p_name is null or length(trim(p_name)) < 1 then
     return null;
   end if;
-  select * into r from public.profiles where lower(display_name) = lower(trim(p_name)) limit 1;
+  select o.user_id into r.id from public.owned_names o
+    where lower(o.name) = lower(trim(p_name)) limit 1;
+  if not found then
+    select * into r from public.profiles where lower(display_name) = lower(trim(p_name)) limit 1;
+  else
+    select * into r from public.profiles where id = r.id;
+  end if;
   if not found then
     return null;
   end if;
@@ -177,7 +202,11 @@ begin
   online := (r.last_active is not null and r.last_active > now() - interval '5 minutes' and coalesce(r.hide_last_seen, false) = false);
   return jsonb_build_object(
     'id', r.id,
-    'display_name', r.display_name,
+    'display_name', coalesce(
+      (select o.name from public.owned_names o
+        where o.user_id = r.id and lower(o.name) = lower(trim(p_name)) limit 1),
+      r.display_name
+    ),
     'public_key', r.public_key,
     'identity_public_key', r.identity_public_key,
     'last_active', case when coalesce(r.hide_last_seen, false) then null else r.last_active end,
@@ -456,14 +485,49 @@ begin
     insert into public.vanity_letters (name, status, owner_id, price_cents)
     values (nm, 'sold', me, 1000)
     on conflict (name) do update
-      set status = 'sold', owner_id = me, updated_at = now()
+      set status = 'sold', owner_id = me
       where vanity_letters.status <> 'sold';
   end if;
-  update public.profiles set display_name = nm where id = me;
+  if exists (select 1 from public.owned_names o where lower(o.name) = lower(nm) and o.user_id <> me) then
+    return jsonb_build_object('ok', false, 'error', 'Already owned');
+  end if;
+  insert into public.owned_names (name, user_id, kind)
+  values (nm, me, case when nm ~ '^[0-9]+$' then 'number' else 'letter' end)
+  on conflict do nothing;
   return jsonb_build_object('ok', true, 'name', nm);
 end;
 $$;
 grant execute on function public.moose_apply_purchase(text) to authenticated;
+
+create or replace function public.moose_set_active_name(p_name text)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  nm text;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'error', 'Log in first');
+  end if;
+  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
+  if not exists (select 1 from public.owned_names o where o.user_id = me and lower(o.name) = lower(nm)) then
+    return jsonb_build_object('ok', false, 'error', 'You do not own that name');
+  end if;
+  select o.name into nm from public.owned_names o where o.user_id = me and lower(o.name) = lower(nm) limit 1;
+  update public.profiles set display_name = nm, updated_at = now() where id = me;
+  return jsonb_build_object('ok', true, 'name', nm);
+end;
+$$;
+grant execute on function public.moose_set_active_name(text) to authenticated;
+
+insert into public.owned_names (name, user_id, kind)
+select p.display_name, p.id, 'signup'
+from public.profiles p
+where not exists (
+  select 1 from public.owned_names o where lower(o.name) = lower(p.display_name)
+);
+
 alter table public.profiles add column if not exists wipe_epoch bigint;
 do $$
 begin

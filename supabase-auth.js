@@ -59,8 +59,15 @@ function setAuthUi(session) {
     if (note) note.classList.add('hidden');
     if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
     markPasskeyButton();
+    renderMyNames(window.__myNames || []);
   } else {
     if (nameEl) nameEl.textContent = '';
+    const namesBox = document.getElementById('myNamesBox');
+    if (namesBox) {
+      namesBox.innerHTML = '';
+      namesBox.classList.add('hidden');
+    }
+    window.__myNames = [];
     userInfo.classList.add('hidden');
     authLinks.style.display = 'block';
     if (note) note.classList.remove('hidden');
@@ -137,14 +144,20 @@ async function applyLoggedInSession(session) {
   }
   const display = (session.user.user_metadata && session.user.user_metadata.display_name)
     || (session.user.email ? session.user.email.split('@')[0] : 'user');
+  let chatName = display;
+  try {
+    const mine = await loadMyNames();
+    const active = mine.find((n) => n.active);
+    if (active && active.name) chatName = active.name;
+  } catch (e) {}
   if (typeof username !== 'undefined') {
-    username = display;
+    username = chatName;
     try { sessionStorage.setItem('username', username); } catch (e) {}
     try { localStorage.setItem('username', username); } catch (e) {}
   }
-  if (typeof rememberUsername === 'function') rememberUsername(display);
+  if (typeof rememberUsername === 'function') rememberUsername(chatName);
   if (typeof showStatusMessage === 'function') {
-    showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
+    showStatusMessage('Logged in as ' + chatName + '. Rooms stay P2P.');
   }
   if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
   startHeartbeat();
@@ -288,11 +301,15 @@ async function registerPushAlerts() {
     const display = (currentUser().user_metadata && currentUser().user_metadata.display_name)
       || (typeof username !== 'undefined' ? username : '');
     if (!display) return;
-    await fetch(PING_URL + '/push-sub', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: display, subscription: sub.toJSON() })
-    });
+    const names = (window.__myNames || []).map((n) => n.name).filter(Boolean);
+    const list = names.length ? names : (display ? [display] : []);
+    for (const n of list) {
+      await fetch(PING_URL + '/push-sub', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: n, subscription: sub.toJSON() })
+      });
+    }
   } catch (e) {
     console.warn('push subscribe', e && e.message);
   }
@@ -720,24 +737,92 @@ async function applyBoughtName(name) {
   try {
     await sb.rpc('moose_apply_purchase', { p_name: String(name) });
   } catch (e) {}
+  await loadMyNames();
+  shopNote(name + ' is yours. Still chatting as ' + (typeof username !== 'undefined' ? username : 'your current name') + '. Tap it under Your names to use it in chat. Mail to any name you own still arrives.');
+  if (typeof showStatusMessage === 'function') showStatusMessage(name + ' saved on this email account.');
+}
+
+async function loadMyNames() {
+  window.__myNames = window.__myNames || [];
+  if (!isLoggedIn() || !sb) {
+    renderMyNames([]);
+    return [];
+  }
   const uid = currentUser().id;
+  let rows = [];
   try {
-    await sb.from('profiles').update({ display_name: String(name) }).eq('id', uid);
+    const { data } = await sb.from('owned_names').select('name, kind, listed_for_sale').eq('user_id', uid);
+    rows = data || [];
   } catch (e) {}
+  let active = '';
   try {
-    await sb.auth.updateUser({ data: { display_name: String(name) } });
+    const { data: prof } = await sb.from('profiles').select('display_name').eq('id', uid).maybeSingle();
+    active = (prof && prof.display_name) || '';
+  } catch (e) {}
+  if (!rows.length && active) rows = [{ name: active, kind: 'signup' }];
+  window.__myNames = rows.map((r) => ({
+    name: r.name,
+    kind: r.kind,
+    listed: !!r.listed_for_sale,
+    active: String(r.name).toLowerCase() === String(active || username || '').toLowerCase()
+  }));
+  if (active && !window.__myNames.some((n) => n.active) && window.__myNames[0]) {
+    window.__myNames[0].active = true;
+  }
+  renderMyNames(window.__myNames);
+  registerPushAlerts();
+  return window.__myNames;
+}
+
+function renderMyNames(list) {
+  const box = document.getElementById('myNamesBox');
+  if (!box) return;
+  if (!isLoggedIn() || !list || !list.length) {
+    box.innerHTML = '';
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  box.innerHTML = '<p class="text-xs text-gray-500 mb-1">Your names — tap one to use in chat. Mail to any of them still reaches you.</p>' +
+    list.map((n) => {
+      const on = n.active ? ' my-name-chip on' : ' my-name-chip';
+      const tag = n.active ? ' <span class="text-xs">(in chat)</span>' : '';
+      return '<button type="button" class="' + on.trim() + '" data-my-name="' + String(n.name).replace(/"/g, '') + '">' +
+        String(n.name).replace(/</g, '') + tag + '</button>';
+    }).join(' ');
+  box.querySelectorAll('[data-my-name]').forEach((btn) => {
+    btn.onclick = () => setActiveOwnedName(btn.getAttribute('data-my-name'));
+  });
+}
+
+async function setActiveOwnedName(name) {
+  if (!isLoggedIn() || !name) return;
+  try {
+    const { data, error } = await sb.rpc('moose_set_active_name', { p_name: name });
+    if (error) throw error;
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    if (row && row.ok === false) throw new Error(row.error || 'Could not switch');
+  } catch (e) {
+    try {
+      await sb.from('profiles').update({ display_name: name }).eq('id', currentUser().id);
+    } catch (e2) {}
+  }
+  try {
+    await sb.auth.updateUser({ data: { display_name: name } });
   } catch (e) {}
   if (window.__sbSession && window.__sbSession.user) {
     window.__sbSession.user.user_metadata = window.__sbSession.user.user_metadata || {};
-    window.__sbSession.user.user_metadata.display_name = String(name);
+    window.__sbSession.user.user_metadata.display_name = name;
   }
   if (typeof username !== 'undefined') {
-    username = String(name);
+    username = name;
     try { sessionStorage.setItem('username', username); } catch (x) {}
     try { localStorage.setItem('username', username); } catch (x) {}
   }
-  if (typeof showStatusMessage === 'function') showStatusMessage('Your name is now ' + name + '. It is saved on this email login.');
-  if (typeof setAuthUi === 'function') setAuthUi(window.__sbSession);
+  if (typeof rememberUsername === 'function') rememberUsername(name);
+  if (typeof showStatusMessage === 'function') showStatusMessage('Chatting as ' + name);
+  setAuthUi(window.__sbSession);
+  await loadMyNames();
 }
 
 function shopNote(text) {
@@ -1018,7 +1103,9 @@ window.sbAuth = {
   signInWithPasskey,
   registerPasskey,
   signOut,
-  findByQr
+  findByQr,
+  loadMyNames,
+  setActiveOwnedName
 };
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -366,9 +366,10 @@ server.on('request', (req, res) => {
           return;
         }
         const session = await stripe.checkout.sessions.retrieve(sessionId);
-        if (!session || session.payment_status !== 'paid') {
+        const paid = session && (session.payment_status === 'paid' || session.status === 'complete');
+        if (!paid) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false }));
+          res.end(JSON.stringify({ ok: false, error: 'Payment not complete yet' }));
           return;
         }
         const name = session.metadata && session.metadata.name;

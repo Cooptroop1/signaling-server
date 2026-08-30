@@ -162,6 +162,7 @@ async function applyLoggedInSession(session) {
   if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
   startHeartbeat();
   registerPushAlerts();
+  finishVanityReturn();
   ensureSbSession().then(() => {
     if (signedOut) return;
     publishKeys().catch((e) => console.warn('publishKeys', e));
@@ -733,13 +734,83 @@ function pounds(cents) {
 }
 
 async function applyBoughtName(name) {
-  if (!isLoggedIn() || !name) return;
+  if (!name) return false;
+  if (!isLoggedIn()) {
+    window.__pendingBoughtName = name;
+    return false;
+  }
+  const uid = currentUser().id;
+  const nm = String(name).trim();
+  let saved = false;
   try {
-    await sb.rpc('moose_apply_purchase', { p_name: String(name) });
+    const { data, error } = await sb.rpc('moose_apply_purchase', { p_name: nm });
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    if (!error && row && row.ok !== false) saved = true;
   } catch (e) {}
+  if (!saved) {
+    try {
+      const kind = /^\d+$/.test(nm) ? 'number' : (nm.length <= 3 ? 'letter' : 'signup');
+      const { error } = await sb.from('owned_names').insert({ name: nm, user_id: uid, kind });
+      if (!error) saved = true;
+      else if (error.message && /duplicate|unique/i.test(error.message)) saved = true;
+    } catch (e) {}
+  }
+  if (!saved) {
+    const msg = 'Payment received, but ' + nm + ' is not on your account yet. Run the owned-names SQL in Supabase, then open this page again.';
+    shopNote(msg);
+    if (typeof showStatusMessage === 'function') showStatusMessage(msg);
+    return false;
+  }
+  window.__pendingBoughtName = '';
+  try { localStorage.removeItem('vanitySession'); localStorage.removeItem('vanityPendingName'); } catch (e) {}
   await loadMyNames();
-  shopNote(name + ' is yours. Still chatting as ' + (typeof username !== 'undefined' ? username : 'your current name') + '. Tap it under Your names to use it in chat. Mail to any name you own still arrives.');
-  if (typeof showStatusMessage === 'function') showStatusMessage(name + ' saved on this email account.');
+  const msg = nm + ' is yours. Still chatting as ' + (typeof username !== 'undefined' ? username : 'your current name') + '. Tap it under Your names to use it in chat.';
+  shopNote(msg);
+  if (typeof showStatusMessage === 'function') showStatusMessage(msg);
+  return true;
+}
+
+async function finishVanityReturn() {
+  try {
+    const q = new URLSearchParams(location.search);
+    let sessionId = q.get('session_id') || '';
+    if (q.get('vanity') === 'ok' && sessionId) {
+      try { localStorage.setItem('vanitySession', sessionId); } catch (e) {}
+    }
+    if (!sessionId) {
+      try { sessionId = localStorage.getItem('vanitySession') || ''; } catch (e) {}
+    }
+    let pendingName = '';
+    try { pendingName = localStorage.getItem('vanityPendingName') || ''; } catch (e) {}
+    if (!sessionId && !pendingName && !window.__pendingBoughtName) return;
+    for (let i = 0; i < 25; i++) {
+      if (isLoggedIn()) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    if (!isLoggedIn()) {
+      if (typeof showStatusMessage === 'function') showStatusMessage('Log in to attach the name you just paid for.');
+      return;
+    }
+    let paidName = window.__pendingBoughtName || pendingName;
+    if (sessionId) {
+      const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          userId: currentUser().id,
+          access: (window.__sbSession && window.__sbSession.access_token) || ''
+        })
+      });
+      const data = await r.json();
+      if (data && data.name) paidName = data.name;
+    }
+    if (!paidName) return;
+    const ok = await applyBoughtName(paidName);
+    if (ok) {
+      try { history.replaceState({}, '', location.pathname); } catch (e) {}
+    }
+  } catch (e) {}
 }
 
 async function loadMyNames() {
@@ -936,6 +1007,9 @@ async function startVanityCheckout(row) {
     });
     const data = await r.json();
     if (data && data.url) {
+      try {
+        localStorage.setItem('vanityPendingName', body.name || '');
+      } catch (e) {}
       window.location.href = data.url;
       return;
     }
@@ -943,23 +1017,6 @@ async function startVanityCheckout(row) {
   } catch (e) {
     shopNote('Could not start checkout. Try again, or add STRIPE_SECRET_KEY on Render.');
   }
-}
-
-async function finishVanityReturn() {
-  try {
-    const q = new URLSearchParams(location.search);
-    if (q.get('vanity') !== 'ok') return;
-    const sessionId = q.get('session_id');
-    if (!sessionId) return;
-    const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId })
-    });
-    const data = await r.json();
-    if (data && data.ok && data.name) await applyBoughtName(data.name);
-    history.replaceState({}, '', location.pathname);
-  } catch (e) {}
 }
 
 function bindVanityShop() {

@@ -575,10 +575,10 @@ begin
     if n in (1, 7) then
       return jsonb_build_object('ok', false, 'error', 'Not for sale');
     end if;
-    update public.vanity_numbers
+    update public.vanity_numbers vn
       set status = 'sold', owner_id = p_user, updated_at = now()
-      where vanity_numbers.n = n and coalesce(held_forever, false) = false
-        and (coalesce(status, 'held') <> 'sold' or owner_id = p_user);
+      where vn.n = n and coalesce(vn.held_forever, false) = false
+        and (coalesce(vn.status, 'held') <> 'sold' or vn.owner_id = p_user);
   else
     insert into public.vanity_letters (name, status, owner_id, price_cents)
     values (nm, 'sold', p_user, p_amount)
@@ -619,10 +619,10 @@ begin
     if n < 1 or n > 999 or n in (1, 7) then
       return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
     end if;
-    update public.vanity_numbers
+    update public.vanity_numbers vn
       set status = 'sold', owner_id = me, updated_at = now()
-      where vanity_numbers.n = n and coalesce(held_forever, false) = false
-        and (coalesce(status, 'held') <> 'sold' or owner_id = me);
+      where vn.n = n and coalesce(vn.held_forever, false) = false
+        and (coalesce(vn.status, 'held') <> 'sold' or vn.owner_id = me);
   else
     insert into public.vanity_letters (name, status, owner_id, price_cents)
     values (nm, 'sold', me, 1000)

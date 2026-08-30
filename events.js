@@ -1626,12 +1626,6 @@ document.addEventListener('DOMContentLoaded', () => {
       e.target.classList.toggle('active');
     }
   });
-  const toggleRecent = document.getElementById('toggleRecent');
-  const recentCodesList = document.getElementById('recentCodesList');
-  toggleRecent.addEventListener('click', () => {
-    const isHidden = recentCodesList.classList.toggle('hidden');
-    toggleRecent.textContent = isHidden ? 'Show' : 'Hide';
-  });
   document.getElementById('loginButton').addEventListener('click', () => {
     if (username && token) {
       showStatusMessage('You are already logged in. Log out first to switch accounts.');

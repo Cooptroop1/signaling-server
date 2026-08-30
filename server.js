@@ -249,7 +249,7 @@ server.on('request', (req, res) => {
       const nonce = crypto.randomBytes(16).toString('base64');
       let updatedCSP = "default-src 'self'; " +
         `script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com 'nonce-${nonce}'; ` +
-        `style-src 'self' https://cdn.jsdelivr.net 'nonce-${nonce}'; ` +
+        `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
         "connect-src 'self' wss://signal.anonomoose.com wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://static.cloudflareinsights.com https://www.anonomoose.com; " +

@@ -100,10 +100,6 @@ function renderMooseInbox() {
     openBtn.textContent = 'Open';
     openBtn.onclick = async () => {
       if (window.__moosePanic || !window.__notesUnlocked) return;
-      if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
-        const ok = await window.loggedFeatures.requireUnlock('Unlock note', true);
-        if (!ok || window.__moosePanic) return;
-      }
       openInboxItem(msg);
     };
     const burnBtn = document.createElement('button');

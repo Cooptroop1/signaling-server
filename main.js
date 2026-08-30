@@ -948,13 +948,26 @@ function updatePrivacyStatus(text) {
   }
 }
 function updateUIState(isConnected = false, hasChat = false) {
-  initialContainer.classList.toggle('hidden', isConnected || hasChat);
-  usernameContainer.classList.toggle('hidden', isConnected || hasChat);
-  connectContainer.classList.toggle('hidden', isConnected || hasChat);
-  chatContainer.classList.toggle('hidden', !isConnected && !hasChat);
-  newSessionButton.classList.toggle('hidden', !isConnected);
-  inputContainer.classList.toggle('hidden', !isConnected);
-  messages.classList.toggle('waiting', !isConnected);
+  const inRoom = isConnected || hasChat;
+  if (inRoom) {
+    initialContainer.classList.add('hidden');
+    usernameContainer.classList.add('hidden');
+    connectContainer.classList.add('hidden');
+    chatContainer.classList.remove('hidden');
+    newSessionButton.classList.toggle('hidden', !isConnected);
+    inputContainer.classList.toggle('hidden', !isConnected);
+    messages.classList.toggle('waiting', !isConnected);
+  } else {
+    initialContainer.classList.remove('hidden');
+    usernameContainer.classList.add('hidden');
+    connectContainer.classList.add('hidden');
+    chatContainer.classList.add('hidden');
+    newSessionButton.classList.add('hidden');
+    inputContainer.classList.add('hidden');
+    messages.classList.remove('waiting');
+    const privacy = document.getElementById('privacyStatus');
+    if (privacy) privacy.classList.add('hidden');
+  }
 }
 async function autoConnect(codeParam) {
   console.log('autoConnect running with code:', codeParam);

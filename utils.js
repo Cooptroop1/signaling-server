@@ -28,8 +28,9 @@ function fillClaimedName(span, name, claimed) {
     badge.width = 14;
     badge.height = 14;
     span.appendChild(badge);
+  } else {
+    span.appendChild(document.createTextNode(': '));
   }
-  span.appendChild(document.createTextNode(': '));
 }
 
 function generateMessageId() {

@@ -707,6 +707,8 @@ function validateMessage(data) {
     case 'pong':
     case 'get-turn-credentials':
     case 'room-wipe':
+    case 'leave':
+    case 'remove-random-code':
       break;
     case 'watch-bind':
       if (!data.token || typeof data.token !== 'string' || data.token.length < 8) {
@@ -1574,6 +1576,37 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'get-turn-credentials') {
         const turn = issueTurnCredentials(data.clientId || ws.clientId);
         ws.send(JSON.stringify({ type: 'turn-credentials', ...turn }));
+        return;
+      }
+      if (data.type === 'leave') {
+        if (ws.code && rooms.has(ws.code)) {
+          const leftCode = ws.code;
+          const roomKey = `room:${leftCode}`;
+          const clientsKey = `${roomKey}:clients`;
+          await redisClient.sRem(clientsKey, ws.clientId);
+          await redisClient.del(`${roomKey}:client:${ws.clientId}`);
+          rooms.get(leftCode).clients.delete(ws.clientId);
+          const totalClients = await redisClient.sCard(clientsKey);
+          pubClient.publish(roomKey, JSON.stringify({
+            type: 'broadcast',
+            clientMessage: JSON.stringify({
+              type: 'client-disconnected',
+              clientId: ws.clientId,
+              totalClients,
+              isInitiator: ws.clientId === rooms.get(leftCode).initiator
+            })
+          }));
+          if (totalClients === 0) {
+            rooms.delete(leftCode);
+            await redisClient.del(roomKey);
+            await redisClient.del(`${roomKey}:totp`);
+            await redisClient.del(`${roomKey}:nonces`);
+            await redisClient.sRem('randomCodes', leftCode);
+            randomCodes.delete(leftCode);
+            if (typeof broadcastRandomCodes === 'function') broadcastRandomCodes();
+          }
+          ws.code = null;
+        }
         return;
       }
       if (data.type === 'room-wipe') {

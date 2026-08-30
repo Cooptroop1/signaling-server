@@ -513,6 +513,11 @@ function endChat() {
   maxClientsContainer.classList.add('hidden');
   inputContainer.classList.add('hidden');
   messages.classList.remove('waiting');
+  messages.innerHTML = '';
+  code = '';
+  pendingCode = null;
+  const privacy = document.getElementById('privacyStatus');
+  if (privacy) privacy.classList.add('hidden');
   statusElement.textContent = 'Start a new chat or connect to an existing one';
   updateLogoutButtonVisibility();
   showStatusMessage('Chat ended.');
@@ -749,8 +754,8 @@ async function handleSocketMessage(event) {
         socket.close();
         updateLogoutButtonVisibility();
         return;
-      } else if (message.message.includes('Target client not found or offline')) {
-        showStatusMessage('The other user is offline or not found.');
+      } else if (/Unknown message type/i.test(message.message || '')) {
+        console.warn('Server:', message.message);
       } else {
         showStatusMessage(message.message);
       }

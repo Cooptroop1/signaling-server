@@ -82,10 +82,11 @@ function renderMooseInbox() {
   updateSealedNotesBadge();
   if (!list) return;
   const logged = window.sbAuth && window.sbAuth.isLoggedIn();
-  const panic = window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode();
-  const rows = panic ? [] : (window.pendingInbox || []);
+  const panic = !!(window.__moosePanic);
+  const allowed = !!(window.__notesUnlocked) && !panic;
+  const rows = allowed ? (window.pendingInbox || []) : [];
   if (!logged) return;
-  if (count) count.textContent = panic ? '' : (rows.length ? '(' + rows.length + ')' : '');
+  if (count) count.textContent = allowed && rows.length ? '(' + rows.length + ')' : '';
   if (!rows.length) {
     list.innerHTML = '<p class="text-sm text-gray-500">No sealed notes.</p>';
     return;
@@ -98,7 +99,11 @@ function renderMooseInbox() {
     const openBtn = document.createElement('button');
     openBtn.textContent = 'Open';
     openBtn.onclick = async () => {
-      if (window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode()) return;
+      if (window.__moosePanic || !window.__notesUnlocked) return;
+      if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
+        const ok = await window.loggedFeatures.requireUnlock('Unlock note', true);
+        if (!ok || window.__moosePanic) return;
+      }
       openInboxItem(msg);
     };
     const burnBtn = document.createElement('button');
@@ -115,11 +120,22 @@ function renderMooseInbox() {
 }
 
 async function openSealedNotes() {
+  window.__notesUnlocked = false;
   if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
-    const ok = await window.loggedFeatures.requireUnlock('Unlock notes');
-    const panic = window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode();
-    if (!ok && !panic) return;
+    const ok = await window.loggedFeatures.requireUnlock('Unlock notes', true);
+    if (window.__moosePanic) {
+      window.__notesUnlocked = false;
+      renderMooseInbox();
+      const decoy = document.getElementById('sealedNotesModal');
+      if (decoy) {
+        decoy.classList.remove('hidden');
+        decoy.classList.add('active');
+      }
+      return;
+    }
+    if (!ok) return;
   }
+  window.__notesUnlocked = true;
   renderMooseInbox();
   const m = document.getElementById('sealedNotesModal');
   if (!m) return;
@@ -317,6 +333,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!m) return;
     m.classList.add('hidden');
     m.classList.remove('active');
+    window.__notesUnlocked = false;
+    window.__bookUnlocked = false;
   };
   const ethBtn = document.getElementById('copyEthDonate');
   if (ethBtn) {

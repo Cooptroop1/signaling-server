@@ -24,6 +24,13 @@ async function hashPin(pin) {
   return Array.from(new Uint8Array(buf)).map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 function isPanicMode() { return !!window.__moosePanic; }
+function enterPanicLock() {
+  window.__moosePanic = true;
+  window.__bookUnlocked = false;
+  window.__notesUnlocked = false;
+  if (typeof renderMooseInbox === 'function') renderMooseInbox();
+  if (typeof renderMooseBook === 'function') renderMooseBook();
+}
 function isBookUnlocked() {
   if (!accGet('realPin', '')) return true;
   return !!window.__bookUnlocked && !window.__moosePanic;
@@ -36,22 +43,7 @@ async function requireUnlock(reason, everyTime) {
     return true;
   }
   if (!everyTime && window.__bookUnlocked) return true;
-  if (!everyTime && typeof passkeySupported === 'function' && passkeySupported()) {
-    try {
-      const chal = crypto.getRandomValues(new Uint8Array(32));
-      await navigator.credentials.get({
-        publicKey: {
-          challenge: chal,
-          timeout: 60000,
-          userVerification: 'required',
-          rpId: location.hostname.replace(/^www\./, '')
-        }
-      });
-      window.__bookUnlocked = true;
-      return true;
-    } catch (e) {}
-  }
-  return await promptPinModal(reason || 'Unlock moose book');
+  return await promptPinModal(reason || 'Enter PIN');
 }
 
 function promptPinModal(title) {
@@ -97,21 +89,16 @@ function promptPinModal(title) {
 }
 
 async function checkPinValue(pin) {
+  pin = String(pin || '').trim();
   if (!pin) return false;
   if (typeof isDuressPassword === 'function' && await isDuressPassword(pin)) {
-    window.__moosePanic = true;
-    window.__bookUnlocked = false;
-    if (typeof renderMooseInbox === 'function') renderMooseInbox();
-    if (typeof renderMooseBook === 'function') renderMooseBook();
+    enterPanicLock();
     return false;
   }
   const h = await hashPin(pin);
   const panic = accGet('panicPin', '');
   if (panic && h === panic) {
-    window.__moosePanic = true;
-    window.__bookUnlocked = false;
-    if (typeof renderMooseInbox === 'function') renderMooseInbox();
-    if (typeof renderMooseBook === 'function') renderMooseBook();
+    enterPanicLock();
     return false;
   }
   const real = accGet('realPin', '');
@@ -410,8 +397,8 @@ async function saveSettings() {
 }
 
 async function savePinsFromForm() {
-  const real = (document.getElementById('setRealPin') || {}).value || '';
-  const panic = (document.getElementById('setPanicPin') || {}).value || '';
+  const real = ((document.getElementById('setRealPin') || {}).value || '').trim();
+  const panic = ((document.getElementById('setPanicPin') || {}).value || '').trim();
   if (real && real.length < 4) return alert('PIN must be 4+ digits');
   if (panic && panic === real) return alert('Panic PIN must be different');
   if (real) accSet('realPin', await hashPin(real));
@@ -427,7 +414,10 @@ async function savePinsFromForm() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) window.__bookUnlocked = false;
+  if (document.hidden) {
+    window.__bookUnlocked = false;
+    window.__notesUnlocked = false;
+  }
   if (document.hidden && document.documentElement.classList.contains('shot-guard')) {
     const img = document.getElementById('sealedNoteImg');
     const text = document.getElementById('sealedNoteText');

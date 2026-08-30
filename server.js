@@ -330,22 +330,32 @@ server.on('request', (req, res) => {
           if (mixed) amount = name.length <= 2 ? 3500 : 2000;
           else amount = name.length === 1 ? 5000 : name.length === 2 ? 2500 : 1000;
         }
-        const session = await stripe.checkout.sessions.create({
-          mode: 'payment',
-          success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
-          cancel_url: 'https://www.anonomoose.com/',
-          metadata: { kind, name, userId },
-          line_items: [{
-            quantity: 1,
-            price_data: {
-              currency: 'gbp',
-              unit_amount: amount,
-              product_data: { name: 'Anonomoose name ' + name }
-            }
-          }]
-        });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, url: session.url }));
+        try {
+          const session = await stripe.checkout.sessions.create({
+            mode: 'payment',
+            success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
+            cancel_url: 'https://www.anonomoose.com/',
+            metadata: { kind, name, userId },
+            line_items: [{
+              quantity: 1,
+              price_data: {
+                currency: 'gbp',
+                unit_amount: amount,
+                product_data: { name: 'Anonomoose name ' + name }
+              }
+            }]
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            ok: true,
+            url: session.url,
+            test: String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_')
+          }));
+        } catch (e) {
+          logger.warn('stripe checkout %s', e && e.message);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: (e && e.message) || 'Stripe checkout failed' }));
+        }
         return;
       }
       if (fullUrl.pathname === '/vanity-claim') {

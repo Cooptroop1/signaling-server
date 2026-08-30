@@ -1321,7 +1321,7 @@ async function startTotpRoom(serverGenerated) {
   totpEnabled = true;
   code = generateCode();
   pendingTotpSecret = { display: totpSecret, send: secretToSend };
-  sendJoin().catch(err => {
+  sendJoin({ totpSecret: secretToSend }).catch(err => {
     console.error(err);
     showStatusMessage('Failed to create 2FA room.');
   });
@@ -1344,6 +1344,21 @@ function showTotpSecretModal(secret) {
   qrCanvas.innerHTML = '';
   new QRCode(qrCanvas, generateTotpUri(code, secret));
   document.getElementById('totpSecretModal').classList.add('active');
+}
+function showTotpInputModal(roomCode) {
+  const modal = document.getElementById('totpInputModal');
+  if (!modal) {
+    showStatusMessage('Could not open 2FA box.');
+    return;
+  }
+  modal.dataset.code = roomCode || code || '';
+  modal.classList.add('active');
+  modal.classList.remove('hidden');
+  const input = document.getElementById('totpCodeInput');
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 50);
+  }
 }
 async function joinWithTotp(roomCode, totpCode) {
   if (roomCode) code = roomCode;

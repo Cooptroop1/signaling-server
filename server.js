@@ -560,6 +560,9 @@ function validateMessage(data) {
       if (data.totpCode && typeof data.totpCode !== 'string') {
         return { valid: false, error: 'join: totpCode must be a string if provided' };
       }
+      if (data.totpSecret && (typeof data.totpSecret !== 'string' || data.totpSecret.length > 64)) {
+        return { valid: false, error: 'join: invalid totpSecret' };
+      }
       if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 80 || data.identityPublic.length > 400)) {
         return { valid: false, error: 'join: invalid identityPublic format or length' };
       }
@@ -1130,8 +1133,11 @@ wss.on('connection', (ws, req) => {
           roomState = JSON.parse(await redisClient.get(roomKey));
         }
         const totpKey = `room:${code}:totp`;
+        if (data.totpSecret && clientId === roomState.initiator) {
+          await redisClient.set(totpKey, String(data.totpSecret).toUpperCase(), { EX: 86400 });
+        }
         const roomTotpSecret = await redisClient.get(totpKey);
-        if (roomTotpSecret && !data.totpCode) {
+        if (roomTotpSecret && !data.totpCode && clientId !== roomState.initiator) {
           ws.send(JSON.stringify({ type: 'totp-required', code: data.code }));
           return;
         }

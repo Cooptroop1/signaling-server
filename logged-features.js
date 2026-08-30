@@ -745,11 +745,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const photoToggle = document.getElementById('photoCodeToggle');
   const stegoBox = document.getElementById('stegoBox');
   if (photoToggle && stegoBox) {
-    photoToggle.onclick = () => {
-      const open = stegoBox.classList.toggle('hidden') === false;
+    photoToggle.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const open = stegoBox.classList.toggle('open');
       photoToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     };
   }
+  function labelFilePick(input, fallback) {
+    if (!input) return;
+    input.addEventListener('change', () => {
+      const lab = input.closest('label');
+      if (!lab) return;
+      lab.firstChild.textContent = (input.files && input.files[0] && input.files[0].name) ? input.files[0].name : fallback;
+    });
+  }
+  labelFilePick(document.getElementById('stegoFile'), 'Tap to pick a photo');
+  labelFilePick(document.getElementById('stegoDecodeFile'), 'Tap to pick the photo they sent');
   const encodeStego = document.getElementById('stegoEncodeBtn');
   const stegoFile = document.getElementById('stegoFile');
   if (encodeStego && stegoFile) encodeStego.onclick = async () => {

@@ -101,6 +101,7 @@ function renderMooseInbox() {
       : msg.kind === 'invite' ? 'Room invite'
       : msg.kind === 'voice' ? 'Sealed voice'
       : msg.kind === 'poke' ? 'Moose poked you'
+      : msg.kind === 'call' ? 'Incoming call'
       : 'Sealed note'
     ) + '</div>';
     const openBtn = document.createElement('button');
@@ -229,6 +230,24 @@ async function openInboxItem(msg) {
       await burnInboxItem(msg);
       return;
     }
+    if (parsed && parsed.type === 'call-invite' && parsed.code) {
+      const act = await showSealedNoteView({
+        from: fromName,
+        meta: 'Voice call',
+        text: 'Answer? This burns after you choose.',
+        code: parsed.code
+      });
+      if (act === 'join') {
+        window.__answerCall = true;
+        await playBurnFlash();
+        await burnInboxItem(msg);
+        if (typeof autoConnect === 'function') autoConnect(parsed.code);
+        return;
+      }
+      await playBurnFlash();
+      await burnInboxItem(msg);
+      return;
+    }
     if (parsed && parsed.type === 'connection-request' && parsed.code) {
       const act = await showSealedNoteView({
         from: fromName,
@@ -327,6 +346,21 @@ function renderMooseBook() {
     row.appendChild(circleSel);
     row.appendChild(trustBtn);
     row.appendChild(openBtn);
+    if (entry.public_key && !blocked) {
+      const callBtn = document.createElement('button');
+      callBtn.textContent = 'Call';
+      callBtn.onclick = async () => {
+        if (typeof inviteEncryptedChat === 'function') {
+          await inviteEncryptedChat(entry.name, entry.public_key, { call: true });
+          const m = document.getElementById('mooseBookModal');
+          if (m) {
+            m.classList.add('hidden');
+            m.classList.remove('active');
+          }
+        }
+      };
+      row.appendChild(callBtn);
+    }
     row.appendChild(blockBtn);
     list.appendChild(row);
   });

@@ -287,6 +287,17 @@ function subscribeInbox(uid) {
       const row = mapRow(payload.new);
       window.pendingInbox = (window.pendingInbox || []).concat([row]);
       if (typeof renderMooseInbox === 'function') renderMooseInbox();
+      if (row.kind === 'call') {
+        try {
+          if (window.Notification && Notification.permission === 'granted') {
+            new Notification('Anonomoose', { body: 'Incoming call', silent: false });
+          } else if (window.Notification && Notification.permission === 'default') {
+            Notification.requestPermission();
+          }
+        } catch (e) {}
+        if (typeof handleIncomingCallRow === 'function') handleIncomingCallRow(row);
+        else if (typeof showStatusMessage === 'function') showStatusMessage('Incoming call');
+      }
       if (row.kind === 'poke') {
         try {
           if (window.Notification && Notification.permission === 'granted') {

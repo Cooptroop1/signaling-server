@@ -2436,6 +2436,23 @@ function showUserSearchResult(searchedUsername, message) {
       }
     };
     searchResult.appendChild(inviteBtn);
+    const callBtn = document.createElement('button');
+    callBtn.textContent = on ? 'Call now' : 'Call (missed call if offline)';
+    callBtn.onclick = async () => {
+      if (callBtn.disabled) return;
+      callBtn.disabled = true;
+      const prev = callBtn.textContent;
+      callBtn.textContent = 'Calling…';
+      try {
+        await inviteEncryptedChat(searchedUsername, message.public_key, { call: true });
+        document.getElementById('searchUserModal').classList.remove('active');
+        document.getElementById('searchUserModal').classList.add('hidden');
+      } finally {
+        callBtn.disabled = false;
+        callBtn.textContent = prev;
+      }
+    };
+    searchResult.appendChild(callBtn);
     const blockBtn = document.createElement('button');
     blockBtn.textContent = 'Block';
     blockBtn.className = 'block';
@@ -2615,14 +2632,16 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   }
 }
 
-async function inviteEncryptedChat(toUsername, theirPub) {
+async function inviteEncryptedChat(toUsername, theirPub, opts) {
+  opts = opts || {};
+  const isCall = !!opts.call;
   if (!theirPub) {
     showStatusMessage('That user has no encryption key.');
     return;
   }
-  const lockKey = 'invite:' + String(toUsername).toLowerCase();
+  const lockKey = (isCall ? 'call:' : 'invite:') + String(toUsername).toLowerCase();
   if (offlineSendLock.has(lockKey)) {
-    showStatusMessage('Invite already sending.');
+    showStatusMessage(isCall ? 'Call already ringing.' : 'Invite already sending.');
     return;
   }
   offlineSendLock.add(lockKey);
@@ -2635,13 +2654,19 @@ async function inviteEncryptedChat(toUsername, theirPub) {
   const alreadyInRoom = !!(code && chatContainer && !chatContainer.classList.contains('hidden'));
   if (!alreadyInRoom) code = generateCode();
   const messageId = generateMessageId();
-  const plaintext = JSON.stringify({ type: 'connection-request', code, from: username, identity: identityPubB64 || '' });
+  const plaintext = JSON.stringify({
+    type: isCall ? 'call-invite' : 'connection-request',
+    code,
+    from: username,
+    identity: identityPubB64 || ''
+  });
   try {
     await ensurePersistentKeys();
     const sealed = await sealOfflinePayload(theirPub, toUsername, plaintext, messageId);
     sealed.messageId = messageId;
+    const ttl = isCall ? 30 * 60 * 1000 : 10 * 60 * 1000;
     if (window.sbAuth && window.sbAuth.isLoggedIn()) {
-      await window.sbAuth.sendOffline(toUsername, sealed, { kind: 'invite', expiresAt: Date.now() + 10 * 60 * 1000 });
+      await window.sbAuth.sendOffline(toUsername, sealed, { kind: isCall ? 'call' : 'invite', expiresAt: Date.now() + ttl });
     } else {
       socket.send(JSON.stringify({
         type: 'send-offline-message',
@@ -2654,24 +2679,68 @@ async function inviteEncryptedChat(toUsername, theirPub) {
         token
       }));
     }
+    if (isCall) window.__outgoingCall = true;
     if (!alreadyInRoom) await sendJoin();
-    showStatusMessage('Sealed invite sent. They tap Open in their inbox to join.');
+    else if (isCall && typeof startVoiceCall === 'function') startVoiceCall();
+    showStatusMessage(isCall
+      ? 'Calling… they ring if the app is open, otherwise a missed call in Sealed Notes.'
+      : 'Sealed invite sent. They tap Open in their inbox to join.');
   } catch (err) {
     console.error(err);
-    showStatusMessage('Failed to send invite: ' + (err.message || 'unknown error'));
+    showStatusMessage('Failed to send ' + (isCall ? 'call' : 'invite') + ': ' + (err.message || 'unknown error'));
     offlineSendLock.delete(lockKey);
+    window.__outgoingCall = false;
   } finally {
     setTimeout(() => offlineSendLock.delete(lockKey), 2500);
   }
 }
 
-function showIncomingInvite(fromUser, inviteCode, dbId) {
+function stopCallRing() {
+  if (window.__callRingTimer) {
+    clearTimeout(window.__callRingTimer);
+    window.__callRingTimer = null;
+  }
+  try { if (window.__callRingCtx) window.__callRingCtx.close(); } catch (e) {}
+  window.__callRingCtx = null;
+}
+
+function startCallRing() {
+  stopCallRing();
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    window.__callRingCtx = ctx;
+    const beep = () => {
+      if (!window.__callRingCtx) return;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = 880;
+      g.gain.value = 0.06;
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + 0.18);
+      window.__callRingTimer = setTimeout(beep, 1200);
+    };
+    beep();
+  } catch (e) {}
+}
+
+function showIncomingInvite(fromUser, inviteCode, dbId, isCall) {
   const modal = document.getElementById('incomingConnectionModal');
+  const title = modal && modal.querySelector('h2');
   const label = document.getElementById('incomingMessage');
-  if (label) label.textContent = `${fromUser} wants to connect. Accept?`;
   const accept = document.getElementById('acceptButton');
   const deny = document.getElementById('denyButton');
+  if (title) title.textContent = isCall ? 'Incoming call' : 'Incoming connection';
+  if (label) label.textContent = isCall
+    ? (fromUser + ' is calling. Answer?')
+    : (fromUser + ' wants to connect. Accept?');
+  if (accept) accept.textContent = isCall ? 'Answer' : 'Accept';
+  if (deny) deny.textContent = isCall ? 'Decline' : 'Deny';
+  if (isCall) startCallRing();
   const closeInvite = () => {
+    stopCallRing();
     if (!modal) return;
     modal.classList.remove('active');
     modal.classList.add('hidden');
@@ -2679,6 +2748,7 @@ function showIncomingInvite(fromUser, inviteCode, dbId) {
   if (accept) {
     accept.onclick = () => {
       if (dbId) confirmOfflineMessage(dbId);
+      if (isCall) window.__answerCall = true;
       autoConnect(inviteCode);
       closeInvite();
     };
@@ -2694,6 +2764,19 @@ function showIncomingInvite(fromUser, inviteCode, dbId) {
     modal.classList.add('active');
   }
 }
+
+async function handleIncomingCallRow(row) {
+  if (!row || window.__moosePanic) return;
+  try {
+    const opened = await openOfflinePayload(row);
+    let parsed = null;
+    try { parsed = JSON.parse(opened); } catch (e) {}
+    if (parsed && parsed.type === 'call-invite' && parsed.code) {
+      showIncomingInvite(parsed.from || 'Someone', parsed.code, row.id, true);
+    }
+  } catch (e) {}
+}
+window.handleIncomingCallRow = handleIncomingCallRow;
 
 function showRecoveryKitModal(kit) {
   const modal = document.getElementById('recoveryKitModal');

@@ -470,6 +470,13 @@ function setupDataChannel(dataChannel, targetId) {
     updateUIState(true, true);
     clearTimeout(connectionTimeouts.get(targetId));
     retryCounts.delete(targetId);
+    if (window.__answerCall || window.__outgoingCall) {
+      window.__answerCall = false;
+      window.__outgoingCall = false;
+      setTimeout(() => {
+        if (typeof startVoiceCall === 'function') startVoiceCall();
+      }, 500);
+    }
     updateMaxClientsUI();
     document.getElementById('messageInput')?.focus();
     if (voiceCallActive) {

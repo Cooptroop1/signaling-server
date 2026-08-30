@@ -334,7 +334,26 @@ async function sendJoin(extra) {
     sbAccess: (window.__sbSession && window.__sbSession.access_token) || undefined
   }, extra)));
 }
+function readP2pOnly() {
+  return !!(
+    document.getElementById('p2pOnlyCheckStart')?.checked ||
+    document.getElementById('p2pOnlyCheck')?.checked ||
+    document.getElementById('p2pOnlyCheckConnect')?.checked
+  );
+}
+function syncLinkToggles(src) {
+  if (!src) return;
+  const p2pIds = ['p2pOnlyCheckStart', 'p2pOnlyCheck', 'p2pOnlyCheckConnect'];
+  const lanIds = ['lanDropCheckStart', 'lanDropCheck', 'lanDropCheckConnect'];
+  const ids = p2pIds.includes(src.id) ? p2pIds : lanIds.includes(src.id) ? lanIds : null;
+  if (!ids) return;
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && el !== src) el.checked = src.checked;
+  });
+}
 function enterHostedRoom() {
+  p2pOnly = readP2pOnly();
   initialContainer.classList.add('hidden');
   usernameContainer.classList.add('hidden');
   connectContainer.classList.add('hidden');
@@ -1772,6 +1791,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
   updateLogoutButtonVisibility();
+  ['p2pOnlyCheckStart', 'p2pOnlyCheck', 'p2pOnlyCheckConnect', 'lanDropCheckStart', 'lanDropCheck', 'lanDropCheckConnect'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', (e) => syncLinkToggles(e.target));
+  });
   document.getElementById('startChatToggleButton').onclick = () => {
     console.log('Start chat toggle clicked');
     if (window.sbAuth && window.sbAuth.isLoggedIn() && validateUsername(username)) {
@@ -1878,7 +1900,7 @@ document.addEventListener('DOMContentLoaded', () => {
     username = usernameInput;
     rememberUsername(username);
     const p2pBox = document.getElementById('p2pOnlyCheck');
-    p2pOnly = !!(p2pBox && p2pBox.checked);
+    p2pOnly = readP2pOnly();
     if (window.pendingJoinCode && validateCode(window.pendingJoinCode)) {
       const joinCode = window.pendingJoinCode;
       window.pendingJoinCode = null;
@@ -1925,7 +1947,7 @@ document.addEventListener('DOMContentLoaded', () => {
     username = usernameInput;
     rememberUsername(username);
     const p2pBoxConnect = document.getElementById('p2pOnlyCheckConnect');
-    p2pOnly = !!(p2pBoxConnect && p2pBoxConnect.checked);
+    p2pOnly = readP2pOnly();
     code = inputCode;
     codeDisplayElement.textContent = `Using code: ${code}`;
     codeDisplayElement.classList.remove('hidden');

@@ -481,7 +481,8 @@ function bindWatchBurn() {
 function dropSignalingAfterP2P() {
   const a = document.getElementById('lanDropCheck');
   const b = document.getElementById('lanDropCheckConnect');
-  const on = (a && a.checked) || (b && b.checked);
+  const c = document.getElementById('lanDropCheckStart');
+  const on = (a && a.checked) || (b && b.checked) || (c && c.checked);
   if (!on) return;
   window.__lanLock = true;
   try {

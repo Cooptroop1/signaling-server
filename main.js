@@ -964,6 +964,7 @@ async function autoConnect(codeParam) {
     return;
   }
   code = codeParam;
+  p2pOnly = (typeof readP2pOnly === 'function') ? readP2pOnly() : p2pOnly;
   updateUIState(false, true);
   codeDisplayElement.classList.add('hidden');
   copyCodeButton?.classList.add('hidden');

@@ -1834,7 +1834,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('customTotpSecretContainer').classList.add('hidden');
     document.querySelector('input[name="totpType"][value="server"]').checked = true;
   };
-  document.getElementById('connect2FAChatButton').onclick = () => {
+  const connect2FABtn = document.getElementById('connect2FAChatButton');
+  if (connect2FABtn) connect2FABtn.onclick = () => {
     initialContainer.classList.add('hidden');
     usernameContainer.classList.add('hidden');
     connectContainer.classList.remove('hidden');

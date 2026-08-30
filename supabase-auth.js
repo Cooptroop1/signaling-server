@@ -130,7 +130,6 @@ async function applyLoggedInSession(session) {
     try {
       if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
     } catch (e) {}
-    if (typeof unlockCallAudio === 'function') unlockCallAudio();
   }
   if (!session || !session.user) {
     stopInbox();

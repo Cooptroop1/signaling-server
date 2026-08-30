@@ -117,7 +117,7 @@ async function checkPinValue(pin) {
     if (typeof playBurnFlash === 'function') {
       playBurnFlash().then(() => {
         if (typeof burnAccountLocal === 'function') burnAccountLocal();
-        if (typeof showStatusMessage === 'function') showStatusMessage('Three wrong PINs — book and notes burned on this phone.');
+        if (typeof showStatusMessage === 'function') showStatusMessage('Three wrong PINs — book and notes burned on this device.');
       });
     } else if (typeof burnAccountLocal === 'function') {
       burnAccountLocal();
@@ -412,7 +412,7 @@ async function savePinsFromForm() {
   }
   document.getElementById('setRealPin').value = '';
   document.getElementById('setPanicPin').value = '';
-  if (typeof showStatusMessage === 'function') showStatusMessage('PIN saved on this phone only.');
+  if (typeof showStatusMessage === 'function') showStatusMessage('PINs saved on this device only.');
 }
 
 document.addEventListener('visibilitychange', () => {

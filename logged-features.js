@@ -749,8 +749,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!chatOn) {
       username = (username || sessionStorage.getItem('username') || localStorage.getItem('username') || '').trim();
       if (typeof validateUsername !== 'function' || !validateUsername(username)) {
-        alert('Put your name in first: tap Start Chat, type a name, come back and hide the photo — or log in.');
-        document.getElementById('startChatToggleButton')?.click();
+        window.pendingStegoEncode = true;
+        document.getElementById('initialContainer')?.classList.add('hidden');
+        document.getElementById('usernameContainer')?.classList.remove('hidden');
+        if (typeof statusElement !== 'undefined' && statusElement) {
+          statusElement.textContent = 'Enter a name — then we hide the code and open the room.';
+        }
+        document.getElementById('usernameInput')?.focus();
         return;
       }
       if (typeof generateCode === 'function' && (typeof validateCode !== 'function' || !validateCode(code))) {

@@ -992,30 +992,14 @@ async function autoConnect(codeParam) {
       updateFeaturesUI();
     } else {
       console.log('No valid username, prompting for username');
+      window.pendingJoinCode = codeParam;
+      initialContainer.classList.add('hidden');
+      connectContainer.classList.add('hidden');
       usernameContainer.classList.remove('hidden');
       chatContainer.classList.add('hidden');
-      statusElement.textContent = 'Please enter a username to join the chat';
+      statusElement.textContent = 'Enter a name to join their room';
       document.getElementById('usernameInput').value = username || '';
       document.getElementById('usernameInput')?.focus();
-      document.getElementById('joinWithUsernameButton').onclick = () => {
-        const usernameInput = document.getElementById('usernameInput').value.trim();
-        if (!validateUsername(usernameInput)) {
-          showStatusMessage('Invalid username: 1-16 alphanumeric characters.');
-          document.getElementById('usernameInput')?.focus();
-          return;
-        }
-        username = usernameInput;
-        rememberUsername(username);
-        usernameContainer.classList.add('hidden');
-        chatContainer.classList.remove('hidden');
-        codeDisplayElement.textContent = `Using code: ${code}`;
-        codeDisplayElement.classList.remove('hidden');
-        copyCodeButton?.classList.remove('hidden');
-        messages.classList.add('waiting');
-        statusElement.textContent = 'Waiting for connection...';
-        socket.send(JSON.stringify({ type: 'check-totp', code, clientId, token }));
-        document.getElementById('messageInput')?.focus();
-      };
     }
   } else {
     console.log('Invalid code, showing initial container');

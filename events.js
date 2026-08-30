@@ -1879,6 +1879,20 @@ document.addEventListener('DOMContentLoaded', () => {
     rememberUsername(username);
     const p2pBox = document.getElementById('p2pOnlyCheck');
     p2pOnly = !!(p2pBox && p2pBox.checked);
+    if (window.pendingJoinCode && validateCode(window.pendingJoinCode)) {
+      const joinCode = window.pendingJoinCode;
+      window.pendingJoinCode = null;
+      usernameContainer.classList.add('hidden');
+      autoConnect(joinCode);
+      return;
+    }
+    if (window.pendingStegoEncode) {
+      window.pendingStegoEncode = false;
+      usernameContainer.classList.add('hidden');
+      initialContainer.classList.remove('hidden');
+      document.getElementById('stegoEncodeBtn')?.click();
+      return;
+    }
     code = generateCode();
     codeDisplayElement.textContent = `Your code: ${code}`;
     codeDisplayElement.classList.remove('hidden');
@@ -1930,6 +1944,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   document.getElementById('backButton').onclick = () => {
     console.log('Back button clicked from usernameContainer');
+    window.pendingJoinCode = null;
+    window.pendingStegoEncode = false;
     usernameContainer.classList.add('hidden');
     initialContainer.classList.remove('hidden');
     connectContainer.classList.add('hidden');

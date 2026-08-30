@@ -316,20 +316,41 @@ server.on('request', (req, res) => {
           return;
         }
         let amount = 500;
-        if (kind === 'number') {
-          const n = parseInt(name, 10);
-          if (n === 1 || n === 7) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: 'That number is not for sale' }));
-            return;
+        try {
+          const headers = { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY };
+          if (kind === 'number') {
+            const n = parseInt(name, 10);
+            if (n === 1 || n === 7) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: 'That number is not for sale' }));
+              return;
+            }
+            const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + n + '&select=buy_now_cents,price_cents,held_forever,status', { headers });
+            const rows = await vr.json();
+            const row = Array.isArray(rows) ? rows[0] : null;
+            if (row && (row.held_forever || row.status === 'sold')) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: 'That number is not for sale' }));
+              return;
+            }
+            const a = Number(row && row.buy_now_cents) || 0;
+            const b = Number(row && row.price_cents) || 0;
+            amount = Math.max(a, b) || (n <= 9 ? 25000 : n <= 99 ? 10000 : 5000);
+          } else {
+            const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(name) + '&select=price_cents,status', { headers });
+            const rows = await vr.json();
+            const row = Array.isArray(rows) ? rows[0] : null;
+            if (row && row.status === 'sold') {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: 'Already sold' }));
+              return;
+            }
+            amount = (row && row.price_cents) || 10000;
           }
-          amount = n <= 9 ? 2500 : n <= 99 ? 1000 : 500;
-          if ([2,3,4,5,6,8,9].includes(n)) amount = ({ 2: 10000, 3: 8000, 4: 6000, 5: 8000, 6: 5000, 8: 5000, 9: 8000 })[n];
-        } else {
-          const mixed = /[0-9]/.test(name) && /[A-Za-z]/.test(name);
-          if (mixed) amount = name.length <= 2 ? 3500 : 2000;
-          else amount = name.length === 1 ? 5000 : name.length === 2 ? 2500 : 1000;
+        } catch (e) {
+          logger.warn('vanity price lookup %s', e && e.message);
         }
+        amount = Math.max(100, parseInt(amount, 10) || 500);
         try {
           const session = await stripe.checkout.sessions.create({
             mode: 'payment',

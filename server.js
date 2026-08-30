@@ -136,24 +136,95 @@ try {
 } catch (e) { logger.warn('stripe %s', e.message); }
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-async function supabaseAdmin(path, method, payload) {
-  const key = SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
+async function supabaseAs(path, method, payload, bearer) {
+  const key = bearer || SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error('No key to write name');
   const r = await fetch(SUPABASE_URL + path, {
     method: method || 'POST',
     headers: {
-      apikey: key,
+      apikey: SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY,
       Authorization: 'Bearer ' + key,
       'Content-Type': 'application/json',
-      Prefer: 'return=representation'
+      Prefer: 'return=minimal'
     },
     body: payload ? JSON.stringify(payload) : undefined
   });
   const text = await r.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
-  if (!r.ok) throw new Error((data && (data.message || data.error)) || text || ('Supabase ' + r.status));
-  return data;
+  if (!r.ok && r.status !== 409) {
+    let msg = text;
+    try { const j = JSON.parse(text); msg = j.message || j.error || j.hint || text; } catch (e) {}
+    throw new Error(msg || ('Supabase ' + r.status));
+  }
+  return true;
+}
+
+async function attachPaidName(userId, name, sessionId, amount, userAccess) {
+  const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
+  const kind = /^\d+$/.test(nm) ? 'number' : 'letter';
+  const payload = { p_user: userId, p_name: nm, p_session: sessionId, p_amount: amount };
+  if (SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_paid', {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      const text = await r.text();
+      let row = null;
+      try { row = text ? JSON.parse(text) : null; } catch (e) {}
+      if (r.ok && row && row.ok !== false) return true;
+      logger.warn('moose_apply_paid %s', (row && row.error) || text);
+    } catch (e) {
+      logger.warn('moose_apply_paid %s', e.message);
+    }
+    try {
+      await supabaseAs('/rest/v1/owned_names', 'POST', { name: nm, user_id: userId, kind });
+    } catch (e) {
+      logger.warn('owned_names insert %s', e.message);
+    }
+    if (kind === 'number') {
+      await supabaseAs('/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10), 'PATCH', {
+        status: 'sold', owner_id: userId
+      });
+    } else {
+      try {
+        await supabaseAs('/rest/v1/vanity_letters', 'POST', {
+          name: nm, status: 'sold', owner_id: userId, price_cents: amount || 1000
+        });
+      } catch (e) {
+        await supabaseAs('/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm), 'PATCH', {
+          status: 'sold', owner_id: userId
+        });
+      }
+    }
+    try {
+      await supabaseAs('/rest/v1/vanity_receipts', 'POST', {
+        session_id: sessionId, user_id: userId, name: nm, amount_cents: amount || 0
+      });
+    } catch (e) {}
+    return true;
+  }
+  if (userAccess) {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_purchase', {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: 'Bearer ' + userAccess,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ p_name: nm })
+    });
+    const text = await r.text();
+    let row = null;
+    try { row = text ? JSON.parse(text) : null; } catch (e) {}
+    if (r.ok && row && row.ok !== false) return true;
+    throw new Error((row && row.error) || text || 'Could not attach name');
+  }
+  throw new Error('Add SUPABASE_SERVICE_ROLE_KEY on Render so paid names can be saved');
 }
 
 async function lookupVanityAmount(kind, name) {
@@ -175,7 +246,7 @@ async function lookupVanityAmount(kind, name) {
   return { amount: Math.max(100, Number(row && row.price_cents) || 10000) };
 }
 
-async function fulfillPaidSession(session) {
+async function fulfillPaidSession(session, userAccess) {
   const paid = session && (session.payment_status === 'paid' || session.status === 'complete');
   if (!paid) return { ok: false, error: 'Payment not complete yet' };
   const name = session.metadata && session.metadata.name;
@@ -185,11 +256,12 @@ async function fulfillPaidSession(session) {
   const paidAmount = Number(session.amount_total) || 0;
   if (!name || !userId) return { ok: false, error: 'Missing payment details' };
   let expected = locked;
-  if (!expected) {
-    const live = await lookupVanityAmount(kind, name);
-    expected = live.amount || 0;
+  if (locked && paidAmount < locked) {
+    return { ok: false, error: 'Paid amount does not match the shop price' };
   }
-  if (!expected || paidAmount < expected) return { ok: false, error: 'Paid amount does not match the shop price' };
+  if (!locked && paidAmount < 100) {
+    return { ok: false, error: 'Paid amount does not match the shop price' };
+  }
   const doneKey = 'vanity:done:' + session.id;
   try {
     const already = await redisClient.get(doneKey);
@@ -197,12 +269,7 @@ async function fulfillPaidSession(session) {
   } catch (e) {}
   await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
   try {
-    await supabaseAdmin('/rest/v1/rpc/moose_apply_paid', 'POST', {
-      p_user: userId,
-      p_name: name,
-      p_session: session.id,
-      p_amount: paidAmount
-    });
+    await attachPaidName(userId, name, session.id, paidAmount, userAccess);
     await redisClient.set(doneKey, name, { EX: 30 * 24 * 3600 });
     return { ok: true, name, userId, applied: true };
   } catch (e) {
@@ -437,7 +504,7 @@ server.on('request', (req, res) => {
         }
         const session = await stripe.checkout.sessions.retrieve(sessionId);
         const claimedUser = String(body.userId || '');
-        const result = await fulfillPaidSession(session);
+        const result = await fulfillPaidSession(session, body.access || '');
         if (claimedUser && result.userId && claimedUser !== result.userId) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'This payment belongs to another account' }));

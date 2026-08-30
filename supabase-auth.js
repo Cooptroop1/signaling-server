@@ -787,6 +787,10 @@ async function finishVanityReturn() {
         })
       });
       const data = await r.json();
+      if (data && data.error && !data.applied) {
+        if (typeof showStatusMessage === 'function') showStatusMessage(data.error);
+        shopNote(data.error);
+      }
       if (data && data.name) paidName = data.name;
       const ok = await applyBoughtName(paidName, !!(data && data.applied));
       if (ok) {

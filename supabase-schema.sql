@@ -599,11 +599,43 @@ create or replace function public.moose_apply_purchase(p_name text)
 returns jsonb
 language plpgsql security definer set search_path = public
 as $$
+declare
+  me uuid := auth.uid();
+  nm text;
+  n int;
 begin
-  return jsonb_build_object('ok', false, 'error', 'Pay first');
+  if me is null then
+    return jsonb_build_object('ok', false, 'error', 'Log in first');
+  end if;
+  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
+  if char_length(nm) < 1 or char_length(nm) > 16 then
+    return jsonb_build_object('ok', false, 'error', 'Bad name');
+  end if;
+  if exists (select 1 from public.owned_names o where lower(o.name) = lower(nm) and o.user_id <> me) then
+    return jsonb_build_object('ok', false, 'error', 'Already owned');
+  end if;
+  if nm ~ '^[0-9]+$' then
+    n := nm::int;
+    if n < 1 or n > 999 or n in (1, 7) then
+      return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
+    end if;
+    update public.vanity_numbers
+      set status = 'sold', owner_id = me, updated_at = now()
+      where vanity_numbers.n = n and coalesce(held_forever, false) = false
+        and (coalesce(status, 'held') <> 'sold' or owner_id = me);
+  else
+    insert into public.vanity_letters (name, status, owner_id, price_cents)
+    values (nm, 'sold', me, 1000)
+    on conflict (name) do update
+      set status = 'sold', owner_id = me
+      where vanity_letters.owner_id is null or vanity_letters.owner_id = me;
+  end if;
+  insert into public.owned_names (name, user_id, kind)
+  values (nm, me, case when nm ~ '^[0-9]+$' then 'number' else 'letter' end)
+  on conflict do nothing;
+  return jsonb_build_object('ok', true, 'name', nm);
 end;
 $$;
-revoke all on function public.moose_apply_purchase(text) from public, anon;
 grant execute on function public.moose_apply_purchase(text) to authenticated;
 do $$
 begin

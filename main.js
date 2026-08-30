@@ -35,8 +35,7 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
   timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
   messageDiv.appendChild(timeSpan);
   const nameSpan = document.createElement('span');
-  nameSpan.className = claimed ? 'claimed-name' : 'guest-name';
-  nameSpan.textContent = username + ': ';
+  fillClaimedName(nameSpan, username, claimed);
   messageDiv.appendChild(nameSpan);
   if (type === 'image' || type === 'voice' || type === 'file') {
     let element;

@@ -1204,8 +1204,7 @@ async function handleSocketMessage(event) {
         timeSpan.textContent = new Date(timestamp).toLocaleTimeString();
         messageDiv.appendChild(timeSpan);
         const nameSpan = document.createElement('span');
-        nameSpan.className = claimed ? 'claimed-name' : 'guest-name';
-        nameSpan.textContent = senderUsername + ': ';
+        fillClaimedName(nameSpan, senderUsername, claimed);
         messageDiv.appendChild(nameSpan);
         let mime = message.mime;
         if (contentType === 'message') {
@@ -1492,7 +1491,16 @@ function updateDots() {
       menu.className = 'user-menu';
       const label = document.createElement('div');
       label.textContent = claimed ? name + ' · logged in' : name;
-      label.style.cssText = 'padding:0.4rem 0.6rem;font-size:0.75rem;border-bottom:1px solid #eee;color:' + (claimed ? '#dc2626' : '#374151') + ';font-weight:' + (claimed ? '800' : '500') + ';';
+      label.style.cssText = 'padding:0.4rem 0.6rem;font-size:0.75rem;border-bottom:1px solid #eee;color:' + (claimed ? '#dc2626' : '#374151') + ';font-weight:' + (claimed ? '800' : '500') + ';display:flex;align-items:center;gap:4px;';
+      if (claimed) {
+        const b = document.createElement('img');
+        b.className = 'moose-badge';
+        b.src = '/192.png';
+        b.alt = '';
+        b.width = 14;
+        b.height = 14;
+        label.appendChild(b);
+      }
       const kickButton = document.createElement('button');
       kickButton.textContent = 'Kick';
       kickButton.onclick = (e) => { e.stopPropagation(); kickUser(targetId); };

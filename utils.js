@@ -17,6 +17,21 @@ function sanitizeMessage(content) {
   return DOMPurify.sanitize(content, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); // Plain text only, no HTML
 }
 
+function fillClaimedName(span, name, claimed) {
+  span.className = claimed ? 'claimed-name' : 'guest-name';
+  span.textContent = name;
+  if (claimed) {
+    const badge = document.createElement('img');
+    badge.className = 'moose-badge';
+    badge.src = '/192.png';
+    badge.alt = '';
+    badge.width = 14;
+    badge.height = 14;
+    span.appendChild(badge);
+  }
+  span.appendChild(document.createTextNode(': '));
+}
+
 function generateMessageId() {
   if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
   const bytes = window.crypto.getRandomValues(new Uint8Array(16));

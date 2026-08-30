@@ -735,14 +735,15 @@ async function applyBoughtName(name) {
 
 async function loadMooseShop() {
   const wrap = document.getElementById('vanityShopWrap');
-  if (!sb || !wrap) return;
+  if (!wrap) return;
+  wrap.classList.add('hidden');
+  if (!sb) return;
   try {
-    const { data } = await sb.from('moose_shop').select('numbers_on, letters_on, stripe_ready').eq('id', 1).maybeSingle();
-    wrap.classList.toggle('hidden', !(data && (data.numbers_on || data.letters_on)));
-    window.__mooseShop = data || {};
-  } catch (e) {
-    wrap.classList.add('hidden');
-  }
+    const { data, error } = await sb.from('moose_shop').select('numbers_on, letters_on').eq('id', 1).maybeSingle();
+    if (error || !data) return;
+    window.__mooseShop = data;
+    if (data.numbers_on === true || data.letters_on === true) wrap.classList.remove('hidden');
+  } catch (e) {}
 }
 
 async function checkMooseNumber(raw) {

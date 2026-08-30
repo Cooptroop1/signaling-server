@@ -326,7 +326,9 @@ server.on('request', (req, res) => {
           amount = n <= 9 ? 2500 : n <= 99 ? 1000 : 500;
           if ([2,3,4,5,6,8,9].includes(n)) amount = ({ 2: 10000, 3: 8000, 4: 6000, 5: 8000, 6: 5000, 8: 5000, 9: 8000 })[n];
         } else {
-          amount = name.length === 1 ? 5000 : name.length === 2 ? 2500 : 1000;
+          const mixed = /[0-9]/.test(name) && /[A-Za-z]/.test(name);
+          if (mixed) amount = name.length <= 2 ? 3500 : 2000;
+          else amount = name.length === 1 ? 5000 : name.length === 2 ? 2500 : 1000;
         }
         const session = await stripe.checkout.sessions.create({
           mode: 'payment',

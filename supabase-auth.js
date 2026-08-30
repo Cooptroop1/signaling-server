@@ -767,8 +767,10 @@ async function checkMooseNumber(raw) {
 }
 
 async function checkMooseLetter(raw) {
-  const name = String(raw || '').replace(/[^A-Za-z]/g, '');
-  if (name.length < 1 || name.length > 3) return { ok: false, error: 'Use 1 to 3 letters' };
+  const name = String(raw || '').replace(/[^A-Za-z0-9]/g, '');
+  if (name.length < 1 || name.length > 3) return { ok: false, error: 'Use 1 to 3 letters or numbers, like Ace, AA1, 12A' };
+  if (/^[0-9]+$/.test(name)) return checkMooseNumber(name);
+  if (!sb) return { ok: false, error: 'Not ready' };
   if (!sb) return { ok: false, error: 'Not ready' };
   try {
     const { data, error } = await sb.rpc('moose_letter_check', { p_name: name });
@@ -795,8 +797,8 @@ function setVanityTab(tab) {
   const tl = document.getElementById('vanityTabLet');
   if (input) {
     input.value = '';
-    input.maxLength = tab === 'letter' ? 3 : 3;
-    input.placeholder = tab === 'letter' ? 'A to ZZZ' : '1 to 999';
+    input.maxLength = 3;
+    input.placeholder = tab === 'letter' ? 'Ace, AA1, 12A' : '1 to 999';
     input.inputMode = tab === 'letter' ? 'text' : 'numeric';
   }
   if (tn) tn.className = tab === 'number' ? 'bg-gray-800 text-white px-3 py-1 rounded text-sm' : 'bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm';

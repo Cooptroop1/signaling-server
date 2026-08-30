@@ -289,7 +289,7 @@ create table if not exists public.vanity_letters (
   price_cents int not null default 1000,
   gold boolean default false,
   updated_at timestamptz default now(),
-  constraint vanity_letter_format check (name ~ '^[A-Za-z]{1,3}$')
+  constraint vanity_letter_format check (name ~ '^[A-Za-z0-9]{1,3}$')
 );
 alter table public.vanity_letters enable row level security;
 drop policy if exists "letters read" on public.vanity_letters;
@@ -319,18 +319,31 @@ declare
   v public.vanity_letters%rowtype;
   nm text;
   price int;
+  mixed boolean := false;
+  as_num int;
 begin
-  nm := regexp_replace(trim(p_name), '[^A-Za-z]', '', 'g');
+  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
   if char_length(nm) < 1 or char_length(nm) > 3 then
-    return jsonb_build_object('ok', false, 'error', 'Use 1 to 3 letters');
+    return jsonb_build_object('ok', false, 'error', 'Use 1 to 3 letters or numbers, like Ace, AA1, 12A');
   end if;
+  if nm ~ '^[0-9]+$' then
+    as_num := nm::int;
+    if as_num >= 1 and as_num <= 999 then
+      return public.moose_number_check(as_num);
+    end if;
+  end if;
+  mixed := nm ~ '[0-9]' and nm ~ '[A-Za-z]';
   select * into shop from public.moose_shop where id = 1;
-  price := case char_length(nm) when 1 then 5000 when 2 then 2500 else 1000 end;
+  if mixed then
+    price := case char_length(nm) when 1 then 5000 when 2 then 3500 else 2000 end;
+  else
+    price := case char_length(nm) when 1 then 5000 when 2 then 2500 else 1000 end;
+  end if;
   select * into v from public.vanity_letters where lower(name) = lower(nm);
   if found then
     return jsonb_build_object(
       'ok', true, 'kind', 'letter', 'name', v.name, 'status', v.status,
-      'price_cents', v.price_cents, 'gold', coalesce(v.gold, false),
+      'price_cents', v.price_cents, 'gold', coalesce(v.gold, mixed or char_length(nm) = 1),
       'shop_on', coalesce(shop.letters_on, false),
       'available', (v.status = 'listed' and coalesce(shop.letters_on, false))
     );
@@ -338,7 +351,7 @@ begin
   return jsonb_build_object(
     'ok', true, 'kind', 'letter', 'name', nm, 'status',
     case when coalesce(shop.letters_on, false) then 'listed' else 'held' end,
-    'price_cents', price, 'gold', char_length(nm) = 1,
+    'price_cents', price, 'gold', mixed or char_length(nm) = 1,
     'shop_on', coalesce(shop.letters_on, false),
     'available', coalesce(shop.letters_on, false)
   );

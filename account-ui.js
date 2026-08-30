@@ -238,16 +238,14 @@ async function burnInboxItem(msg) {
 }
 
 function renderMooseBook() {
-  const box = document.getElementById('mooseBook');
   const list = document.getElementById('bookList');
-  if (!box || !list) return;
+  if (!list) return;
   const logged = window.sbAuth && window.sbAuth.isLoggedIn();
-  const panic = window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode();
+  const panic = !!(window.__moosePanic);
   const book = panic ? [] : getBook();
-  box.classList.toggle('hidden', !logged);
   if (!logged) return;
   if (!book.length) {
-    list.innerHTML = '<p class="text-sm text-gray-500">Names you search stay here on this phone.</p>';
+    list.innerHTML = '<p class="text-sm text-gray-500">Names you search stay here on this device.</p>';
     return;
   }
   list.innerHTML = '';
@@ -312,6 +310,18 @@ function showMooseQr() {
   window._mooseQrTimer = setInterval(() => { if (typeof rotateMooseQr === 'function') rotateMooseQr(); }, 10 * 60 * 1000);
 }
 
+async function openMooseBook() {
+  if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
+    const ok = await window.loggedFeatures.requireUnlock('Unlock moose book', true);
+    if (!ok || window.__moosePanic) return;
+  }
+  renderMooseBook();
+  const m = document.getElementById('mooseBookModal');
+  if (!m) return;
+  m.classList.remove('hidden');
+  m.classList.add('active');
+}
+window.openMooseBook = openMooseBook;
 window.updateSealedNotesBadge = updateSealedNotesBadge;
 window.renderMooseInbox = renderMooseInbox;
 window.renderMooseBook = renderMooseBook;
@@ -323,6 +333,15 @@ window.rememberSafety = rememberSafety;
 window.lastSeenLabel = lastSeenLabel;
 
 document.addEventListener('DOMContentLoaded', () => {
+  const bookBtn = document.getElementById('mooseBookBtn');
+  if (bookBtn) bookBtn.onclick = () => openMooseBook();
+  const closeBook = document.getElementById('closeMooseBook');
+  if (closeBook) closeBook.onclick = () => {
+    const m = document.getElementById('mooseBookModal');
+    if (!m) return;
+    m.classList.add('hidden');
+    m.classList.remove('active');
+  };
   const notesBtn = document.getElementById('sealedNotesBtn');
   if (notesBtn) notesBtn.onclick = () => openSealedNotes();
   const closeNotes = document.getElementById('closeSealedNotes');

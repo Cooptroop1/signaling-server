@@ -429,6 +429,7 @@ function dismissModal(m) {
     sealedNotesModal: 'closeSealedNotes',
     photoCodeModal: 'closePhotoCode',
     safetySettingsModal: 'closeSafetySettings',
+    mooseBookModal: 'closeMooseBook',
     helpModal: 'closeHelp',
     mooseQrModal: 'closeMooseQrButton',
     searchUserModal: 'searchCancelButton'

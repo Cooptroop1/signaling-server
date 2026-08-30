@@ -682,7 +682,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const encodeStego = document.getElementById('stegoEncodeBtn');
   const stegoFile = document.getElementById('stegoFile');
   if (encodeStego && stegoFile) encodeStego.onclick = async () => {
-    if (!code) return alert('Start a chat first.');
+    const chatOn = document.getElementById('chatContainer') && !document.getElementById('chatContainer').classList.contains('hidden');
+    if (!chatOn || !code) {
+      alert('Start a chat first, stay on that screen, then hide that room’s code in a photo. They decode it and walk into YOUR room.');
+      return;
+    }
     if (!stegoFile.files || !stegoFile.files[0]) return alert('Pick a normal-looking photo.');
     try {
       const img = await fileToImage(stegoFile.files[0]);
@@ -691,7 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
       a.href = canvas.toDataURL('image/png');
       a.download = 'holiday.png';
       a.click();
-      showStatusMessage('Photo saved. Send it like a normal picture. They use Decode photo.');
+      showStatusMessage('Photo saved. Stay in this chat — when they decode it they join you here.');
     } catch (e) { alert(e.message || 'Could not hide the code'); }
   };
   const decodeStego = document.getElementById('stegoDecodeBtn');
@@ -701,8 +705,8 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const img = await fileToImage(stegoIn.files[0]);
       const found = extractTextFromPng(img);
+      showStatusMessage('Joining their room: ' + found);
       if (typeof autoConnect === 'function') autoConnect(found);
-      else showStatusMessage('Code: ' + found);
     } catch (e) { alert(e.message || 'No invite in that photo'); }
   };
 });

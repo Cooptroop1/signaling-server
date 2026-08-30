@@ -422,7 +422,48 @@ begin
 end;
 $$;
 
--- Remote wipe
+grant execute on function public.moose_number_check(int) to authenticated, anon;
+
+create or replace function public.moose_apply_purchase(p_name text)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  nm text;
+  n int;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'error', 'Log in first');
+  end if;
+  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
+  if char_length(nm) < 1 or char_length(nm) > 3 then
+    return jsonb_build_object('ok', false, 'error', 'Bad name');
+  end if;
+  if nm ~ '^[0-9]+$' then
+    n := nm::int;
+    if n < 1 or n > 999 or n in (1, 7) then
+      return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
+    end if;
+    update public.vanity_numbers
+      set status = 'sold', owner_id = me, updated_at = now()
+      where vanity_numbers.n = n and coalesce(status, 'held') <> 'sold'
+        and coalesce(held_forever, false) = false;
+    if not found then
+      return jsonb_build_object('ok', false, 'error', 'Already sold');
+    end if;
+  else
+    insert into public.vanity_letters (name, status, owner_id, price_cents)
+    values (nm, 'sold', me, 1000)
+    on conflict (name) do update
+      set status = 'sold', owner_id = me, updated_at = now()
+      where vanity_letters.status <> 'sold';
+  end if;
+  update public.profiles set display_name = nm where id = me;
+  return jsonb_build_object('ok', true, 'name', nm);
+end;
+$$;
+grant execute on function public.moose_apply_purchase(text) to authenticated;
 alter table public.profiles add column if not exists wipe_epoch bigint;
 do $$
 begin

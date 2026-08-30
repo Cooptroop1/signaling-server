@@ -717,6 +717,9 @@ function pounds(cents) {
 
 async function applyBoughtName(name) {
   if (!isLoggedIn() || !name) return;
+  try {
+    await sb.rpc('moose_apply_purchase', { p_name: String(name) });
+  } catch (e) {}
   const uid = currentUser().id;
   try {
     await sb.from('profiles').update({ display_name: String(name) }).eq('id', uid);
@@ -724,13 +727,32 @@ async function applyBoughtName(name) {
   try {
     await sb.auth.updateUser({ data: { display_name: String(name) } });
   } catch (e) {}
+  if (window.__sbSession && window.__sbSession.user) {
+    window.__sbSession.user.user_metadata = window.__sbSession.user.user_metadata || {};
+    window.__sbSession.user.user_metadata.display_name = String(name);
+  }
   if (typeof username !== 'undefined') {
     username = String(name);
     try { sessionStorage.setItem('username', username); } catch (x) {}
     try { localStorage.setItem('username', username); } catch (x) {}
   }
-  if (typeof showStatusMessage === 'function') showStatusMessage('Your name is now ' + name);
+  if (typeof showStatusMessage === 'function') showStatusMessage('Your name is now ' + name + '. It is saved on this email login.');
   if (typeof setAuthUi === 'function') setAuthUi(window.__sbSession);
+}
+
+function shopNote(text) {
+  const out = document.getElementById('vanityShopResult');
+  if (out) out.textContent = text;
+  if (typeof showStatusMessage === 'function') showStatusMessage(text);
+}
+
+function openLoginForShop() {
+  shopNote('Log in with your email first. The name is saved on that account, same as your password login.');
+  const loginModal = document.getElementById('supabaseLoginModal');
+  if (loginModal) {
+    loginModal.classList.remove('hidden');
+    loginModal.classList.add('active');
+  }
 }
 
 async function loadMooseShop() {
@@ -810,9 +832,10 @@ function setVanityTab(tab) {
 
 async function startVanityCheckout(row) {
   if (!isLoggedIn()) {
-    if (typeof showStatusMessage === 'function') showStatusMessage('Log in first to buy a name.');
+    openLoginForShop();
     return;
   }
+  shopNote('Opening payment…');
   const body = {
     kind: row.kind || (window.__vanityTab === 'letter' ? 'letter' : 'number'),
     n: row.n || null,
@@ -831,11 +854,9 @@ async function startVanityCheckout(row) {
       window.location.href = data.url;
       return;
     }
-    if (typeof showStatusMessage === 'function') {
-      showStatusMessage(data && data.error ? data.error : 'Stripe is not live yet. Add keys on the server to take payment.');
-    }
+    shopNote((data && data.error) || 'Stripe is not live yet. On Render add STRIPE_SECRET_KEY, then Buy now takes you to card payment. The name is saved on this email account.');
   } catch (e) {
-    if (typeof showStatusMessage === 'function') showStatusMessage('Could not start checkout.');
+    shopNote('Could not start checkout. Try again, or add STRIPE_SECRET_KEY on Render.');
   }
 }
 
@@ -931,29 +952,54 @@ function bindVanityShop() {
   if (buyBtn) buyBtn.onclick = () => startVanityCheckout(window.__vanityLast || {});
   if (bidBtn) bidBtn.onclick = async () => {
     if (!isLoggedIn()) {
-      if (typeof showStatusMessage === 'function') showStatusMessage('Log in to bid.');
+      openLoginForShop();
       return;
     }
     const row = window.__vanityLast;
     const poundsIn = Number(bidInput && bidInput.value);
-    if (!row || !poundsIn || poundsIn <= 0) return;
+    if (!row) {
+      shopNote('Check a number first.');
+      return;
+    }
+    if (!poundsIn || poundsIn <= 0) {
+      shopNote('Type your bid in pounds first, then tap Place bid.');
+      return;
+    }
     const amount = Math.round(poundsIn * 100);
     const min = row.current_bid_cents || Math.round((row.price_cents || 0) * 0.2);
     if (amount <= min) {
-      if (out) out.textContent = 'Bid more than ' + pounds(min);
+      shopNote('Bid more than ' + pounds(min));
       return;
     }
-    const { data, error } = await sb.rpc('moose_place_bid', {
-      p_kind: row.kind || 'number',
-      p_target: String(row.name || row.n),
-      p_amount: amount
-    });
-    if (error || (data && data.ok === false)) {
-      if (out) out.textContent = (data && data.error) || (error && error.message) || 'Could not bid';
-      return;
+    shopNote('Saving bid…');
+    try {
+      const { data, error } = await sb.rpc('moose_place_bid', {
+        p_kind: row.kind || 'number',
+        p_target: String(row.name || row.n),
+        p_amount: amount
+      });
+      if (error) throw error;
+      if (data && data.ok === false) {
+        shopNote(data.error || 'Could not bid');
+        return;
+      }
+      row.current_bid_cents = amount;
+      shopNote('Bid in at ' + pounds(amount) + '. Highest bid wins; they pay with the email they logged in with.');
+    } catch (e) {
+      try {
+        const { error } = await sb.from('vanity_bids').insert({
+          kind: row.kind || 'number',
+          target: String(row.name || row.n),
+          user_id: currentUser().id,
+          amount_cents: amount
+        });
+        if (error) throw error;
+        row.current_bid_cents = amount;
+        shopNote('Bid in at ' + pounds(amount) + '. Saved on your email account.');
+      } catch (e2) {
+        shopNote('Could not bid. Run the shop SQL in Supabase, then try again.');
+      }
     }
-    row.current_bid_cents = amount;
-    if (out) out.textContent = 'Bid in at ' + pounds(amount) + '. Winner pays later with Stripe.';
   };
   loadMooseShop();
   finishVanityReturn();

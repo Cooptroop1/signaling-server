@@ -78,6 +78,9 @@ begin
   name := regexp_replace(name, '[^a-zA-Z0-9]', '', 'g');
   if char_length(name) < 1 then name := 'user'; end if;
   if char_length(name) > 16 then name := left(name, 16); end if;
+  if exists (select 1 from public.profiles where lower(display_name) = lower(name)) then
+    raise exception 'Display name already taken';
+  end if;
   insert into public.profiles (id, display_name)
   values (new.id, name)
   on conflict (id) do nothing;
@@ -147,7 +150,7 @@ begin
   if p_name is null or length(trim(p_name)) < 1 then
     return null;
   end if;
-  select * into r from public.profiles where display_name = p_name;
+  select * into r from public.profiles where lower(display_name) = lower(trim(p_name)) limit 1;
   if not found then
     return null;
   end if;
@@ -178,6 +181,20 @@ end;
 $$;
 
 grant execute on function public.lookup_moose(text) to authenticated, anon;
+
+-- One name only, capitals do not count as different
+with d as (
+  select id, display_name,
+    row_number() over (partition by lower(display_name) order by updated_at nulls last, id) as rn
+  from public.profiles
+)
+update public.profiles p
+set display_name = left(regexp_replace(p.display_name, '[0-9]+$', ''), 14) || d.rn::text
+from d
+where p.id = d.id and d.rn > 1;
+
+create unique index if not exists profiles_display_name_ci
+  on public.profiles (lower(display_name));
 
 -- Remote wipe
 alter table public.profiles add column if not exists wipe_epoch bigint;

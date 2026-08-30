@@ -407,7 +407,8 @@ async function findUser(name) {
   } catch (e) {}
   const { data, error } = await sb.from('profiles')
     .select('id, display_name, public_key, identity_public_key, last_active, hide_last_seen')
-    .eq('display_name', name)
+    .ilike('display_name', String(name || '').replace(/[%_]/g, ''))
+    .limit(1)
     .maybeSingle();
   if (error || !data) return null;
   const hide = !!data.hide_last_seen;
@@ -439,11 +440,18 @@ async function sendOffline(toUsername, sealed, meta) {
   if (!isLoggedIn()) throw new Error('Log in to send offline mail');
   await ensureSbSession();
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
-  const { data: dest, error: findErr } = await sb.from('profiles')
-    .select('id')
-    .eq('display_name', toUsername)
-    .maybeSingle();
-  if (findErr) throw new Error(findErr.message || 'Could not look up that name');
+  let dest = null;
+  const found = await findUser(toUsername);
+  if (found && found.id) dest = { id: found.id };
+  if (!dest) {
+    const { data, error: findErr } = await sb.from('profiles')
+      .select('id')
+      .ilike('display_name', String(toUsername || '').replace(/[%_]/g, ''))
+      .limit(1)
+      .maybeSingle();
+    if (findErr) throw new Error(findErr.message || 'Could not look up that name');
+    dest = data;
+  }
   if (!dest) throw new Error('Recipient not found');
   const blob = {
     encrypted: sealed.encrypted,
@@ -491,11 +499,17 @@ async function signUp(email, displayName, password) {
   if (!/^[a-zA-Z0-9]{1,16}$/.test(displayName)) {
     throw new Error('Display name must be 1-16 letters or numbers');
   }
-  const { data: taken } = await sb.from('profiles')
+  const { data: taken, error: takenErr } = await sb.from('profiles')
     .select('id')
-    .eq('display_name', displayName)
-    .maybeSingle();
-  if (taken) throw new Error('Display name already taken');
+    .ilike('display_name', displayName)
+    .limit(1);
+  if (!takenErr && taken && taken.length) throw new Error('That name is already taken');
+  try {
+    const hit = await findUser(displayName);
+    if (hit && hit.id) throw new Error('That name is already taken');
+  } catch (e) {
+    if (e && e.message === 'That name is already taken') throw e;
+  }
   const { data, error } = await sb.auth.signUp({
     email,
     password,

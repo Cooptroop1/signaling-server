@@ -364,9 +364,9 @@ begin
   mixed := nm ~ '[0-9]' and nm ~ '[A-Za-z]';
   select * into shop from public.moose_shop where id = 1;
   if mixed then
-    price := case char_length(nm) when 1 then 5000 when 2 then 3500 else 2000 end;
+    price := case char_length(nm) when 1 then 300000 when 2 then 25000 else 2000 end;
   else
-    price := case char_length(nm) when 1 then 5000 when 2 then 2500 else 1000 end;
+    price := case char_length(nm) when 1 then 300000 when 2 then 8000 else 1000 end;
   end if;
   select * into v from public.vanity_letters where lower(name) = lower(nm);
   if found then
@@ -643,4 +643,61 @@ begin
 exception when duplicate_object then
   null;
 end $$;
+
+-- Reset test buys. Buy now: #2 = £10,000 → #9 = £6,000 → #999 = £10
+delete from public.owned_names where kind in ('number', 'letter');
+delete from public.vanity_receipts where true;
+delete from public.vanity_bids where true;
+
+update public.profiles p
+set display_name = o.name
+from public.owned_names o
+where o.user_id = p.id and o.kind = 'signup'
+  and p.display_name ~ '^[A-Za-z0-9]{1,3}$';
+
+update public.vanity_numbers
+set
+  owner_id = null,
+  current_bid_cents = 0,
+  held_forever = (n in (1, 7)),
+  gold = (n between 2 and 9),
+  status = case when n in (1, 7) then 'held' else 'listed' end,
+  buy_now_cents = case
+    when n in (1, 7) then 0
+    when n between 2 and 9 then (1000000 - round(400000.0 * (n - 2) / 7.0))::int
+    else greatest(1000, (600000 - round(599000.0 * (n - 9) / 990.0))::int)
+  end,
+  price_cents = case
+    when n in (1, 7) then 0
+    when n between 2 and 9 then (1000000 - round(400000.0 * (n - 2) / 7.0))::int
+    else greatest(1000, (600000 - round(599000.0 * (n - 9) / 990.0))::int)
+  end,
+  updated_at = now();
+
+alter table public.vanity_letters add column if not exists buy_now_cents int;
+
+update public.vanity_letters
+set
+  owner_id = null,
+  status = 'listed',
+  price_cents = case
+    when name ~ '[0-9]' and name ~ '[A-Za-z]' then
+      case char_length(name) when 1 then 300000 when 2 then 25000 else 2000 end
+    else
+      case char_length(name) when 1 then 300000 when 2 then 8000 else 1000 end
+  end,
+  buy_now_cents = case
+    when name ~ '[0-9]' and name ~ '[A-Za-z]' then
+      case char_length(name) when 1 then 300000 when 2 then 25000 else 2000 end
+    else
+      case char_length(name) when 1 then 300000 when 2 then 8000 else 1000 end
+  end,
+  gold = (char_length(name) = 1 or (name ~ '[0-9]' and name ~ '[A-Za-z]'));
+
+insert into public.vanity_letters (name, status, price_cents, buy_now_cents, gold)
+select chr(i), 'listed', 300000, 300000, true
+from generate_series(65, 90) i
+on conflict (name) do update
+  set status = 'listed', owner_id = null, price_cents = 300000, buy_now_cents = 300000, gold = true;
+
 

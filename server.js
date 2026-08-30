@@ -123,6 +123,35 @@ const redisClient = redis.createClient({
 redisClient.on('error', err => logger.error('Redis Client Error %o', err));
 const pubClient = redisClient;
 const subClient = redisClient.duplicate();
+let webpush = null;
+try { webpush = require('web-push'); } catch (e) { logger.warn('web-push not installed'); }
+const VAPID_PUBLIC = process.env.VAPID_PUBLIC || 'BNKkuUrHAmam_htLZqI0Nb-J9vw4bWipcd5t_U1KNPGIfM-IuqgVKOYDzgxaELSyFoD1k1VG23HFPwl3rg_2zyQ';
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE || '5-E26pjHBd9TwjyCFvuRQs-ShLurnt7z3F81h55tRFs';
+if (webpush) {
+  try { webpush.setVapidDetails('mailto:hello@anonomoose.com', VAPID_PUBLIC, VAPID_PRIVATE); } catch (e) { logger.warn('vapid setup %s', e.message); }
+}
+function readJsonBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (c) => {
+      raw += c;
+      if (raw.length > (limit || 8000)) {
+        reject(new Error('too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      try { resolve(raw ? JSON.parse(raw) : {}); } catch (e) { reject(e); }
+    });
+    req.on('error', reject);
+  });
+}
+function pingCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.anonomoose.com');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Vary', 'Origin');
+}
 const subscribed = new Set(); // Track subscribed rooms
 // Added: Redis message handler for pub/sub
 const messageHandler = async (msg, channel) => {
@@ -235,7 +264,78 @@ server.on('request', (req, res) => {
   }
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('Cache-Control', 'no-store');
+  const origin = req.headers.origin || '';
+  const allowOrigin = (origin === 'https://www.anonomoose.com' || origin === 'https://anonomoose.com') ? origin : 'https://www.anonomoose.com';
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
+  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping') {
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.writeHead(405);
+      res.end();
+      return;
+    }
+    readJsonBody(req).then(async (body) => {
+      if (fullUrl.pathname === '/push-sub') {
+        const name = String(body.to || body.username || '').trim().toLowerCase();
+        const sub = body.subscription || body;
+        if (!name || name.length > 16 || !sub || !sub.endpoint) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false }));
+          return;
+        }
+        await redisClient.set('push:' + name, JSON.stringify({
+          endpoint: sub.endpoint,
+          keys: sub.keys || { p256dh: body.p256dh, auth: body.auth }
+        }), { EX: 30 * 24 * 3600 });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      const to = String(body.to || '').trim().toLowerCase();
+      const kind = String(body.kind || 'note').slice(0, 16);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      if (!to || !webpush) return;
+      try {
+        const raw = await redisClient.get('push:' + to);
+        if (!raw) return;
+        const sub = JSON.parse(raw);
+        const labels = {
+          call: 'Incoming call',
+          poke: 'moose poked you',
+          invite: 'Room invite',
+          photo: 'Sealed photo',
+          voice: 'Sealed voice',
+          note: 'Sealed note'
+        };
+        await webpush.sendNotification(sub, JSON.stringify({
+          title: 'Anonomoose',
+          body: labels[kind] || 'Sealed note',
+          kind,
+          tag: 'moose-' + kind
+        }));
+      } catch (e) {
+        if (e.statusCode === 404 || e.statusCode === 410) {
+          try { await redisClient.del('push:' + to); } catch (x) {}
+        } else {
+          logger.warn('push fail %s', e.message);
+        }
+      }
+    }).catch(() => {
+      if (!res.headersSent) {
+        res.writeHead(400);
+        res.end();
+      }
+    });
+    return;
+  }
   let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);
   fs.readFile(filePath, (err, data) => {
     if (err) {
@@ -252,7 +352,7 @@ server.on('request', (req, res) => {
         `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; ` +
         "img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; " +
         "media-src 'self' blob: data:; " +
-        "connect-src 'self' wss://signal.anonomoose.com wss://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://static.cloudflareinsights.com https://www.anonomoose.com; " +
+        "connect-src 'self' wss://signal.anonomoose.com https://signal.anonomoose.com wss://signaling-server-zc6m.onrender.com https://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://api.x.ai/v1/chat/completions https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://static.cloudflareinsights.com https://www.anonomoose.com; " +
         "object-src 'none'; base-uri 'self'; form-action 'self';";
       data = data.toString().replace(/<meta http-equiv="Content-Security-Policy" content="[^"]*">/,
         `<meta http-equiv="Content-Security-Policy" content="${updatedCSP}">`);
@@ -309,7 +409,7 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
-const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com', 'https://signaling-server-1.onrender.com'];
+const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com', 'https://signaling-server-1.onrender.com', 'https://signal.anonomoose.com'];
 let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   JWT_SECRET = crypto.randomBytes(32).toString('hex');

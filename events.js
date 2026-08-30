@@ -1625,6 +1625,9 @@ function setupWaitingForJoin(codeParam) {
   document.getElementById('messageInput')?.focus();
 }
 document.addEventListener('DOMContentLoaded', () => {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
   ['pointerdown', 'touchstart', 'click'].forEach((ev) => {
     document.addEventListener(ev, unlockCallAudio, { passive: true });
   });

@@ -148,12 +148,15 @@ async function applyLoggedInSession(session) {
     showStatusMessage('Logged in as ' + display + '. Rooms stay P2P.');
   }
   if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
+  startHeartbeat();
+  registerPushAlerts();
   ensureSbSession().then(() => {
     if (signedOut) return;
     publishKeys().catch((e) => console.warn('publishKeys', e));
     loadInbox().catch((e) => console.warn('inbox', e));
     subscribeInbox(session.user.id);
     startHeartbeat();
+    registerPushAlerts();
     if (typeof renderMooseBook === 'function') renderMooseBook();
     if (typeof schedulePersistKeys === 'function') schedulePersistKeys();
     offerPasskeyOnce();
@@ -195,32 +198,115 @@ async function publishKeys() {
   }
 }
 
+let heartbeatVisBound = false;
 function startHeartbeat() {
   stopHeartbeat();
   const beat = () => {
     if (signedOut || !isLoggedIn()) return;
-    ensureSbSession().then(() => {
-      if (typeof window.loggedFeatures !== 'undefined' && window.loggedFeatures.checkDeviceLock) {
-        return window.loggedFeatures.checkDeviceLock();
-      }
-    }).then(() => {
-      const hide = (typeof accGet === 'function') ? !!accGet('hideLastSeen', false) : false;
-      const patch = {};
-      if (!hide) patch.last_active = new Date().toISOString();
-      if (typeof clientId !== 'undefined' && clientId) patch.client_id = clientId;
-      if (Object.keys(patch).length === 0) return null;
-      return sb.from('profiles').update(patch).eq('id', currentUser().id);
-    }).then((res) => {
+    const uid = currentUser() && currentUser().id;
+    if (!uid || !sb) return;
+    const hide = (typeof accGet === 'function') ? !!accGet('hideLastSeen', false) : false;
+    const patch = {};
+    if (!hide) patch.last_active = new Date().toISOString();
+    if (typeof clientId !== 'undefined' && clientId) patch.client_id = clientId;
+    if (Object.keys(patch).length === 0) return;
+    sb.from('profiles').update(patch).eq('id', uid).then((res) => {
       if (res && res.error && /client_id|schema cache/i.test(res.error.message || '')) {
-        return sb.from('profiles').update({ last_active: new Date().toISOString() }).eq('id', currentUser().id);
+        if (!hide) sb.from('profiles').update({ last_active: new Date().toISOString() }).eq('id', uid);
       }
     }).catch(() => {});
+    if (typeof window.loggedFeatures !== 'undefined' && window.loggedFeatures.checkDeviceLock) {
+      window.loggedFeatures.checkDeviceLock().catch(() => {});
+    }
   };
   beat();
-  heartbeatTimer = setInterval(beat, 20000);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') beat();
-  });
+  heartbeatTimer = setInterval(beat, 15000);
+  if (!heartbeatVisBound) {
+    heartbeatVisBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') beat();
+    });
+    window.addEventListener('focus', beat);
+    window.addEventListener('pageshow', beat);
+  }
+}
+
+const VAPID_PUBLIC = 'BNKkuUrHAmam_htLZqI0Nb-J9vw4bWipcd5t_U1KNPGIfM-IuqgVKOYDzgxaELSyFoD1k1VG23HFPwl3rg_2zyQ';
+const PING_URL = 'https://signal.anonomoose.com';
+
+function vapidBytes() {
+  const pad = VAPID_PUBLIC.replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(pad);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function inboxPingLabel(kind) {
+  if (kind === 'call') return 'Incoming call';
+  if (kind === 'poke') return 'moose poked you';
+  if (kind === 'invite') return 'Room invite';
+  if (kind === 'photo') return 'Sealed photo';
+  if (kind === 'voice') return 'Sealed voice';
+  return 'Sealed note';
+}
+
+function notifyInbox(kind) {
+  const body = inboxPingLabel(kind);
+  try { navigator.vibrate(kind === 'call' ? [900, 250, 900, 500] : [180, 80, 180]); } catch (e) {}
+  try {
+    if (window.Notification && Notification.permission === 'granted') {
+      new Notification('Anonomoose', { body, tag: 'moose-' + (kind || 'note'), silent: false });
+    }
+  } catch (e) {}
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+      navigator.serviceWorker.ready.then((reg) => {
+        if (reg.showNotification) reg.showNotification('Anonomoose', { body, tag: 'moose-' + (kind || 'note'), silent: false });
+      }).catch(() => {});
+    }
+  } catch (e) {}
+  if (typeof showStatusMessage === 'function') showStatusMessage(body);
+}
+
+async function registerPushAlerts() {
+  if (signedOut || !isLoggedIn()) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    if (window.Notification && Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub && Notification.permission === 'granted') {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: vapidBytes()
+      });
+    }
+    if (!sub) return;
+    const display = (currentUser().user_metadata && currentUser().user_metadata.display_name)
+      || (typeof username !== 'undefined' ? username : '');
+    if (!display) return;
+    await fetch(PING_URL + '/push-sub', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: display, subscription: sub.toJSON() })
+    });
+  } catch (e) {
+    console.warn('push subscribe', e && e.message);
+  }
+}
+
+async function pingRemoteInbox(toUsername, kind) {
+  try {
+    await fetch(PING_URL + '/inbox-ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: toUsername, kind: kind || 'note' })
+    });
+  } catch (e) {}
 }
 
 function stopHeartbeat() {
@@ -293,28 +379,9 @@ function subscribeInbox(uid) {
       const row = mapRow(payload.new);
       window.pendingInbox = (window.pendingInbox || []).concat([row]);
       if (typeof renderMooseInbox === 'function') renderMooseInbox();
+      notifyInbox(row.kind || 'note');
       if (row.kind === 'call') {
-        try {
-          if (window.Notification && Notification.permission === 'granted') {
-            new Notification('Anonomoose', { body: 'Incoming call', silent: false });
-          } else if (window.Notification && Notification.permission === 'default') {
-            Notification.requestPermission();
-          }
-        } catch (e) {}
         if (typeof handleIncomingCallRow === 'function') handleIncomingCallRow(row);
-        else if (typeof showStatusMessage === 'function') showStatusMessage('Incoming call');
-      }
-      if (row.kind === 'poke') {
-        try {
-          if (window.Notification && Notification.permission === 'granted') {
-            new Notification('Anonomoose', { body: 'moose poked you', silent: true });
-          } else if (window.Notification && Notification.permission === 'default') {
-            Notification.requestPermission().then((p) => {
-              if (p === 'granted') new Notification('Anonomoose', { body: 'moose poked you', silent: true });
-            });
-          }
-        } catch (e) {}
-        if (typeof showStatusMessage === 'function') showStatusMessage('moose poked you');
       }
     })
     .subscribe();
@@ -401,7 +468,10 @@ async function sendOffline(toUsername, sealed, meta) {
   let lastErr = null;
   for (const row of shapes) {
     const { error } = await sb.from('offline_messages').insert(row);
-    if (!error) return;
+    if (!error) {
+      pingRemoteInbox(toUsername, blob.kind);
+      return;
+    }
     lastErr = error;
   }
   throw new Error(lastErr && lastErr.message ? lastErr.message : 'Could not store sealed note');

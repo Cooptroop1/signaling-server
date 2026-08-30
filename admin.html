@@ -132,7 +132,13 @@
  </div>
  </div>
  <script>
- let socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
+ let socket = null;
+ function adminWsUrl() { return 'wss://signaling-server-zc6m.onrender.com'; }
+ function connectAdminSocket() {
+   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+   socket = new WebSocket(adminWsUrl());
+   bindAdminSocket();
+ }
  const statusElement = document.getElementById('status');
  const adminPasswordInput = document.getElementById('adminPassword');
  const submitButton = document.getElementById('submitButton');
@@ -165,7 +171,8 @@
  adminPasswordInput.focus();
  return;
  }
- if (socket.readyState === WebSocket.OPEN && token) {
+ connectAdminSocket();
+ if (socket && socket.readyState === WebSocket.OPEN && token) {
  statusElement.textContent = 'Fetching server stats and features...';
  socket.send(JSON.stringify({ type: 'get-stats', secret, clientId, token, csrfToken }));
  socket.send(JSON.stringify({ type: 'get-features', secret, clientId, token, csrfToken }));
@@ -184,7 +191,7 @@
  if (feature === 'service' && !confirm('Toggling the service will disconnect all users. Continue?')) {
  return;
  }
- if (socket.readyState === WebSocket.OPEN) {
+ if (socket && socket.readyState === WebSocket.OPEN) {
  socket.send(JSON.stringify({ type: 'toggle-feature', feature, secret, clientId, token, csrfToken }));
  } else {
  showStatusMessage('Connection closed. Reconnecting to toggle...');
@@ -204,15 +211,17 @@
  // New: Request export from server
  function requestExport(type) {
  const secret = adminPasswordInput.value.trim();
- if (socket.readyState === WebSocket.OPEN && token) {
+ if (socket && socket.readyState === WebSocket.OPEN && token) {
  socket.send(JSON.stringify({ type, secret, clientId, token, csrfToken }));
  } else {
  showStatusMessage('Connection not open. Please reconnect.');
  }
  }
+ function bindAdminSocket() {
+ if (!socket) return;
  socket.onopen = () => {
  console.log('Admin page WebSocket opened');
- if (socket.readyState === WebSocket.OPEN) {
+ if (socket && socket.readyState === WebSocket.OPEN) {
  socket.send(JSON.stringify({ type: 'connect', clientId }));
  }
  reconnectAttempts = 0;
@@ -227,8 +236,12 @@
  token = data.accessToken;
  csrfToken = data.csrfToken;
  console.log('Received token and CSRF:', token, csrfToken);
+ if (adminPasswordInput.value.trim()) {
+ fetchStatsAndFeatures();
+ } else {
  statusElement.textContent = 'Connected. Enter admin password to view stats.';
  adminPasswordInput.focus();
+ }
  } else if (data.type === 'stats') {
  statsDisplay.innerHTML = '';
  statsDisplay.classList.remove('hidden');
@@ -321,7 +334,7 @@
  showStatusMessage(data.message || 'Error fetching stats. Please try again.');
  console.error('Server error:', data.message);
  if (data.message.includes('Invalid or expired token')) {
- if (socket.readyState === WebSocket.OPEN) {
+ if (socket && socket.readyState === WebSocket.OPEN) {
  socket.send(JSON.stringify({ type: 'connect', clientId }));
  }
  } else if (data.message.includes('Invalid admin secret')) {
@@ -330,11 +343,11 @@
  } else if (data.message.includes('Token revoked')) {
  showStatusMessage('Session expired. Reconnecting...');
  token = '';
- socket.close();
+ if (socket) socket.close();
  } else if (data.message.includes('Rate limit exceeded')) {
  showStatusMessage('Rate limit exceeded. Retrying in 5 seconds...', 5000);
  setTimeout(() => {
- if (socket.readyState === WebSocket.OPEN && token) {
+ if (socket && socket.readyState === WebSocket.OPEN && token) {
  fetchStatsAndFeatures();
  }
  }, 5000);
@@ -368,13 +381,10 @@
  const delay = Math.min(30000, 5000 * Math.pow(2, reconnectAttempts));
  reconnectAttempts++;
  setTimeout(() => {
- socket = new WebSocket('wss://signaling-server-zc6m.onrender.com');
- socket.onopen = socket.onopen;
- socket.onmessage = socket.onmessage;
- socket.onerror = socket.onerror;
- socket.onclose = socket.onclose;
+ connectAdminSocket();
  }, delay);
  };
+ }
  submitButton.onclick = () => {
  fetchStatsAndFeatures();
  };
@@ -398,7 +408,7 @@
  // New: Clear random board handler
  document.getElementById('clearRandomButton').onclick = () => {
    const secret = adminPasswordInput.value.trim();
-   if (socket.readyState === WebSocket.OPEN && token) {
+   if (socket && socket.readyState === WebSocket.OPEN && token) {
      socket.send(JSON.stringify({ type: 'clear-random-codes', secret, clientId, token, csrfToken }));
    } else {
      showStatusMessage('Connection not open. Please reconnect.');

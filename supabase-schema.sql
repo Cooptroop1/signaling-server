@@ -42,8 +42,11 @@ alter table public.profiles enable row level security;
 alter table public.offline_messages enable row level security;
 
 drop policy if exists "profiles readable" on public.profiles;
-create policy "profiles readable" on public.profiles
-  for select using (true);
+drop policy if exists "profiles read own" on public.profiles;
+create policy "profiles read own" on public.profiles
+  for select to authenticated
+  using (auth.uid() = id);
+revoke select on public.profiles from anon;
 
 drop policy if exists "profiles insert own" on public.profiles;
 create policy "profiles insert own" on public.profiles
@@ -217,6 +220,52 @@ $$;
 
 grant execute on function public.lookup_moose(text) to authenticated, anon;
 
+create or replace function public.moose_name_taken(p_name text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  nm text;
+begin
+  nm := regexp_replace(trim(coalesce(p_name, '')), '[^a-zA-Z0-9]', '', 'g');
+  if char_length(nm) < 1 then
+    return true;
+  end if;
+  return exists (select 1 from public.owned_names o where lower(o.name) = lower(nm))
+      or exists (select 1 from public.profiles p where lower(p.display_name) = lower(nm));
+end;
+$$;
+revoke all on function public.moose_name_taken(text) from public;
+grant execute on function public.moose_name_taken(text) to anon, authenticated;
+
+create or replace function public.lookup_moose_qr(p_token text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  r public.profiles%rowtype;
+begin
+  if p_token is null or char_length(trim(p_token)) < 8 then
+    return null;
+  end if;
+  select * into r from public.profiles
+    where qr_token = trim(p_token)
+      and qr_expires is not null
+      and qr_expires > now()
+    limit 1;
+  if not found then
+    return null;
+  end if;
+  return public.lookup_moose(r.display_name);
+end;
+$$;
+revoke all on function public.lookup_moose_qr(text) from public;
+grant execute on function public.lookup_moose_qr(text) to anon, authenticated;
+
 -- One name only, capitals do not count as different
 with d as (
   select id, display_name,
@@ -302,14 +351,16 @@ alter table public.vanity_numbers add column if not exists current_bid_cents int
 
 update public.vanity_numbers
 set held_forever = true, gold = true, status = 'held'
-where n in (1, 7);
+where n in (1, 7)
+  and coalesce(status, 'held') <> 'sold';
 
 update public.vanity_numbers
 set gold = true,
     buy_now_cents = case n
       when 2 then 10000 when 3 then 8000 when 4 then 6000 when 5 then 8000
       when 6 then 5000 when 8 then 5000 when 9 then 8000 else 10000 end
-where n in (2,3,4,5,6,8,9);
+where n in (2,3,4,5,6,8,9)
+  and coalesce(status, 'held') <> 'sold';
 
 create table if not exists public.vanity_letters (
   name text primary key,
@@ -457,47 +508,12 @@ create or replace function public.moose_apply_purchase(p_name text)
 returns jsonb
 language plpgsql security definer set search_path = public
 as $$
-declare
-  me uuid := auth.uid();
-  nm text;
-  n int;
 begin
-  if me is null then
-    return jsonb_build_object('ok', false, 'error', 'Log in first');
-  end if;
-  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
-  if char_length(nm) < 1 or char_length(nm) > 3 then
-    return jsonb_build_object('ok', false, 'error', 'Bad name');
-  end if;
-  if nm ~ '^[0-9]+$' then
-    n := nm::int;
-    if n < 1 or n > 999 then
-      return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
-    end if;
-    update public.vanity_numbers
-      set status = 'sold', owner_id = me, updated_at = now()
-      where vanity_numbers.n = n and coalesce(status, 'held') <> 'sold'
-        and coalesce(held_forever, false) = false;
-    if not found then
-      return jsonb_build_object('ok', false, 'error', 'Already sold');
-    end if;
-  else
-    insert into public.vanity_letters (name, status, owner_id, price_cents)
-    values (nm, 'sold', me, 1000)
-    on conflict (name) do update
-      set status = 'sold', owner_id = me
-      where vanity_letters.status <> 'sold';
-  end if;
-  if exists (select 1 from public.owned_names o where lower(o.name) = lower(nm) and o.user_id <> me) then
-    return jsonb_build_object('ok', false, 'error', 'Already owned');
-  end if;
-  insert into public.owned_names (name, user_id, kind)
-  values (nm, me, case when nm ~ '^[0-9]+$' then 'number' else 'letter' end)
-  on conflict do nothing;
-  return jsonb_build_object('ok', true, 'name', nm);
+  return jsonb_build_object('ok', false, 'error', 'Pay through the shop. This path is closed.');
 end;
 $$;
-grant execute on function public.moose_apply_purchase(text) to authenticated;
+revoke all on function public.moose_apply_purchase(text) from public, anon, authenticated;
+-- paid names: service-role moose_apply_paid only
 
 create or replace function public.moose_set_active_name(p_name text)
 returns jsonb
@@ -599,44 +615,12 @@ create or replace function public.moose_apply_purchase(p_name text)
 returns jsonb
 language plpgsql security definer set search_path = public
 as $$
-declare
-  me uuid := auth.uid();
-  nm text;
-  n int;
 begin
-  if me is null then
-    return jsonb_build_object('ok', false, 'error', 'Log in first');
-  end if;
-  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
-  if char_length(nm) < 1 or char_length(nm) > 16 then
-    return jsonb_build_object('ok', false, 'error', 'Bad name');
-  end if;
-  if exists (select 1 from public.owned_names o where lower(o.name) = lower(nm) and o.user_id <> me) then
-    return jsonb_build_object('ok', false, 'error', 'Already owned');
-  end if;
-  if nm ~ '^[0-9]+$' then
-    n := nm::int;
-    if n < 1 or n > 999 then
-      return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
-    end if;
-    update public.vanity_numbers vn
-      set status = 'sold', owner_id = me, updated_at = now()
-      where vn.n = n and coalesce(vn.held_forever, false) = false
-        and (coalesce(vn.status, 'held') <> 'sold' or vn.owner_id = me);
-  else
-    insert into public.vanity_letters (name, status, owner_id, price_cents)
-    values (nm, 'sold', me, 1000)
-    on conflict (name) do update
-      set status = 'sold', owner_id = me
-      where vanity_letters.owner_id is null or vanity_letters.owner_id = me;
-  end if;
-  insert into public.owned_names (name, user_id, kind)
-  values (nm, me, case when nm ~ '^[0-9]+$' then 'number' else 'letter' end)
-  on conflict do nothing;
-  return jsonb_build_object('ok', true, 'name', nm);
+  return jsonb_build_object('ok', false, 'error', 'Pay through the shop. This path is closed.');
 end;
 $$;
-grant execute on function public.moose_apply_purchase(text) to authenticated;
+revoke all on function public.moose_apply_purchase(text) from public, anon, authenticated;
+-- paid names: service-role moose_apply_paid only
 do $$
 begin
   alter publication supabase_realtime add table public.profiles;
@@ -644,60 +628,50 @@ exception when duplicate_object then
   null;
 end $$;
 
+-- LIVE SHOP ROWS ARE NOT RESET HERE.
+-- Numbers 1 and 2 stay as they are in Supabase. Do not paste a wipe.
 -- Reset test buys. Buy now: #2 = £10,000 → #9 = £6,000 → #999 = £10
-delete from public.owned_names where kind in ('number', 'letter');
-delete from public.vanity_receipts where true;
-delete from public.vanity_bids where true;
+-- delete from public.owned_names where kind in ('number', 'letter');
+-- delete from public.vanity_receipts where true;
+-- delete from public.vanity_bids where true;
 
-update public.profiles p
-set display_name = o.name
-from public.owned_names o
-where o.user_id = p.id and o.kind = 'signup'
-  and p.display_name ~ '^[A-Za-z0-9]{1,3}$';
-
-update public.vanity_numbers
-set
-  owner_id = null,
-  current_bid_cents = 0,
-  held_forever = (n in (1, 7)),
-  gold = (n between 2 and 9),
-  status = case when n in (1, 7) then 'held' else 'listed' end,
-  buy_now_cents = case
-    when n in (1, 7) then 0
-    when n between 2 and 9 then (1000000 - round(400000.0 * (n - 2) / 7.0))::int
-    else greatest(1000, (600000 - round(599000.0 * (n - 9) / 990.0))::int)
-  end,
-  price_cents = case
-    when n in (1, 7) then 0
-    when n between 2 and 9 then (1000000 - round(400000.0 * (n - 2) / 7.0))::int
-    else greatest(1000, (600000 - round(599000.0 * (n - 9) / 990.0))::int)
-  end,
-  updated_at = now();
+-- update public.profiles p
+-- set display_name = o.name
+-- from public.owned_names o
+-- where o.user_id = p.id and o.kind = 'signup'
+--   and p.display_name ~ '^[A-Za-z0-9]{1,3}$';
+--
+-- update public.vanity_numbers
+-- set
+--   owner_id = null,
+--   current_bid_cents = 0,
+--   held_forever = (n in (1, 7)),
+--   gold = (n between 2 and 9),
+--   status = case when n in (1, 7) then 'held' else 'listed' end,
+--   buy_now_cents = case
+--     when n in (1, 7) then 0
+--     when n between 2 and 9 then (1000000 - round(400000.0 * (n - 2) / 7.0))::int
+--     else greatest(1000, (600000 - round(599000.0 * (n - 9) / 990.0))::int)
+--   end,
+--   price_cents = case
+--     when n in (1, 7) then 0
+--     when n between 2 and 9 then (1000000 - round(400000.0 * (n - 2) / 7.0))::int
+--     else greatest(1000, (600000 - round(599000.0 * (n - 9) / 990.0))::int)
+--   end,
+--   updated_at = now();
 
 alter table public.vanity_letters add column if not exists buy_now_cents int;
 
-update public.vanity_letters
-set
-  owner_id = null,
-  status = 'listed',
-  price_cents = case
-    when name ~ '[0-9]' and name ~ '[A-Za-z]' then
-      case char_length(name) when 1 then 300000 when 2 then 25000 else 2000 end
-    else
-      case char_length(name) when 1 then 300000 when 2 then 8000 else 1000 end
-  end,
-  buy_now_cents = case
-    when name ~ '[0-9]' and name ~ '[A-Za-z]' then
-      case char_length(name) when 1 then 300000 when 2 then 25000 else 2000 end
-    else
-      case char_length(name) when 1 then 300000 when 2 then 8000 else 1000 end
-  end,
-  gold = (char_length(name) = 1 or (name ~ '[0-9]' and name ~ '[A-Za-z]'));
+-- Do not wipe live letter sales.
+-- update public.vanity_letters
+-- set
+--   owner_id = null,
+--   status = 'listed',
+--   ...
 
 insert into public.vanity_letters (name, status, price_cents, buy_now_cents, gold)
 select chr(i), 'listed', 300000, 300000, true
 from generate_series(65, 90) i
-on conflict (name) do update
-  set status = 'listed', owner_id = null, price_cents = 300000, buy_now_cents = 300000, gold = true;
+on conflict (name) do nothing;
 
 

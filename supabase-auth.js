@@ -255,6 +255,16 @@ function vapidBytes() {
   return out;
 }
 
+function sbBearer() {
+  return (window.__sbSession && window.__sbSession.access_token) || '';
+}
+function authHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  const t = sbBearer();
+  if (t) h.Authorization = 'Bearer ' + t;
+  return h;
+}
+
 function inboxPingLabel(kind) {
   if (kind === 'call') return 'Incoming call';
   if (kind === 'poke') return 'moose poked you';
@@ -307,8 +317,8 @@ async function registerPushAlerts() {
     for (const n of list) {
       await fetch(PING_URL + '/push-sub', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: n, subscription: sub.toJSON() })
+        headers: authHeaders(),
+        body: JSON.stringify({ username: n, subscription: sub.toJSON(), access: sbBearer() })
       });
     }
   } catch (e) {
@@ -320,8 +330,8 @@ async function pingRemoteInbox(toUsername, kind) {
   try {
     await fetch(PING_URL + '/inbox-ping', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: toUsername, kind: kind || 'note' })
+      headers: authHeaders(),
+      body: JSON.stringify({ to: toUsername, kind: kind || 'note', access: sbBearer() })
     });
   } catch (e) {}
 }
@@ -423,35 +433,28 @@ async function findUser(name) {
       };
     }
   } catch (e) {}
-  const { data, error } = await sb.from('profiles')
-    .select('id, display_name, public_key, identity_public_key, last_active, hide_last_seen')
-    .ilike('display_name', String(name || '').replace(/[%_]/g, ''))
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return null;
-  const hide = !!data.hide_last_seen;
-  const last = data.last_active ? new Date(data.last_active).getTime() : 0;
-  const online = !hide && last && (Date.now() - last < 5 * 60 * 1000);
-  return {
-    id: data.id,
-    display_name: data.display_name,
-    status: online ? 'online' : 'offline',
-    public_key: data.public_key,
-    identity_public_key: data.identity_public_key,
-    last_active: hide ? null : data.last_active
-  };
+  return null;
 }
 
 async function findByQr(mq) {
   if (!sb || !mq || window.__duress) return null;
   try { await ensureSbSession(); } catch (e) {}
-  const { data, error } = await sb.from('profiles')
-    .select('id, display_name, public_key, identity_public_key, last_active, qr_expires')
-    .eq('qr_token', mq)
-    .maybeSingle();
-  if (error || !data) return null;
-  if (data.qr_expires && new Date(data.qr_expires).getTime() < Date.now()) return null;
-  return findUser(data.display_name);
+  try {
+    const { data, error } = await sb.rpc('lookup_moose_qr', { p_token: mq });
+    if (error || !data) return null;
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    if (!row || !row.display_name) return null;
+    return {
+      id: row.id,
+      display_name: row.display_name,
+      status: row.status || 'offline',
+      public_key: row.public_key,
+      identity_public_key: row.identity_public_key,
+      last_active: row.last_active
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 async function sendOffline(toUsername, sealed, meta) {
@@ -461,15 +464,6 @@ async function sendOffline(toUsername, sealed, meta) {
   let dest = null;
   const found = await findUser(toUsername);
   if (found && found.id) dest = { id: found.id };
-  if (!dest) {
-    const { data, error: findErr } = await sb.from('profiles')
-      .select('id')
-      .ilike('display_name', String(toUsername || '').replace(/[%_]/g, ''))
-      .limit(1)
-      .maybeSingle();
-    if (findErr) throw new Error(findErr.message || 'Could not look up that name');
-    dest = data;
-  }
   if (!dest) throw new Error('Recipient not found');
   const blob = {
     encrypted: sealed.encrypted,
@@ -532,11 +526,12 @@ function validMooseName(name) {
 async function signUp(email, displayName, password) {
   const nameErr = validMooseName(displayName);
   if (nameErr) throw new Error(nameErr);
-  const { data: taken, error: takenErr } = await sb.from('profiles')
-    .select('id')
-    .ilike('display_name', displayName)
-    .limit(1);
-  if (!takenErr && taken && taken.length) throw new Error('That name is already taken');
+  try {
+    const { data: takenRpc, error: takenRpcErr } = await sb.rpc('moose_name_taken', { p_name: displayName });
+    if (!takenRpcErr && takenRpc === true) throw new Error('That name is already taken');
+  } catch (e) {
+    if (e && e.message === 'That name is already taken') throw e;
+  }
   try {
     const hit = await findUser(displayName);
     if (hit && hit.id) throw new Error('That name is already taken');
@@ -781,11 +776,11 @@ async function finishVanityReturn() {
       for (let i = 0; i < 8; i++) {
         const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(),
           body: JSON.stringify({
             sessionId,
             userId: currentUser().id,
-            access: (window.__sbSession && window.__sbSession.access_token) || ''
+            access: sbBearer()
           })
         });
         data = await r.json();
@@ -1008,7 +1003,7 @@ async function startVanityCheckout(row) {
   try {
     const r = await fetch('https://signal.anonomoose.com/vanity-checkout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify(body)
     });
     const data = await r.json();

@@ -26,11 +26,27 @@ async function validatePassword(input, hash) {
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://crgmcdpmmxtrcocfbsac.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
 const claimedLoginCache = new Map();
-async function verifyClaimedLogin(sbAccess) {
-  if (!sbAccess || typeof sbAccess !== 'string' || sbAccess.length < 40 || sbAccess.length > 8000) return false;
+const pingRate = new Map();
+const checkoutRate = new Map();
+function rateOk(map, key, max, windowMs) {
+  const now = Date.now();
+  const rec = map.get(key) || { n: 0, t: now };
+  if (now - rec.t > windowMs) { rec.n = 0; rec.t = now; }
+  rec.n += 1;
+  map.set(key, rec);
+  return rec.n <= max;
+}
+function bearerFrom(req, body) {
+  const h = String((req && req.headers && req.headers.authorization) || '');
+  if (/^Bearer\s+\S+/i.test(h)) return h.replace(/^Bearer\s+/i, '').trim();
+  if (body && typeof body.access === 'string') return String(body.access).trim();
+  return '';
+}
+async function verifySbUser(sbAccess) {
+  if (!sbAccess || typeof sbAccess !== 'string' || sbAccess.length < 40 || sbAccess.length > 8000) return null;
   const cacheKey = crypto.createHash('sha256').update(sbAccess).digest('hex').slice(0, 24);
   const hit = claimedLoginCache.get(cacheKey);
-  if (hit && hit.exp > Date.now()) return hit.ok;
+  if (hit && hit.exp > Date.now()) return hit.user || null;
   try {
     const r = await fetch(SUPABASE_URL + '/auth/v1/user', {
       headers: {
@@ -38,18 +54,46 @@ async function verifyClaimedLogin(sbAccess) {
         apikey: SUPABASE_ANON_KEY
       }
     });
-    const ok = r.ok;
-    claimedLoginCache.set(cacheKey, { ok, exp: Date.now() + 120000 });
+    if (!r.ok) {
+      claimedLoginCache.set(cacheKey, { ok: false, user: null, exp: Date.now() + 30000 });
+      return null;
+    }
+    const raw = await r.json();
+    const user = raw && raw.id ? { id: raw.id, email: raw.email || '' } : null;
+    claimedLoginCache.set(cacheKey, { ok: !!user, user, exp: Date.now() + 120000 });
     if (claimedLoginCache.size > 500) {
       const now = Date.now();
       for (const [k, v] of claimedLoginCache) {
         if (v.exp < now) claimedLoginCache.delete(k);
       }
     }
-    return ok;
+    return user;
   } catch (e) {
-    return false;
+    return null;
   }
+}
+async function verifyClaimedLogin(sbAccess) {
+  const user = await verifySbUser(sbAccess);
+  return !!user;
+}
+async function userOwnsName(userId, name, userAccess) {
+  const nm = String(name || '').toLowerCase();
+  if (!userId || !nm) return false;
+  const token = SUPABASE_SERVICE_ROLE_KEY || userAccess;
+  const key = SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY;
+  if (!token) return false;
+  const headers = { apikey: key, Authorization: 'Bearer ' + token };
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&select=name', { headers });
+    const rows = await r.json();
+    if (Array.isArray(rows) && rows.some((x) => String(x.name || '').toLowerCase() === nm)) return true;
+  } catch (e) {}
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(userId) + '&select=display_name', { headers });
+    const rows = await r.json();
+    if (Array.isArray(rows) && rows[0] && String(rows[0].display_name || '').toLowerCase() === nm) return true;
+  } catch (e) {}
+  return false;
 }
 // Main logger for general operations
 const logger = winston.createLogger({
@@ -157,80 +201,56 @@ async function supabaseAs(path, method, payload, bearer) {
   throw new Error(msg || ('Supabase ' + r.status));
 }
 
-async function attachPaidName(userId, name, sessionId, amount, userAccess) {
+async function attachPaidName(userId, name, sessionId, amount) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Add SUPABASE_SERVICE_ROLE_KEY on Render so paid names can be saved');
+  }
+  const headers = {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+    'Content-Type': 'application/json'
+  };
+  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_paid', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      p_user: userId,
+      p_name: nm,
+      p_session: sessionId || ('sess-' + Date.now()),
+      p_amount: amount || 0
+    })
+  });
+  const text = await r.text();
+  let row = null;
+  try { row = text ? JSON.parse(text) : null; } catch (e) {}
+  if (r.ok && row && row.ok !== false) return true;
   const kind = /^\d+$/.test(nm) ? 'number' : 'letter';
-  const errors = [];
-  if (SUPABASE_SERVICE_ROLE_KEY) {
-    try {
-      await supabaseAs('/rest/v1/owned_names', 'POST', { name: nm, user_id: userId, kind });
-    } catch (e) {
-      errors.push('owned_names: ' + e.message);
-    }
-    try {
-      if (kind === 'number') {
-        await supabaseAs('/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10), 'PATCH', {
+  try {
+    await supabaseAs('/rest/v1/owned_names', 'POST', { name: nm, user_id: userId, kind });
+    if (kind === 'number') {
+      await supabaseAs('/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10), 'PATCH', {
+        status: 'sold', owner_id: userId
+      });
+    } else {
+      try {
+        await supabaseAs('/rest/v1/vanity_letters', 'POST', {
+          name: nm, status: 'sold', owner_id: userId, price_cents: amount || 1000
+        });
+      } catch (e) {
+        await supabaseAs('/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm), 'PATCH', {
           status: 'sold', owner_id: userId
         });
-      } else {
-        try {
-          await supabaseAs('/rest/v1/vanity_letters', 'POST', {
-            name: nm, status: 'sold', owner_id: userId, price_cents: amount || 1000
-          });
-        } catch (e) {
-          await supabaseAs('/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm), 'PATCH', {
-            status: 'sold', owner_id: userId
-          });
-        }
       }
-    } catch (e) {
-      errors.push('shop row: ' + e.message);
     }
-    const headers = {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY
-    };
     const check = await fetch(
       SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + userId + '&name=eq.' + encodeURIComponent(nm) + '&select=name',
-      { headers }
+      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY } }
     );
     const rows = await check.json();
     if (Array.isArray(rows) && rows.length) return true;
-    if (userAccess) {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_purchase', {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: 'Bearer ' + userAccess,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ p_name: nm })
-      });
-      const text = await r.text();
-      let row = null;
-      try { row = text ? JSON.parse(text) : null; } catch (e) {}
-      if (r.ok && row && row.ok !== false) return true;
-      errors.push('rpc: ' + ((row && row.error) || text));
-    }
-    throw new Error(errors.join(' | ') || 'Name was not saved on the account');
-  }
-  if (userAccess) {
-    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_purchase', {
-      method: 'POST',
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: 'Bearer ' + userAccess,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ p_name: nm })
-    });
-    const text = await r.text();
-    let row = null;
-    try { row = text ? JSON.parse(text) : null; } catch (e) {}
-    if (r.ok && row && row.ok !== false) return true;
-    throw new Error((row && row.error) || text || 'Could not attach name');
-  }
-  throw new Error('Add SUPABASE_SERVICE_ROLE_KEY on Render so paid names can be saved');
+  } catch (e) {}
+  throw new Error((row && row.error) || text || 'Could not attach name');
 }
 
 async function lookupVanityAmount(kind, name) {
@@ -277,7 +297,7 @@ async function fulfillPaidSession(session, userAccess) {
   }
   const doneKey = 'vanity:done:' + session.id;
   try {
-    await attachPaidName(userId, name, session.id, paidAmount || locked, userAccess);
+    await attachPaidName(userId, name, session.id, paidAmount || locked);
     await redisClient.set(doneKey, name, { EX: 30 * 24 * 3600 });
     await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
     return { ok: true, name, userId, applied: true };
@@ -305,8 +325,37 @@ function readJsonBody(req, limit) {
 function pingCors(res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://www.anonomoose.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Vary', 'Origin');
+}
+const PUBLIC_PATHS = new Set([
+  '/', '/index.html', '/offline.html', '/cover.html', '/random.html', '/w.html',
+  '/manifest.json', '/sw.js', '/oldsw.js',
+  '/crypto.js', '/ratchet.js', '/utils.js', '/main.js', '/init.js', '/events.js',
+  '/supabase-auth.js', '/account-ui.js', '/logged-features.js',
+  '/192.png', '/256.png', '/512.png', '/apple-touch-icon.png'
+]);
+function sendNotFound(res) {
+  res.writeHead(404, { 'Content-Type': 'text/plain', 'X-Robots-Tag': 'noindex, nofollow' });
+  res.end('Not Found');
+}
+function adminDeskToken() {
+  const secret = process.env.ADMIN_SECRET || '';
+  if (!secret) return '';
+  return crypto.createHmac('sha256', secret).update('moose-desk').digest('hex').slice(0, 32);
+}
+function hasAdminDeskCookie(req) {
+  const want = adminDeskToken();
+  if (!want) return false;
+  const cookies = req.headers.cookie ? req.headers.cookie.split(';').reduce((acc, cookie) => {
+    const [name, value] = cookie.trim().split('=');
+    acc[name] = value;
+    return acc;
+  }, {}) : {};
+  return cookies['moose_desk'] === want;
+}
+function mooseDeskGateHtml() {
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Desk</title><style>body{font-family:sans-serif;background:#111;color:#eee;display:flex;min-height:100vh;align-items:center;justify-content:center}form{background:#1f2937;padding:1.25rem;border-radius:10px;width:min(320px,90vw)}input,button{width:100%;box-sizing:border-box;margin-top:.5rem;padding:.6rem;border-radius:6px;border:0}button{background:#2563eb;color:#fff;cursor:pointer}</style></head><body><form method="POST" action="/moose-desk"><input type="password" name="secret" placeholder="Password" autofocus><button type="submit">Open</button></form></body></html>';
 }
 const subscribed = new Set(); // Track subscribed rooms
 // Added: Redis message handler for pub/sub
@@ -428,7 +477,7 @@ server.on('request', (req, res) => {
     if (vanityCors) {
       res.setHeader('Access-Control-Allow-Origin', allowOrigin);
       res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     }
     if (req.method === 'OPTIONS' && vanityCors) {
       res.writeHead(204);
@@ -456,6 +505,17 @@ server.on('request', (req, res) => {
     }
     readJsonBody(req).then(async (body) => {
       if (fullUrl.pathname === '/vanity-checkout') {
+        const shopUser = await verifySbUser(bearerFrom(req, body));
+        if (!shopUser) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Log in first' }));
+          return;
+        }
+        if (!rateOk(checkoutRate, shopUser.id, 8, 60000)) {
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Too many checkout attempts. Wait a minute.' }));
+          return;
+        }
         if (!stripe) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Stripe is not live yet. Add STRIPE_SECRET_KEY on Render to take payment.' }));
@@ -463,7 +523,7 @@ server.on('request', (req, res) => {
         }
         const kind = body.kind === 'letter' ? 'letter' : 'number';
         const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
-        const userId = String(body.userId || '');
+        const userId = shopUser.id;
         if (!name || !userId) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Missing name' }));
@@ -511,6 +571,12 @@ server.on('request', (req, res) => {
         return;
       }
       if (fullUrl.pathname === '/vanity-claim') {
+        const claimUser = await verifySbUser(bearerFrom(req, body));
+        if (!claimUser) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Log in first' }));
+          return;
+        }
         const sessionId = String(body.sessionId || '');
         if (!stripe || !sessionId) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -518,9 +584,8 @@ server.on('request', (req, res) => {
           return;
         }
         const session = await stripe.checkout.sessions.retrieve(sessionId);
-        const claimedUser = String(body.userId || '');
-        const result = await fulfillPaidSession(session, body.access || '');
-        if (claimedUser && result.userId && claimedUser !== result.userId) {
+        const result = await fulfillPaidSession(session);
+        if (result.userId && claimUser.id !== result.userId) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'This payment belongs to another account' }));
           return;
@@ -530,11 +595,23 @@ server.on('request', (req, res) => {
         return;
       }
       if (fullUrl.pathname === '/push-sub') {
+        const pushUser = await verifySbUser(bearerFrom(req, body));
+        if (!pushUser) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Log in first' }));
+          return;
+        }
         const name = String(body.to || body.username || '').trim().toLowerCase();
         const sub = body.subscription || body;
         if (!name || name.length > 16 || !sub || !sub.endpoint) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false }));
+          return;
+        }
+        const owned = await userOwnsName(pushUser.id, name, bearerFrom(req, body));
+        if (!owned) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'That name is not yours' }));
           return;
         }
         await redisClient.set('push:' + name, JSON.stringify({
@@ -545,11 +622,27 @@ server.on('request', (req, res) => {
         res.end(JSON.stringify({ ok: true }));
         return;
       }
+      const pingUser = await verifySbUser(bearerFrom(req, body));
+      if (!pingUser) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Log in first' }));
+        return;
+      }
+      if (!rateOk(pingRate, pingUser.id, 12, 60000)) {
+        res.writeHead(429, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Too many pings' }));
+        return;
+      }
       const to = String(body.to || '').trim().toLowerCase();
       const kind = String(body.kind || 'note').slice(0, 16);
+      if (!to || to.length > 16 || !/^[a-z0-9]+$/i.test(to)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false }));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
-      if (!to || !webpush) return;
+      if (!webpush) return;
       try {
         const raw = await redisClient.get('push:' + to);
         if (!raw) return;
@@ -581,6 +674,68 @@ server.on('request', (req, res) => {
         res.end();
       }
     });
+    return;
+  }
+  if (fullUrl.pathname === '/admin.html') {
+    sendNotFound(res);
+    return;
+  }
+  if (fullUrl.pathname === '/moose-desk') {
+    const finishDesk = (secretOk) => {
+      if (secretOk) {
+        const tok = adminDeskToken();
+        if (tok) {
+          res.setHeader('Set-Cookie', 'moose_desk=' + tok + '; Secure; HttpOnly; SameSite=Strict; Max-Age=43200; Path=/moose-desk');
+        }
+        fs.readFile(path.join(__dirname, 'admin.html'), (err, data) => {
+          if (err) { sendNotFound(res); return; }
+          res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+          res.setHeader('Cache-Control', 'no-store');
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(data);
+        });
+        return;
+      }
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      res.setHeader('Cache-Control', 'no-store');
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(mooseDeskGateHtml());
+    };
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      finishDesk(hasAdminDeskCookie(req));
+      return;
+    }
+    if (req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 4000) req.destroy(); });
+      req.on('end', () => {
+        let secret = '';
+        try {
+          const ct = String(req.headers['content-type'] || '');
+          if (ct.includes('application/json')) {
+            const j = JSON.parse(raw || '{}');
+            secret = String(j.secret || '');
+          } else {
+            secret = new URLSearchParams(raw).get('secret') || '';
+          }
+        } catch (e) { secret = ''; }
+        const want = process.env.ADMIN_SECRET || '';
+        const ok = !!(want && secret && secret === want);
+        if (!ok) {
+          res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Not Found');
+          return;
+        }
+        finishDesk(true);
+      });
+      return;
+    }
+    sendNotFound(res);
+    return;
+  }
+  if (!PUBLIC_PATHS.has(fullUrl.pathname)) {
+    sendNotFound(res);
     return;
   }
   let filePath = path.join(__dirname, fullUrl.pathname === '/' ? 'index.html' : fullUrl.pathname);

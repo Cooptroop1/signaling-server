@@ -337,15 +337,19 @@ async function loadDeviceList() {
       return;
     }
     const mine = hwDeviceId();
-    data.forEach((d) => {
+    const live = data.filter((d) => !d.revoked);
+    if (!live.length) {
+      box.innerHTML = '<p class="text-xs text-gray-500">No other phones on this account.</p>';
+      return;
+    }
+    live.forEach((d) => {
       const row = document.createElement('div');
       row.className = 'book-row';
       const when = d.last_seen ? new Date(d.last_seen).toLocaleString() : '';
       row.innerHTML = '<strong>' + (d.label || 'Device') + '</strong> ' +
         (d.device_id === mine ? '<span class="presence-on">(this phone)</span> ' : '') +
-        (d.revoked ? '<span class="presence-off">revoked</span> ' : '') +
         '<div class="text-xs text-gray-500">' + when + '</div>';
-      if (d.device_id !== mine && !d.revoked) {
+      if (d.device_id !== mine) {
         const btn = document.createElement('button');
         btn.className = 'block';
         btn.textContent = 'Revoke';

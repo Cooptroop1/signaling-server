@@ -407,13 +407,17 @@ begin
     'ok', true,
     'kind', 'number',
     'n', v.n,
-    'status', case when forever then 'held' else v.status end,
+    'status', case
+      when forever then 'held'
+      when v.status = 'sold' then 'sold'
+      when coalesce(shop.numbers_on, false) then 'listed'
+      else 'held' end,
     'price_cents', coalesce(v.buy_now_cents, v.price_cents),
     'gold', coalesce(v.gold, false),
     'held_forever', forever,
     'current_bid_cents', v.current_bid_cents,
     'shop_on', coalesce(shop.numbers_on, false),
-    'available', (not forever and v.status = 'listed' and coalesce(shop.numbers_on, false))
+    'available', (not forever and coalesce(v.status, 'held') <> 'sold' and coalesce(shop.numbers_on, false))
   );
 end;
 $$;

@@ -701,8 +701,8 @@ window.loggedFeatures = {
 document.addEventListener('DOMContentLoaded', () => {
   const safetyBtn = document.getElementById('safetySettingsBtn');
   if (safetyBtn) safetyBtn.onclick = async () => {
-    const ok = await requireUnlock('Unlock settings');
-    if (!ok && !isPanicMode()) return;
+    const ok = await requireUnlock('Unlock settings', true);
+    if (!ok || isPanicMode()) return;
     fillSettingsForm();
     loadDeviceList();
     const m = document.getElementById('safetySettingsModal');

@@ -777,16 +777,21 @@ async function finishVanityReturn() {
     }
     let paidName = window.__pendingBoughtName || pendingName;
     if (sessionId) {
-      const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          userId: currentUser().id,
-          access: (window.__sbSession && window.__sbSession.access_token) || ''
-        })
-      });
-      const data = await r.json();
+      let data = null;
+      for (let i = 0; i < 8; i++) {
+        const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            userId: currentUser().id,
+            access: (window.__sbSession && window.__sbSession.access_token) || ''
+          })
+        });
+        data = await r.json();
+        if (data && data.applied) break;
+        await new Promise((x) => setTimeout(x, 500));
+      }
       if (data && data.error && !data.applied) {
         if (typeof showStatusMessage === 'function') showStatusMessage(data.error);
         shopNote(data.error);

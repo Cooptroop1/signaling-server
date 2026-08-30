@@ -19,7 +19,7 @@ let inboxChannel = null;
 let heartbeatTimer = null;
 
 function isLoggedIn() {
-  return !!(sb && sb.auth && window.__sbSession && window.__sbSession.user);
+  return !!(!signedOut && sb && sb.auth && window.__sbSession && window.__sbSession.user);
 }
 
 function currentUser() {
@@ -68,6 +68,18 @@ function setAuthUi(session) {
     const book = document.getElementById('mooseBook');
     if (inbox) inbox.classList.add('hidden');
     if (book) book.classList.add('hidden');
+    const notes = document.getElementById('sealedNotesWrap');
+    if (notes) {
+      notes.classList.add('hidden');
+      notes.classList.remove('has-mail');
+    }
+    const notesModal = document.getElementById('sealedNotesModal');
+    if (notesModal) {
+      notesModal.classList.add('hidden');
+      notesModal.classList.remove('active');
+    }
+    window.pendingInbox = [];
+    if (typeof updateSealedNotesBadge === 'function') updateSealedNotesBadge();
   }
 }
 
@@ -428,7 +440,11 @@ function signOut() {
   stopInbox();
   stopHeartbeat();
   window.__sbSession = null;
+  window.pendingInbox = [];
   setAuthUi(null);
+  if (sb && sb.auth && typeof sb.auth.signOut === 'function') {
+    sb.auth.signOut().catch(() => {});
+  }
   try {
     localStorage.removeItem('anonomoose-auth');
     for (let i = localStorage.length - 1; i >= 0; i--) {

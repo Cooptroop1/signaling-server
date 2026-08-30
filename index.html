@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260831d">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260831d">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260831d">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260831d">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260831d">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260831d">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260831e">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260831e">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260831e">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260831e">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260831e">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260831e">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1048,6 +1048,33 @@
     #connectToggleButton { background: #22c55e; }
     #connect2FAChatButton { background: #14b8a6; }
     #photoCodeToggle { background: #ea580c; }
+    #sealedNotesWrap {
+      overflow: visible;
+      height: auto;
+      margin: 6px 0 10px;
+    }
+    #sealedNotesBtn {
+      background: #9f1239;
+      position: relative;
+    }
+    #sealedNotesWrap.has-mail #sealedNotesBtn {
+      box-shadow: 0 0 0 2px #fff, 0 0 0 5px #dc2626;
+    }
+    .mail-dot {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      width: 10px;
+      height: 10px;
+      background: #fbbf24;
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px #9f1239;
+    }
+    #sealedNotesModal .totp-modal-content {
+      width: min(420px, calc(100vw - 2rem));
+      max-width: 420px;
+      margin: 0 auto;
+    }
     #photoCodeModal .totp-modal-content {
       width: min(420px, calc(100vw - 2rem));
       max-width: 420px;
@@ -1153,6 +1180,9 @@
           <div class="start-btn-wrap"><button type="button" id="start2FAChatButton" class="bg-purple-500 text-white rounded hover:bg-purple-600">Start 2FA Room</button></div>
           <div class="start-btn-wrap"><button type="button" id="connectToggleButton" class="bg-green-500 text-white rounded hover:bg-green-600">Connect to Chat</button></div>
           <div class="start-btn-wrap"><button type="button" id="photoCodeToggle" class="text-white rounded hover:bg-orange-600">Photo Code</button></div>
+          <div class="start-btn-wrap logged-only-opt hidden" id="sealedNotesWrap">
+            <button type="button" id="sealedNotesBtn">Sealed Notes<span id="sealedNotesDot" class="mail-dot hidden"></span></button>
+          </div>
         </div>
         <div id="loggedLinkOpts" class="logged-link-box logged-only-opt hidden">
           <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheckStart"> Phone-to-phone only (never use the server backup)</label>
@@ -1281,10 +1311,6 @@
             <button id="myQrButton" type="button">My QR</button>
             <button id="signOutBtn" type="button" class="sign-out">Sign Out</button>
           </div>
-          <div id="mooseInbox" class="account-card hidden">
-            <h3>Sealed notes <span id="inboxCount"></span></h3>
-            <div id="inboxList"></div>
-          </div>
           <div id="mooseBook" class="account-card hidden">
             <h3>Moose book</h3>
             <button id="familyDropBtn" type="button" class="mb-2">Note to family</button>
@@ -1341,6 +1367,13 @@
       <label class="stego-file-btn">Tap to pick the photo they sent<input id="stegoDecodeFile" type="file" accept="image/*"></label>
       <button id="stegoDecodeBtn" type="button" class="bg-gray-800 text-white px-3 py-2 rounded text-sm w-full mb-3">Decode photo</button>
       <button id="closePhotoCode" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full">Close</button>
+    </div>
+  </div>
+  <div id="sealedNotesModal" class="totp-modal" role="dialog" aria-label="Sealed Notes">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-3">Sealed notes <span id="inboxCount"></span></h2>
+      <div id="inboxList"></div>
+      <button id="closeSealedNotes" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-3">Close</button>
     </div>
   </div>
   <div id="totpOptionsModal" class="totp-modal" role="dialog" aria-label="2FA Options" tabindex="-1">
@@ -1549,15 +1582,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260831d"></script>
-  <script src="ratchet.js?v=260831d"></script>
-  <script src="utils.js?v=260831d"></script>
-  <script src="main.js?v=260831d"></script>
-  <script src="init.js?v=260831d"></script>
-  <script src="events.js?v=260831d"></script>
+    <script src="crypto.js?v=260831e"></script>
+  <script src="ratchet.js?v=260831e"></script>
+  <script src="utils.js?v=260831e"></script>
+  <script src="main.js?v=260831e"></script>
+  <script src="init.js?v=260831e"></script>
+  <script src="events.js?v=260831e"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260831d"></script>
-  <script src="account-ui.js?v=260831d"></script>
-  <script src="logged-features.js?v=260831d"></script>
+  <script src="supabase-auth.js?v=260831e"></script>
+  <script src="account-ui.js?v=260831e"></script>
+  <script src="logged-features.js?v=260831e"></script>
 </body>
 </html>

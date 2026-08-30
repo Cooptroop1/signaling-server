@@ -64,17 +64,25 @@ async function rememberSafety(name, theirB64) {
 
 window.pendingInbox = window.pendingInbox || [];
 
+function updateSealedNotesBadge() {
+  const wrap = document.getElementById('sealedNotesWrap');
+  const dot = document.getElementById('sealedNotesDot');
+  const logged = window.sbAuth && window.sbAuth.isLoggedIn();
+  const n = (window.pendingInbox || []).length;
+  if (wrap) wrap.classList.toggle('has-mail', !!(logged && n > 0));
+  if (dot) dot.classList.toggle('hidden', !(logged && n > 0));
+}
+
 function renderMooseInbox() {
-  const box = document.getElementById('mooseInbox');
   const list = document.getElementById('inboxList');
   const count = document.getElementById('inboxCount');
-  if (!box || !list) return;
+  updateSealedNotesBadge();
+  if (!list) return;
   const logged = window.sbAuth && window.sbAuth.isLoggedIn();
   const panic = window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode();
   const rows = panic ? [] : (window.pendingInbox || []);
-  box.classList.toggle('hidden', !logged);
   if (!logged) return;
-  count.textContent = rows.length ? '(' + rows.length + ')' : '(0)';
+  if (count) count.textContent = panic ? '' : (rows.length ? '(' + rows.length + ')' : '');
   if (!rows.length) {
     list.innerHTML = '<p class="text-sm text-gray-500">No sealed notes.</p>';
     return;
@@ -87,10 +95,6 @@ function renderMooseInbox() {
     const openBtn = document.createElement('button');
     openBtn.textContent = 'Open';
     openBtn.onclick = async () => {
-      if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
-        const ok = await window.loggedFeatures.requireUnlock('Unlock note', true);
-        if (!ok) return;
-      }
       if (window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode()) return;
       openInboxItem(msg);
     };
@@ -105,6 +109,19 @@ function renderMooseInbox() {
     row.appendChild(burnBtn);
     list.appendChild(row);
   });
+}
+
+async function openSealedNotes() {
+  if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
+    const ok = await window.loggedFeatures.requireUnlock('Unlock notes');
+    const panic = window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode();
+    if (!ok && !panic) return;
+  }
+  renderMooseInbox();
+  const m = document.getElementById('sealedNotesModal');
+  if (!m) return;
+  m.classList.remove('hidden');
+  m.classList.add('active');
 }
 
 async function openInboxItem(msg) {
@@ -278,8 +295,10 @@ function showMooseQr() {
   window._mooseQrTimer = setInterval(() => { if (typeof rotateMooseQr === 'function') rotateMooseQr(); }, 10 * 60 * 1000);
 }
 
+window.updateSealedNotesBadge = updateSealedNotesBadge;
 window.renderMooseInbox = renderMooseInbox;
 window.renderMooseBook = renderMooseBook;
+window.openSealedNotes = openSealedNotes;
 window.saveBookEntry = saveBookEntry;
 window.isBlocked = isBlocked;
 window.blockName = blockName;
@@ -287,6 +306,15 @@ window.rememberSafety = rememberSafety;
 window.lastSeenLabel = lastSeenLabel;
 
 document.addEventListener('DOMContentLoaded', () => {
+  const notesBtn = document.getElementById('sealedNotesBtn');
+  if (notesBtn) notesBtn.onclick = () => openSealedNotes();
+  const closeNotes = document.getElementById('closeSealedNotes');
+  if (closeNotes) closeNotes.onclick = () => {
+    const m = document.getElementById('sealedNotesModal');
+    if (!m) return;
+    m.classList.add('hidden');
+    m.classList.remove('active');
+  };
   const ethBtn = document.getElementById('copyEthDonate');
   if (ethBtn) {
     ethBtn.onclick = async () => {

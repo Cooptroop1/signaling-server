@@ -456,6 +456,8 @@ function updateLogoutButtonVisibility() {
   document.querySelectorAll('.logged-only-opt').forEach((el) => {
     el.classList.toggle('hidden', !logged);
   });
+  if (typeof updateSealedNotesBadge === 'function') updateSealedNotesBadge();
+  else if (typeof renderMooseInbox === 'function') renderMooseInbox();
 }
 function logout() {
   if (socket && socket.readyState === WebSocket.OPEN && token) {

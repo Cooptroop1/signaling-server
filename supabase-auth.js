@@ -926,23 +926,31 @@ async function checkMooseNumber(raw) {
   const n = parseInt(String(raw || '').replace(/\D/g, ''), 10);
   if (!n || n < 1 || n > 999) return { ok: false, error: 'Pick a number from 1 to 999' };
   if (!sb) return { ok: false, error: 'Not ready' };
+  const shopOn = !!(window.__mooseShop && window.__mooseShop.numbers_on);
+  let data = null;
   try {
-    const { data, error } = await sb.rpc('moose_number_check', { p_n: n });
-    if (error) throw error;
-    return (typeof data === 'string' ? JSON.parse(data) : data) || { ok: false, error: 'Could not check' };
-  } catch (e) {
-    const { data } = await sb.from('vanity_numbers').select('*').eq('n', n).maybeSingle();
-    if (!data) return { ok: false, error: 'Could not check that number' };
-    const forever = !!data.held_forever;
-    const shopOn = !!(window.__mooseShop && window.__mooseShop.numbers_on);
-    return {
-      ok: true, kind: 'number', n: data.n, status: forever ? 'held' : (shopOn ? 'listed' : data.status),
-      price_cents: data.buy_now_cents || data.price_cents, gold: data.gold,
-      held_forever: forever, current_bid_cents: data.current_bid_cents,
-      shop_on: shopOn,
-      available: !forever && data.status !== 'sold' && shopOn
-    };
+    const { data: row } = await sb.from('vanity_numbers').select('n,status,price_cents,buy_now_cents,gold,held_forever,current_bid_cents').eq('n', n).maybeSingle();
+    data = row;
+  } catch (e) {}
+  if (!data) {
+    try {
+      const { data: rpc, error } = await sb.rpc('moose_number_check', { p_n: n });
+      if (error) throw error;
+      data = typeof rpc === 'string' ? JSON.parse(rpc) : rpc;
+    } catch (e) {
+      return { ok: false, error: 'Could not check that number' };
+    }
   }
+  const forever = data.held_forever === true;
+  const price = data.buy_now_cents || data.price_cents;
+  return {
+    ok: true, kind: 'number', n: data.n || n,
+    status: forever ? 'held' : (data.status === 'sold' ? 'sold' : (shopOn ? 'listed' : data.status)),
+    price_cents: price, gold: data.gold,
+    held_forever: forever, current_bid_cents: data.current_bid_cents,
+    shop_on: shopOn,
+    available: !forever && data.status !== 'sold' && shopOn
+  };
 }
 
 async function checkMooseLetter(raw) {

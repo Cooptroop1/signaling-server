@@ -126,6 +126,12 @@ async function applyLoggedInSession(session) {
   window.__sbSession = session;
   if (session && session.user) closeAuthModals();
   setAuthUi(session);
+  if (session && session.user) {
+    try {
+      if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
+    } catch (e) {}
+    if (typeof unlockCallAudio === 'function') unlockCallAudio();
+  }
   if (!session || !session.user) {
     stopInbox();
     return;

@@ -1625,6 +1625,9 @@ function setupWaitingForJoin(codeParam) {
   document.getElementById('messageInput')?.focus();
 }
 document.addEventListener('DOMContentLoaded', () => {
+  ['pointerdown', 'touchstart', 'click'].forEach((ev) => {
+    document.addEventListener(ev, unlockCallAudio, { passive: true });
+  });
   const urlParams = new URLSearchParams(window.location.search);
   const codeParam = urlParams.get('code');
   if (codeParam && validateCode(codeParam)) {
@@ -2696,33 +2699,135 @@ async function inviteEncryptedChat(toUsername, theirPub, opts) {
 }
 
 function stopCallRing() {
+  window.__callRinging = false;
   if (window.__callRingTimer) {
     clearTimeout(window.__callRingTimer);
     window.__callRingTimer = null;
   }
-  try { if (window.__callRingCtx) window.__callRingCtx.close(); } catch (e) {}
-  window.__callRingCtx = null;
+  if (window.__callVibTimer) {
+    clearTimeout(window.__callVibTimer);
+    window.__callVibTimer = null;
+  }
+  try { navigator.vibrate(0); } catch (e) {}
+  const audio = document.getElementById('callRingAudio');
+  if (audio) {
+    try { audio.pause(); audio.currentTime = 0; } catch (e) {}
+  }
+  try { if (window.__callNote) window.__callNote.close(); } catch (e) {}
+  window.__callNote = null;
+}
+
+function mooseRingtoneSrc() {
+  if (window.__mooseRingSrc) return window.__mooseRingSrc;
+  const sr = 22050;
+  const seconds = 2.4;
+  const n = sr * seconds;
+  const pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const burst = (t % 2.4) < 1.15;
+    if (!burst) continue;
+    const env = Math.min(1, (t % 2.4) * 8) * Math.min(1, (1.15 - (t % 2.4)) * 8);
+    const s = (Math.sin(2 * Math.PI * 440 * t) + Math.sin(2 * Math.PI * 480 * t)) * 0.4 * env;
+    pcm[i] = Math.max(-32767, Math.min(32767, s * 32767));
+  }
+  const bytes = pcm.byteLength;
+  const buf = new ArrayBuffer(44 + bytes);
+  const v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + bytes, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, bytes, true);
+  new Uint8Array(buf, 44).set(new Uint8Array(pcm.buffer));
+  window.__mooseRingSrc = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  return window.__mooseRingSrc;
+}
+
+function unlockCallAudio() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!window.__mooseAudioCtx && Ctx) window.__mooseAudioCtx = new Ctx();
+    if (window.__mooseAudioCtx && window.__mooseAudioCtx.state === 'suspended') window.__mooseAudioCtx.resume();
+  } catch (e) {}
+  const a = document.getElementById('callRingAudio');
+  if (!a) return;
+  if (!a.src) a.src = mooseRingtoneSrc();
+  const wasMuted = a.muted;
+  a.muted = true;
+  const p = a.play();
+  if (p && p.then) {
+    p.then(() => { a.pause(); a.currentTime = 0; a.muted = wasMuted; }).catch(() => { a.muted = wasMuted; });
+  }
+}
+
+function startOscRing() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = window.__mooseAudioCtx || (Ctx ? new Ctx() : null);
+    if (!ctx) return;
+    window.__mooseAudioCtx = ctx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const beep = () => {
+      if (!window.__callRinging) return;
+      [440, 480].forEach((freq) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sine';
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.1);
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.start();
+        o.stop(ctx.currentTime + 1.15);
+      });
+      window.__callRingTimer = setTimeout(beep, 2000);
+    };
+    beep();
+  } catch (e) {}
 }
 
 function startCallRing() {
   stopCallRing();
+  window.__callRinging = true;
+  unlockCallAudio();
+  const audio = document.getElementById('callRingAudio');
+  let usedAudio = false;
+  if (audio) {
+    audio.src = mooseRingtoneSrc();
+    audio.loop = true;
+    audio.volume = 1;
+    audio.currentTime = 0;
+    const play = audio.play();
+    if (play && play.then) {
+      play.then(() => { usedAudio = true; }).catch(() => startOscRing());
+    } else {
+      startOscRing();
+    }
+    setTimeout(() => { if (window.__callRinging && audio.paused) startOscRing(); }, 400);
+  } else {
+    startOscRing();
+  }
+  const buzz = () => {
+    if (!window.__callRinging) return;
+    try { navigator.vibrate([900, 250, 900, 500]); } catch (e) {}
+    window.__callVibTimer = setTimeout(buzz, 2600);
+  };
+  buzz();
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    window.__callRingCtx = ctx;
-    const beep = () => {
-      if (!window.__callRingCtx) return;
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = 'sine';
-      o.frequency.value = 880;
-      g.gain.value = 0.06;
-      o.connect(g);
-      g.connect(ctx.destination);
-      o.start();
-      o.stop(ctx.currentTime + 0.18);
-      window.__callRingTimer = setTimeout(beep, 1200);
-    };
-    beep();
+    if (window.Notification && Notification.permission === 'granted') {
+      window.__callNote = new Notification('Incoming call', {
+        body: 'Anonomoose',
+        tag: 'moose-call',
+        requireInteraction: true,
+        silent: false,
+        vibrate: [400, 200, 400, 200, 400]
+      });
+    } else if (window.Notification && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
   } catch (e) {}
 }
 

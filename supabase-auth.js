@@ -58,7 +58,7 @@ function setAuthUi(session) {
     authLinks.style.display = 'none';
     if (note) note.classList.add('hidden');
     if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
-  } else {
+    markPasskeyButton();
     if (nameEl) nameEl.textContent = '';
     userInfo.classList.add('hidden');
     authLinks.style.display = 'block';
@@ -532,9 +532,19 @@ async function registerPasskey() {
   if (!sb || typeof sb.auth.registerPasskey !== 'function') {
     throw new Error('Passkeys are not on yet. In Supabase: Authentication → Passkeys. RP ID: anonomoose.com');
   }
-  const { data, error } = await sb.auth.registerPasskey({ friendlyName: 'This phone' });
+  const { data, error } = await sb.auth.registerPasskey({ friendlyName: 'This device' });
   if (error) throw error;
+  try { localStorage.setItem('moose_passkey_saved', '1'); } catch (e) {}
   return data;
+}
+
+function markPasskeyButton() {
+  const b = document.getElementById('savePasskeyBtn');
+  if (!b) return;
+  try {
+    if (localStorage.getItem('moose_passkey_saved') === '1') b.textContent = 'Fingerprint saved';
+    else b.textContent = 'Save fingerprint';
+  } catch (e) {}
 }
 
 function offerPasskeyOnce() {
@@ -671,13 +681,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!passkeySupported()) savePasskeyBtn.classList.add('hidden');
     savePasskeyBtn.onclick = async () => {
       try {
+        if (localStorage.getItem('moose_passkey_saved') === '1') {
+          if (!confirm('Fingerprint is already saved on this device. Add another?')) return;
+        }
         savePasskeyBtn.disabled = true;
         savePasskeyBtn.textContent = 'Saving…';
         await registerPasskey();
-        savePasskeyBtn.textContent = 'Saved';
-        if (typeof showStatusMessage === 'function') showStatusMessage('Passkey saved on this phone.');
+        savePasskeyBtn.textContent = 'Fingerprint saved';
+        if (typeof showSaveToast === 'function') showSaveToast('Fingerprint saved on this device');
+        else if (typeof showStatusMessage === 'function') showStatusMessage('Fingerprint saved on this device.');
       } catch (err) {
-        savePasskeyBtn.textContent = 'Save fingerprint';
+        markPasskeyButton();
         const msg = (err && err.message) ? err.message : 'Could not save passkey';
         if (/not enabled|not on yet|feature/i.test(msg)) {
           alert('Turn on Passkeys in Supabase first:\nAuthentication → Passkeys → Enable\nRP ID: anonomoose.com\nOrigins: https://www.anonomoose.com,https://anonomoose.com');
@@ -686,7 +700,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } finally {
         savePasskeyBtn.disabled = false;
-        if (savePasskeyBtn.textContent === 'Saving…') savePasskeyBtn.textContent = 'Save fingerprint';
+        if (savePasskeyBtn.textContent === 'Saving…') markPasskeyButton();
       }
     };
   }

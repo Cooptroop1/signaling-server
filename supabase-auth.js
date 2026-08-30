@@ -758,11 +758,13 @@ async function checkMooseNumber(raw) {
     const { data } = await sb.from('vanity_numbers').select('*').eq('n', n).maybeSingle();
     if (!data) return { ok: false, error: 'Could not check that number' };
     const forever = !!data.held_forever || n === 1 || n === 7;
+    const shopOn = !!(window.__mooseShop && window.__mooseShop.numbers_on);
     return {
-      ok: true, kind: 'number', n: data.n, status: forever ? 'held' : data.status,
+      ok: true, kind: 'number', n: data.n, status: forever ? 'held' : (shopOn ? 'listed' : data.status),
       price_cents: data.buy_now_cents || data.price_cents, gold: data.gold,
       held_forever: forever, current_bid_cents: data.current_bid_cents,
-      available: !forever && data.status === 'listed'
+      shop_on: shopOn,
+      available: !forever && data.status !== 'sold' && shopOn
     };
   }
 }
@@ -893,7 +895,14 @@ function bindVanityShop() {
       return;
     }
     const label = row.kind === 'letter' ? row.name : ('#' + row.n);
-    if (row.held_forever) {
+    const n = Number(row.n);
+    const forever = !!row.held_forever || n === 1 || n === 7;
+    const shop = window.__mooseShop || {};
+    const saleOn = row.kind === 'letter'
+      ? (shop.letters_on === true || row.shop_on === true)
+      : (shop.numbers_on === true || row.shop_on === true);
+    const onSale = !forever && row.status !== 'sold' && saleOn;
+    if (forever) {
       out.textContent = label + ' is kept by Anonomoose. Not for sale.';
       return;
     }
@@ -901,10 +910,12 @@ function bindVanityShop() {
       out.textContent = label + ' is taken.';
       return;
     }
-    if (row.status === 'held' || !row.available) {
+    if (!onSale) {
       out.textContent = label + ' is reserved. Not for sale yet.';
       return;
     }
+    row.available = true;
+    window.__vanityLast = row;
     let msg = label + ' is available — ' + pounds(row.price_cents);
     if (row.gold) msg = 'Gold ' + msg;
     if (row.current_bid_cents) msg += '. Highest bid ' + pounds(row.current_bid_cents);

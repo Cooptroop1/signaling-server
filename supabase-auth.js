@@ -356,25 +356,20 @@ async function sendOffline(toUsername, sealed, meta) {
   };
   const uid = currentUser().id;
   const fromOk = uid && uid !== 'duress-local' && /^[0-9a-f-]{36}$/i.test(uid);
-  const full = { to_user_id: dest.id, payload: blob, message: JSON.stringify(blob) };
-  if (fromOk) full.from_user_id = uid;
-  const shapes = window.__mailInsertKeys
-    ? [Object.fromEntries(window.__mailInsertKeys.filter((k) => full[k] != null).map((k) => [k, full[k]]))]
-    : [
-      full,
-      { to_user_id: dest.id, payload: blob, message: JSON.stringify(blob) },
-      { to_user_id: dest.id, payload: blob },
-      { to_user_id: dest.id, message: JSON.stringify(blob) }
-    ];
+  const msg = JSON.stringify(blob);
+  const core = { to_user_id: dest.id, message: msg };
+  if (fromOk) core.from_user_id = uid;
+  const shapes = [
+    { to_user_id: dest.id, message: msg },
+    core,
+    { to_user_id: dest.id, payload: blob },
+    { ...core, payload: blob }
+  ];
   let lastErr = null;
   for (const row of shapes) {
     const { error } = await sb.from('offline_messages').insert(row);
-    if (!error) {
-      window.__mailInsertKeys = Object.keys(row);
-      return;
-    }
+    if (!error) return;
     lastErr = error;
-    if (error && /column/i.test(error.message || '')) window.__mailInsertKeys = null;
   }
   throw new Error(lastErr && lastErr.message ? lastErr.message : 'Could not store sealed note');
 }

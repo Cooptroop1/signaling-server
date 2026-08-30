@@ -25,7 +25,7 @@ function getBook() { return accGet('book', []); }
 function saveBookEntry(entry) {
   if (!entry || !entry.name) return;
   const book = getBook().filter(b => b.name.toLowerCase() !== entry.name.toLowerCase());
-  book.unshift({ name: entry.name, public_key: entry.public_key || '', identity_public_key: entry.identity_public_key || '', last: Date.now() });
+  book.unshift({ name: entry.name, public_key: entry.public_key || '', identity_public_key: entry.identity_public_key || '', last: Date.now(), circle: entry.circle || 'other', id: entry.id || '' });
   accSet('book', book.slice(0, 40));
   renderMooseBook();
 }
@@ -70,7 +70,8 @@ function renderMooseInbox() {
   const count = document.getElementById('inboxCount');
   if (!box || !list) return;
   const logged = window.sbAuth && window.sbAuth.isLoggedIn();
-  const rows = window.pendingInbox || [];
+  const panic = window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode();
+  const rows = panic ? [] : (window.pendingInbox || []);
   box.classList.toggle('hidden', !logged);
   if (!logged) return;
   count.textContent = rows.length ? '(' + rows.length + ')' : '(0)';
@@ -82,10 +83,16 @@ function renderMooseInbox() {
   rows.forEach((msg) => {
     const row = document.createElement('div');
     row.className = 'inbox-row';
-    row.innerHTML = '<div>Sealed note</div>';
+    row.innerHTML = '<div>' + (msg.kind === 'photo' ? 'Sealed photo' : msg.kind === 'meet' ? 'Meet code' : msg.kind === 'invite' ? 'Room invite' : 'Sealed note') + '</div>';
     const openBtn = document.createElement('button');
     openBtn.textContent = 'Open';
-    openBtn.onclick = () => openInboxItem(msg);
+    openBtn.onclick = async () => {
+      if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
+        const ok = await window.loggedFeatures.requireUnlock('Unlock note');
+        if (!ok) return;
+      }
+      openInboxItem(msg);
+    };
     const burnBtn = document.createElement('button');
     burnBtn.textContent = 'Burn';
     burnBtn.className = 'burn';
@@ -114,17 +121,67 @@ async function openInboxItem(msg) {
       showStatusMessage('Blocked note burned.');
       return;
     }
-    if (parsed && parsed.identity) await rememberSafety(fromName, parsed.identity);
+    if (parsed && parsed.identity) {
+      const s = await rememberSafety(fromName, parsed.identity);
+      if (s.warn) {
+        setTrustedName(fromName, false);
+        alert('Safety number CHANGED for ' + fromName + '. Treat this as a new person until you verify.');
+      }
+    }
+    if (parsed && parsed.type === 'meet' && parsed.code) {
+      const unlockAt = Number(parsed.unlock_at) || 0;
+      if (Date.now() < unlockAt) {
+        const when = new Date(unlockAt).toLocaleString();
+        await showSealedNoteView({
+          from: fromName,
+          meta: 'Meet locked until ' + when,
+          text: 'Code hidden until then. Note stays sealed.'
+        });
+        return;
+      }
+      if (parsed.burn_at && Date.now() > Number(parsed.burn_at)) {
+        await playBurnFlash();
+        await burnInboxItem(msg);
+        showStatusMessage('That meet code already burned.');
+        return;
+      }
+      const act = await showSealedNoteView({
+        from: fromName,
+        meta: 'Meet code ready',
+        text: parsed.text || 'Join now. Code burns after you OK.',
+        code: parsed.code
+      });
+      if (act === 'join') {
+        await playBurnFlash();
+        await burnInboxItem(msg);
+        if (typeof autoConnect === 'function') autoConnect(parsed.code);
+        return;
+      }
+      await playBurnFlash();
+      await burnInboxItem(msg);
+      return;
+    }
     if (parsed && parsed.type === 'connection-request' && parsed.code) {
-      if (confirm(fromName + ' sent a room code. Join?')) {
+      const act = await showSealedNoteView({
+        from: fromName,
+        meta: 'Room invite (10 min)',
+        text: 'Join their room? Opening burns this invite.',
+        code: parsed.code
+      });
+      if (act === 'join') {
         await playBurnFlash();
         await burnInboxItem(msg);
         if (typeof autoConnect === 'function') autoConnect(parsed.code);
       }
       return;
     }
-    const text = (parsed && parsed.text) || opened;
-    alert('From ' + fromName + ':\n\n' + text);
+    const text = (parsed && parsed.text) || (parsed && parsed.photo ? '' : opened);
+    const act = await showSealedNoteView({
+      from: fromName,
+      meta: parsed && parsed.photo ? 'Read-once photo' : 'Sealed note',
+      text: text,
+      photo: parsed && parsed.photo
+    });
     await playBurnFlash();
     await burnInboxItem(msg);
   } catch (e) {
@@ -148,7 +205,8 @@ function renderMooseBook() {
   const list = document.getElementById('bookList');
   if (!box || !list) return;
   const logged = window.sbAuth && window.sbAuth.isLoggedIn();
-  const book = getBook();
+  const panic = window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode();
+  const book = panic ? [] : getBook();
   box.classList.toggle('hidden', !logged);
   if (!logged) return;
   if (!book.length) {
@@ -160,7 +218,28 @@ function renderMooseBook() {
     const row = document.createElement('div');
     row.className = 'book-row';
     const blocked = isBlocked(entry.name);
-    row.innerHTML = '<strong>' + entry.name + '</strong>' + (blocked ? ' <span class="presence-off">(blocked)</span>' : '');
+    const trusted = typeof isTrustedName === 'function' && isTrustedName(entry.name);
+    const circ = entry.circle || 'other';
+    row.innerHTML = '<strong>' + entry.name + '</strong>' +
+      (trusted ? ' <span class="presence-on">trusted</span>' : '') +
+      ' <span class="presence-off">' + circ + '</span>' +
+      (blocked ? ' <span class="presence-off">(blocked)</span>' : '');
+    const circleSel = document.createElement('select');
+    circleSel.className = 'circle-select';
+    ['family', 'work', 'other'].forEach((c) => {
+      const o = document.createElement('option');
+      o.value = c;
+      o.textContent = c;
+      if (c === circ) o.selected = true;
+      circleSel.appendChild(o);
+    });
+    circleSel.onchange = () => setCircle(entry.name, circleSel.value);
+    const trustBtn = document.createElement('button');
+    trustBtn.textContent = trusted ? 'Untrust' : 'Trust';
+    trustBtn.onclick = () => {
+      setTrustedName(entry.name, !trusted);
+      if (entry.id) trustOnServer(entry.id, !trusted);
+    };
     const openBtn = document.createElement('button');
     openBtn.textContent = 'Open';
     openBtn.onclick = () => {
@@ -178,6 +257,8 @@ function renderMooseBook() {
       } else blockName(entry.name);
       renderMooseBook();
     };
+    row.appendChild(circleSel);
+    row.appendChild(trustBtn);
     row.appendChild(openBtn);
     row.appendChild(blockBtn);
     list.appendChild(row);

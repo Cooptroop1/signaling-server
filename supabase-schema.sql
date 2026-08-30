@@ -96,3 +96,84 @@ begin
 exception when duplicate_object then
   null;
 end $$;
+
+-- ===== Logged-in extras (1-14) =====
+alter table public.profiles add column if not exists hide_last_seen boolean default false;
+alter table public.profiles add column if not exists discover text default 'anyone';
+alter table public.profiles add column if not exists device_id text;
+alter table public.profiles add column if not exists device_name text;
+
+alter table public.offline_messages add column if not exists expires_at timestamptz;
+alter table public.offline_messages add column if not exists kind text;
+
+create table if not exists public.moose_trust (
+  owner_id uuid not null references public.profiles (id) on delete cascade,
+  peer_id uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (owner_id, peer_id)
+);
+alter table public.moose_trust enable row level security;
+drop policy if exists "trust own" on public.moose_trust;
+create policy "trust own" on public.moose_trust
+  for all to authenticated using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+create table if not exists public.moose_devices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  device_id text not null,
+  label text,
+  last_seen timestamptz default now(),
+  revoked boolean default false,
+  unique (user_id, device_id)
+);
+alter table public.moose_devices enable row level security;
+drop policy if exists "devices own" on public.moose_devices;
+create policy "devices own" on public.moose_devices
+  for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create or replace function public.lookup_moose(p_name text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  r public.profiles%rowtype;
+  me uuid := auth.uid();
+  is_trusted boolean := false;
+  online boolean := false;
+begin
+  if p_name is null or length(trim(p_name)) < 1 then
+    return null;
+  end if;
+  select * into r from public.profiles where display_name = p_name;
+  if not found then
+    return null;
+  end if;
+  if r.id <> me then
+    if coalesce(r.discover, 'anyone') = 'nobody' then
+      return null;
+    end if;
+    if r.discover = 'trusted' then
+      select exists(
+        select 1 from public.moose_trust t
+        where t.owner_id = r.id and t.peer_id = me
+      ) into is_trusted;
+      if not is_trusted then
+        return null;
+      end if;
+    end if;
+  end if;
+  online := (r.last_active is not null and r.last_active > now() - interval '5 minutes' and coalesce(r.hide_last_seen, false) = false);
+  return jsonb_build_object(
+    'id', r.id,
+    'display_name', r.display_name,
+    'public_key', r.public_key,
+    'identity_public_key', r.identity_public_key,
+    'last_active', case when coalesce(r.hide_last_seen, false) then null else r.last_active end,
+    'status', case when online then 'online' else 'offline' end
+  );
+end;
+$$;
+
+grant execute on function public.lookup_moose(text) to authenticated, anon;

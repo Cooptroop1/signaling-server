@@ -117,6 +117,10 @@ async function applyLoggedInSession(session) {
     if (typeof renderMooseBook === 'function') renderMooseBook();
     if (typeof schedulePersistKeys === 'function') schedulePersistKeys();
     offerPasskeyOnce();
+    if (window.loggedFeatures) {
+      window.loggedFeatures.claimThisDevice().catch(() => {});
+      window.loggedFeatures.runDeadManSwitch().catch(() => {});
+    }
   }).catch((e) => console.warn('post-login', e));
 }
 
@@ -129,9 +133,10 @@ async function publishKeys() {
     const ident = me && me.ecdsaPubB64;
     const uid = currentUser().id;
     const keysPatch = {
-      last_active: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
+    const hide = (typeof accGet === 'function') ? !!accGet('hideLastSeen', false) : false;
+    if (!hide) keysPatch.last_active = new Date().toISOString();
     if (pub) keysPatch.public_key = pub;
     if (ident) keysPatch.identity_public_key = ident;
     if (typeof clientId !== 'undefined' && clientId) keysPatch.client_id = clientId;
@@ -155,8 +160,15 @@ function startHeartbeat() {
   const beat = () => {
     if (signedOut || !isLoggedIn()) return;
     ensureSbSession().then(() => {
-      const patch = { last_active: new Date().toISOString() };
+      if (typeof window.loggedFeatures !== 'undefined' && window.loggedFeatures.checkDeviceLock) {
+        return window.loggedFeatures.checkDeviceLock();
+      }
+    }).then(() => {
+      const hide = (typeof accGet === 'function') ? !!accGet('hideLastSeen', false) : false;
+      const patch = {};
+      if (!hide) patch.last_active = new Date().toISOString();
       if (typeof clientId !== 'undefined' && clientId) patch.client_id = clientId;
+      if (Object.keys(patch).length === 0) return null;
       return sb.from('profiles').update(patch).eq('id', currentUser().id);
     }).then((res) => {
       if (res && res.error && /client_id|schema cache/i.test(res.error.message || '')) {
@@ -200,7 +212,9 @@ function mapRow(row) {
     encrypted: p.encrypted,
     iv: p.iv,
     ephemeral_public: p.ephemeral_public,
-    messageId: p.messageId
+    messageId: p.messageId,
+    expires_at: row.expires_at || p.expires_at || null,
+    kind: row.kind || p.kind || null
   };
 }
 
@@ -215,7 +229,14 @@ async function loadInbox() {
     console.warn('inbox', error.message);
     return;
   }
-  window.pendingInbox = (data || []).map(mapRow);
+  window.pendingInbox = (data || []).map(mapRow).filter((row) => {
+    if (!row.expires_at) return true;
+    return new Date(row.expires_at).getTime() > Date.now();
+  });
+  const expired = (data || []).filter((row) => row.expires_at && new Date(row.expires_at).getTime() <= Date.now());
+  expired.forEach((row) => {
+    sb.from('offline_messages').delete().eq('id', row.id).eq('to_user_id', currentUser().id).then(() => {});
+  });
   if (typeof renderMooseInbox === 'function') renderMooseInbox();
 }
 
@@ -239,22 +260,38 @@ function subscribeInbox(uid) {
 async function findUser(name) {
   if (!sb) return null;
   try { await ensureSbSession(); } catch (e) {}
+  try {
+    const { data, error } = await sb.rpc('lookup_moose', { p_name: name });
+    if (!error && data) {
+      const row = typeof data === 'string' ? JSON.parse(data) : data;
+      if (!row || !row.display_name) return null;
+      return {
+        id: row.id,
+        status: row.status || 'offline',
+        public_key: row.public_key,
+        identity_public_key: row.identity_public_key,
+        last_active: row.last_active
+      };
+    }
+  } catch (e) {}
   const { data, error } = await sb.from('profiles')
-    .select('display_name, public_key, identity_public_key, last_active')
+    .select('id, display_name, public_key, identity_public_key, last_active, hide_last_seen')
     .eq('display_name', name)
     .maybeSingle();
   if (error || !data) return null;
+  const hide = !!data.hide_last_seen;
   const last = data.last_active ? new Date(data.last_active).getTime() : 0;
-  const online = last && (Date.now() - last < 5 * 60 * 1000);
+  const online = !hide && last && (Date.now() - last < 5 * 60 * 1000);
   return {
+    id: data.id,
     status: online ? 'online' : 'offline',
     public_key: data.public_key,
     identity_public_key: data.identity_public_key,
-    last_active: data.last_active
+    last_active: hide ? null : data.last_active
   };
 }
 
-async function sendOffline(toUsername, sealed) {
+async function sendOffline(toUsername, sealed, meta) {
   if (!isLoggedIn()) throw new Error('Log in to send offline mail');
   await ensureSbSession();
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
@@ -268,12 +305,16 @@ async function sendOffline(toUsername, sealed) {
     encrypted: sealed.encrypted,
     iv: sealed.iv,
     ephemeral_public: sealed.ephemeral_public,
-    messageId: sealed.messageId || null
+    messageId: sealed.messageId || null,
+    kind: (meta && meta.kind) || 'note'
   };
   const uid = currentUser().id;
+  const expiresAt = (meta && meta.expiresAt) ? new Date(meta.expiresAt).toISOString() : null;
   const tries = [
-    { to_user_id: dest.id, payload: blob },
+    { to_user_id: dest.id, from_user_id: uid, payload: blob, expires_at: expiresAt, kind: blob.kind },
+    { to_user_id: dest.id, payload: blob, expires_at: expiresAt, kind: blob.kind },
     { to_user_id: dest.id, from_user_id: uid, payload: blob },
+    { to_user_id: dest.id, payload: blob },
     { to_user_id: dest.id, from_user_id: uid, message: JSON.stringify(blob) },
     { to_user_id: dest.id, message: JSON.stringify(blob) }
   ];
@@ -284,6 +325,12 @@ async function sendOffline(toUsername, sealed) {
     lastErr = error;
   }
   throw new Error(lastErr && lastErr.message ? lastErr.message : 'Could not store sealed note');
+}
+
+async function burnAllOffline() {
+  if (!isLoggedIn()) return;
+  await ensureSbSession();
+  await sb.from('offline_messages').delete().eq('to_user_id', currentUser().id);
 }
 
 async function confirmOffline(id) {
@@ -469,6 +516,7 @@ window.sbAuth = {
   findUser,
   sendOffline,
   confirmOffline,
+  burnAllOffline,
   publishKeys,
   signUp,
   signIn,

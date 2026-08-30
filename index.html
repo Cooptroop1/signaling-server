@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260828l">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260828l">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260828l">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260828l">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260828l">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260828l">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260830a">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260830a">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260830a">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260830a">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260830a">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260830a">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1005,6 +1005,9 @@
       12% { opacity: 1; }
       100% { opacity: 0; transform: translateY(-110vh) rotate(210deg); }
     }
+    html.shot-guard #sealedNoteModal img, html.shot-guard #sealedNoteText { filter: none; }
+    html.shot-guard #sealedNoteModal { -webkit-user-select: none; user-select: none; }
+    .circle-select { font-size: 0.75rem; margin: 0.2rem 0.2rem 0 0; padding: 0.2rem; border-radius: 0.35rem; border: 1px solid #d1d5db; }
   </style>
 </head>
 <body class="bg-black min-h-screen flex items-center justify-center">
@@ -1143,6 +1146,8 @@
           <div class="account-actions">
           <button id="savePasskeyBtn" type="button">Save fingerprint</button>
             <button id="searchUserButton" type="button">Search</button>
+            <button id="safetySettingsBtn" type="button">Safety</button>
+            <button id="burnAllInboxBtn" type="button" class="sign-out">Burn inbox</button>
             <button id="myQrButton" type="button">My QR</button>
             <button id="signOutBtn" type="button" class="sign-out">Sign Out</button>
           </div>
@@ -1185,7 +1190,7 @@
       <p><strong>Moose (corner):</strong> Tap once to burn this phone. Tap twice to wipe everyone still in the room, kill the code, and leave. Switching away for 20 seconds also burns a live room. Text Code and Random Board give you three minutes so you can pick a room or send a text without wiping. Refreshing or closing the tab burns this device.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
       <p><strong>Fingerprint / Face ID:</strong> After Sign Up, tap Save fingerprint. Next time tap Login then Fingerprint / Face ID — no password. First time only: in Supabase go Authentication → Passkeys, turn it on, RP ID <code>anonomoose.com</code>, origins <code>https://www.anonomoose.com</code> and <code>https://anonomoose.com</code>.</p>
-      <p><strong>Search User:</strong> Find a signed-up name. Send a sealed invite or note. Inbox, moose book and QR stay on this phone. Rooms still burn.</p>
+      <p><strong>Safety:</strong> Logged-in only. Trust names, hide last seen, panic PIN, one-phone lock, disappearing notes, read-once photos, timed meet codes. iPhone cannot fully block screenshots — the note hides if you leave the app.</p>
     </div>
   </div>
   <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
@@ -1255,6 +1260,7 @@
     <div id="searchUserModal" class="totp-modal hidden" role="dialog" aria-label="Search User" tabindex="-1">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-4">Search User</h2>
+      <p id="trustedSearchHint" class="text-xs text-gray-500 mb-2"></p>
       <input id="searchUsernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Search username" maxlength="16">
       <div id="searchError" class="text-red-500 mb-2"></div>
       <div id="searchResult" class="mb-2"></div>
@@ -1333,15 +1339,64 @@
       <button id="cancelRecoverKeysButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">Cancel</button>
     </div>
   </div>
-    <script src="crypto.js?v=260828l"></script>
-  <script src="ratchet.js?v=260828l"></script>
-  <script src="utils.js?v=260828l"></script>
-  <script src="main.js?v=260828l"></script>
-  <script src="init.js?v=260828l"></script>
-  <script src="events.js?v=260828l"></script>
-
+  <div id="pinUnlockModal" class="totp-modal hidden" role="dialog" aria-label="PIN">
+    <div class="totp-modal-content">
+      <h2 id="pinUnlockTitle" class="text-xl font-bold mb-4">Enter PIN</h2>
+      <input id="pinUnlockInput" type="password" inputmode="numeric" class="border border-gray-300 p-3 w-full mb-2 rounded" placeholder="PIN">
+      <p id="pinUnlockError" class="text-red-500 text-sm mb-2"></p>
+      <button id="pinUnlockSubmit" class="bg-blue-500 text-white px-4 py-2 rounded w-full">Unlock</button>
+      <button id="pinUnlockCancel" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2">Cancel</button>
+    </div>
+  </div>
+  <div id="sealedNoteModal" class="totp-modal hidden shot-guard-box" role="dialog" aria-label="Sealed note">
+    <div class="totp-modal-content">
+      <h2 id="sealedNoteFrom" class="text-xl font-bold mb-1"></h2>
+      <p id="sealedNoteMeta" class="text-xs text-gray-500 mb-2"></p>
+      <img id="sealedNoteImg" class="hidden w-full rounded mb-2" alt="Sealed photo">
+      <p id="sealedNoteText" class="mb-3 whitespace-pre-wrap"></p>
+      <button id="sealedNoteJoin" class="bg-green-500 text-white px-4 py-2 rounded w-full mb-2 hidden">Join room</button>
+      <button id="sealedNoteOk" class="bg-red-500 text-white px-4 py-2 rounded w-full">OK · burn</button>
+    </div>
+  </div>
+  <div id="safetySettingsModal" class="totp-modal hidden" role="dialog" aria-label="Safety settings">
+    <div class="totp-modal-content" style="max-height:80vh;overflow:auto">
+      <h2 class="text-xl font-bold mb-3">Safety</h2>
+      <label class="block text-sm mb-2"><input type="checkbox" id="setHideLastSeen"> Hide last seen (look offline)</label>
+      <label class="block text-sm mb-1">Who can find you</label>
+      <select id="setDiscover" class="border border-gray-300 p-2 w-full mb-3 rounded">
+        <option value="anyone">Anyone</option>
+        <option value="trusted">Trusted moose only</option>
+        <option value="nobody">Nobody (hidden)</option>
+      </select>
+      <label class="block text-sm mb-1">Dead-man switch (unread notes burn if you stay away)</label>
+      <select id="setDeadMan" class="border border-gray-300 p-2 w-full mb-3 rounded">
+        <option value="0">Off</option>
+        <option value="8">8 hours</option>
+        <option value="24">24 hours</option>
+        <option value="48">48 hours</option>
+      </select>
+      <button id="saveSafetySettings" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-4">Save settings</button>
+      <h3 class="font-bold mb-1">PIN / panic PIN</h3>
+      <p class="text-xs text-gray-500 mb-2">Real PIN unlocks Search and inbox. Panic PIN shows empty book. Fingerprint can unlock if you saved one.</p>
+      <input id="setRealPin" type="password" inputmode="numeric" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="New real PIN (4+)">
+      <input id="setPanicPin" type="password" inputmode="numeric" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Panic PIN (different)">
+      <label class="text-xs block mb-2"><input type="checkbox" id="clearPins"> Clear PINs</label>
+      <button id="savePinSettings" class="bg-black text-white px-4 py-2 rounded w-full mb-4">Save PINs on this phone</button>
+      <h3 class="font-bold mb-1">Devices</h3>
+      <p class="text-xs text-gray-500 mb-2">New login takes this phone. Revoke a stolen one.</p>
+      <div id="deviceList"></div>
+      <button id="closeSafetySettings" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-3">Close</button>
+    </div>
+  </div>
+    <script src="crypto.js?v=260830a"></script>
+  <script src="ratchet.js?v=260830a"></script>
+  <script src="utils.js?v=260830a"></script>
+  <script src="main.js?v=260830a"></script>
+  <script src="init.js?v=260830a"></script>
+  <script src="events.js?v=260830a"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260828l"></script>
-  <script src="account-ui.js?v=260828l"></script>
+  <script src="supabase-auth.js?v=260830a"></script>
+  <script src="account-ui.js?v=260830a"></script>
+  <script src="logged-features.js?v=260830a"></script>
 </body>
 </html>

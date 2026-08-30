@@ -1557,10 +1557,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('loginCancelButton').onclick = () => {
     document.getElementById('loginModal').classList.remove('active');
   };
-  document.getElementById('searchUserButton').addEventListener('click', () => {
+  document.getElementById('searchUserButton').addEventListener('click', async () => {
+    if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
+      const ok = await window.loggedFeatures.requireUnlock('Unlock search');
+      if (!ok) return;
+    }
     const modal = document.getElementById('searchUserModal');
     modal.classList.remove('hidden');
     modal.classList.add('active');
+    const hint = document.getElementById('trustedSearchHint');
+    if (hint && typeof getTrusted === 'function') {
+      const t = getTrusted();
+      hint.textContent = t.length ? ('Trusted first: ' + t.slice(0, 8).join(', ')) : '';
+    }
   });
   document.getElementById('searchSubmitButton').onclick = async () => {
     const name = document.getElementById('searchUsernameInput').value.trim();
@@ -2236,7 +2245,7 @@ function showUserSearchResult(searchedUsername, message) {
   line.innerHTML = '<strong>' + searchedUsername + '</strong> · <span class="' + (on ? 'presence-on' : 'presence-off') + '">' + seen + '</span>';
   searchResult.appendChild(line);
   if (typeof saveBookEntry === 'function') {
-    saveBookEntry({ name: searchedUsername, public_key: message.public_key, identity_public_key: message.identity_public_key });
+    saveBookEntry({ name: searchedUsername, public_key: message.public_key, identity_public_key: message.identity_public_key, id: message.id });
   }
   if (message.identity_public_key && typeof rememberSafety === 'function') {
     rememberSafety(searchedUsername, message.identity_public_key).then((s) => {
@@ -2244,9 +2253,18 @@ function showUserSearchResult(searchedUsername, message) {
       const p = document.createElement('p');
       p.className = 'safety-num';
       p.textContent = (s.warn ? 'Safety number CHANGED: ' : 'Safety number: ') + s.num;
-      if (s.warn) p.style.color = '#dc2626';
+      if (s.warn) {
+        p.style.color = '#dc2626';
+        if (typeof setTrustedName === 'function') setTrustedName(searchedUsername, false);
+      }
       searchResult.insertBefore(p, searchResult.children[1] || null);
     });
+  }
+  if (typeof isTrustedName === 'function' && isTrustedName(searchedUsername)) {
+    const star = document.createElement('p');
+    star.className = 'presence-on';
+    star.textContent = 'Trusted moose';
+    searchResult.appendChild(star);
   }
   if (message.public_key) {
     userPublicKey = message.public_key;
@@ -2276,6 +2294,29 @@ function showUserSearchResult(searchedUsername, message) {
       searchResult.textContent = searchedUsername + ' blocked.';
     };
     searchResult.appendChild(blockBtn);
+    const trustBtn = document.createElement('button');
+    trustBtn.textContent = (typeof isTrustedName === 'function' && isTrustedName(searchedUsername)) ? 'Untrust' : 'Trust';
+    trustBtn.onclick = () => {
+      const on = !(typeof isTrustedName === 'function' && isTrustedName(searchedUsername));
+      if (typeof setTrustedName === 'function') setTrustedName(searchedUsername, on);
+      if (message.id && typeof trustOnServer === 'function') trustOnServer(message.id, on);
+      trustBtn.textContent = on ? 'Untrust' : 'Trust';
+    };
+    searchResult.appendChild(trustBtn);
+    const ttl = document.createElement('select');
+    ttl.className = 'border border-gray-300 p-2 w-full mt-2 rounded';
+    ttl.innerHTML = '<option value="0">Keep until they open</option><option value="3600000">Burn in 1 hour if unopened</option><option value="86400000">Burn in 24 hours if unopened</option>';
+    const photoInput = document.createElement('input');
+    photoInput.type = 'file';
+    photoInput.accept = 'image/*';
+    photoInput.className = 'mt-2';
+    const meetAt = document.createElement('input');
+    meetAt.type = 'datetime-local';
+    meetAt.className = 'border border-gray-300 p-2 w-full mt-2 rounded';
+    meetAt.title = 'Optional meet time';
+    const meetHint = document.createElement('p');
+    meetHint.className = 'text-xs text-gray-500 mt-1';
+    meetHint.textContent = 'Optional: set a meet time. Code stays hidden until then, then burns.';
     const offlineMsgContainer = document.createElement('div');
     const textarea = document.createElement('textarea');
     textarea.placeholder = 'Sealed note (they open it later)';
@@ -2284,11 +2325,17 @@ function showUserSearchResult(searchedUsername, message) {
     sendBtn.textContent = 'Send note';
     sendBtn.onclick = async () => {
       const msgText = textarea.value.trim();
-      if (!msgText || sendBtn.disabled) return;
+      if (sendBtn.disabled) return;
+      if (!msgText && !(photoInput.files && photoInput.files[0]) && !meetAt.value) return;
       sendBtn.disabled = true;
       sendBtn.textContent = 'Sending…';
       try {
-        await sendOfflineMessage(searchedUsername, msgText);
+        const ttlMs = Number(ttl.value) || 0;
+        const photo = (photoInput.files && photoInput.files[0] && typeof compressPhotoFile === 'function')
+          ? await compressPhotoFile(photoInput.files[0])
+          : null;
+        const meet = meetAt.value ? new Date(meetAt.value).getTime() : 0;
+        await sendOfflineMessage(searchedUsername, msgText, { ttlMs, photo, meetAt: meet });
         textarea.value = '';
         sendBtn.textContent = 'Sent';
         setTimeout(() => {
@@ -2302,6 +2349,10 @@ function showUserSearchResult(searchedUsername, message) {
         sendBtn.disabled = false;
       }
     };
+    offlineMsgContainer.appendChild(ttl);
+    offlineMsgContainer.appendChild(photoInput);
+    offlineMsgContainer.appendChild(meetHint);
+    offlineMsgContainer.appendChild(meetAt);
     offlineMsgContainer.appendChild(textarea);
     offlineMsgContainer.appendChild(sendBtn);
     searchResult.appendChild(offlineMsgContainer);
@@ -2312,9 +2363,10 @@ function showUserSearchResult(searchedUsername, message) {
 
 const offlineSendLock = new Set();
 
-async function sendOfflineMessage(toUsername, messageText) {
-  if (!toUsername || !messageText) throw new Error('Missing recipient or message');
-  const lockKey = 'note:' + String(toUsername).toLowerCase() + ':' + messageText;
+async function sendOfflineMessage(toUsername, messageText, extra) {
+  extra = extra || {};
+  if (!toUsername || !(messageText || extra.photo || extra.meetAt)) throw new Error('Missing recipient or message');
+  const lockKey = 'note:' + String(toUsername).toLowerCase() + ':' + (messageText || '') + ':' + (extra.meetAt || '') + ':' + (extra.photo ? 'p' : '');
   if (offlineSendLock.has(lockKey)) throw new Error('Already sending that note.');
   offlineSendLock.add(lockKey);
   try {
@@ -2322,12 +2374,24 @@ async function sendOfflineMessage(toUsername, messageText) {
   if (!userPublicKey) throw new Error('No public key for recipient');
   await ensurePersistentKeys();
   const messageId = generateMessageId();
-  const plaintext = JSON.stringify({ type: 'message', from: username, text: messageText, timestamp: Date.now(), identity: identityPubB64 || '' });
+  let kind = extra.photo ? 'photo' : 'note';
+  let payload = { type: extra.photo ? 'photo' : 'message', from: username, text: messageText || '', timestamp: Date.now(), identity: identityPubB64 || '' };
+  if (extra.photo) payload.photo = extra.photo;
+  if (extra.meetAt) {
+    if (!code) throw new Error('Start a chat first, then send a timed meet code.');
+    kind = 'meet';
+    payload.type = 'meet';
+    payload.code = code;
+    payload.unlock_at = extra.meetAt;
+    payload.burn_at = extra.meetAt + 30 * 60 * 1000;
+  }
+  const plaintext = JSON.stringify(payload);
   const sealed = await sealOfflinePayload(userPublicKey, toUsername, plaintext, messageId);
   sealed.messageId = messageId;
+  const expiresAt = extra.ttlMs ? (Date.now() + extra.ttlMs) : (extra.meetAt ? extra.meetAt + 30 * 60 * 1000 : null);
   if (window.sbAuth && window.sbAuth.isLoggedIn()) {
-    await window.sbAuth.sendOffline(toUsername, sealed);
-    showStatusMessage('Encrypted offline message sent.');
+    await window.sbAuth.sendOffline(toUsername, sealed, { kind, expiresAt });
+    showStatusMessage(kind === 'meet' ? 'Meet code sealed. Hidden until the time you set.' : 'Encrypted offline message sent.');
     return;
   }
   socket.send(JSON.stringify({
@@ -2371,7 +2435,7 @@ async function inviteEncryptedChat(toUsername, theirPub) {
     const sealed = await sealOfflinePayload(theirPub, toUsername, plaintext, messageId);
     sealed.messageId = messageId;
     if (window.sbAuth && window.sbAuth.isLoggedIn()) {
-      await window.sbAuth.sendOffline(toUsername, sealed);
+      await window.sbAuth.sendOffline(toUsername, sealed, { kind: 'invite', expiresAt: Date.now() + 10 * 60 * 1000 });
     } else {
       socket.send(JSON.stringify({
         type: 'send-offline-message',

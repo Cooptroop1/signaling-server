@@ -2093,34 +2093,35 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   const cornerLogo = document.getElementById('cornerLogo');
   if (cornerLogo) {
-    let mooseTapAt = 0;
-    const onMoose = () => {
-      const now = Date.now();
-      if (now - mooseTapAt < 700) {
-        mooseTapAt = 0;
-        requestRoomWipe();
-        playBurnFlash().then(() => {
-          burnChatSession();
-          if (window.loggedFeatures && window.loggedFeatures.goCoverStory) window.loggedFeatures.goCoverStory();
-        });
-        return;
+    let mooseSingleTimer = null;
+    const fullMooseBurn = () => {
+      if (mooseSingleTimer) {
+        clearTimeout(mooseSingleTimer);
+        mooseSingleTimer = null;
       }
-      mooseTapAt = now;
-      playBurnFlash().then(() => {
-        burnTranscript();
-        showStatusMessage('Messages burned here. Tap the moose again to wipe everyone in the room and leave.');
-      });
-    };
-    cornerLogo.addEventListener('click', onMoose);
-    cornerLogo.addEventListener('dblclick', (e) => {
-      e.preventDefault();
-      mooseTapAt = 0;
       requestRoomWipe();
       playBurnFlash().then(() => {
         burnChatSession();
-        if (window.loggedFeatures && window.loggedFeatures.goCoverStory) window.loggedFeatures.goCoverStory();
+        if (window.loggedFeatures && window.loggedFeatures.goCoverStory) {
+          window.loggedFeatures.goCoverStory();
+        }
       });
-    });
+    };
+    const onMoose = (e) => {
+      if (e) e.preventDefault();
+      if (mooseSingleTimer) {
+        fullMooseBurn();
+        return;
+      }
+      mooseSingleTimer = setTimeout(() => {
+        mooseSingleTimer = null;
+        playBurnFlash().then(() => {
+          burnTranscript();
+          showStatusMessage('Messages burned here. Tap the moose twice to wipe everyone and leave.');
+        });
+      }, 500);
+    };
+    cornerLogo.addEventListener('click', onMoose);
   } else {
     console.error('cornerLogo element not found—check ID in index.html');
   }

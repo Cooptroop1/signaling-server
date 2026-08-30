@@ -59,6 +59,7 @@ function setAuthUi(session) {
     if (note) note.classList.add('hidden');
     if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
     markPasskeyButton();
+  } else {
     if (nameEl) nameEl.textContent = '';
     userInfo.classList.add('hidden');
     authLinks.style.display = 'block';

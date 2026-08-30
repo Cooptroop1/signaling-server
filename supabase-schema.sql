@@ -178,3 +178,13 @@ end;
 $$;
 
 grant execute on function public.lookup_moose(text) to authenticated, anon;
+
+-- Remote wipe
+alter table public.profiles add column if not exists wipe_epoch bigint;
+do $$
+begin
+  alter publication supabase_realtime add table public.profiles;
+exception when duplicate_object then
+  null;
+end $$;
+

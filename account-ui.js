@@ -95,7 +95,14 @@ function renderMooseInbox() {
   rows.forEach((msg) => {
     const row = document.createElement('div');
     row.className = 'inbox-row';
-    row.innerHTML = '<div>' + (msg.kind === 'photo' ? 'Sealed photo' : msg.kind === 'meet' ? 'Meet code' : msg.kind === 'invite' ? 'Room invite' : 'Sealed note') + '</div>';
+    row.innerHTML = '<div>' + (
+      msg.kind === 'photo' ? 'Sealed photo'
+      : msg.kind === 'meet' ? 'Meet code'
+      : msg.kind === 'invite' ? 'Room invite'
+      : msg.kind === 'voice' ? 'Sealed voice'
+      : msg.kind === 'poke' ? 'Moose poked you'
+      : 'Sealed note'
+    ) + '</div>';
     const openBtn = document.createElement('button');
     openBtn.textContent = 'Open';
     openBtn.onclick = async () => {
@@ -163,6 +170,31 @@ async function openInboxItem(msg) {
         setTrustedName(fromName, false);
         alert('Safety number CHANGED for ' + fromName + '. Treat this as a new person until you verify.');
       }
+    }
+    if (parsed && parsed.unlock_at && Date.now() < Number(parsed.unlock_at) && parsed.type !== 'meet') {
+      const when = new Date(Number(parsed.unlock_at)).toLocaleString();
+      await showSealedNoteView({
+        from: fromName,
+        meta: 'Locked until ' + when,
+        text: 'Hidden until then. Note stays sealed.'
+      });
+      return;
+    }
+    if (parsed && parsed.burn_at && Date.now() > Number(parsed.burn_at) && parsed.type !== 'meet') {
+      await playBurnFlash();
+      await burnInboxItem(msg);
+      showStatusMessage('That note already burned.');
+      return;
+    }
+    if (parsed && parsed.type === 'poke') {
+      await showSealedNoteView({
+        from: 'Moose',
+        meta: 'Poke',
+        text: 'A moose poked you.'
+      });
+      await playBurnFlash();
+      await burnInboxItem(msg);
+      return;
     }
     if (parsed && parsed.type === 'meet' && parsed.code) {
       const unlockAt = Number(parsed.unlock_at) || 0;

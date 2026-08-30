@@ -214,13 +214,28 @@ function showSealedNoteView(opts) {
       img.classList.add('hidden');
     }
     const audio = document.getElementById('sealedNoteAudio');
+    const hold = document.getElementById('sealedNoteHold');
     if (audio) {
       if (opts.voice) {
         audio.src = opts.voice;
-        audio.classList.remove('hidden');
+        audio.classList.add('hidden');
+        if (hold) {
+          hold.classList.remove('hidden');
+          const down = () => { try { audio.currentTime = 0; audio.play(); } catch (e) {} };
+          const up = () => { try { audio.pause(); } catch (e) {} };
+          hold.onpointerdown = down;
+          hold.onpointerup = up;
+          hold.onpointerleave = up;
+          hold.onpointercancel = up;
+        }
       } else {
         audio.removeAttribute('src');
         audio.classList.add('hidden');
+        if (hold) {
+          hold.classList.add('hidden');
+          hold.onpointerdown = null;
+          hold.onpointerup = null;
+        }
       }
     }
     join.classList.toggle('hidden', !opts.code);
@@ -277,7 +292,15 @@ async function checkDeviceLock() {
     }
   } catch (e) {}
   try {
-    const { data } = await sb.from('profiles').select('device_id').eq('id', uid).maybeSingle();
+    const { data } = await sb.from('profiles').select('device_id, wipe_epoch').eq('id', uid).maybeSingle();
+    if (data && data.wipe_epoch) {
+      const seen = Number(accGet('wipeEpochSeen', 0)) || 0;
+      if (data.wipe_epoch > seen && data.device_id !== did) {
+        accSet('wipeEpochSeen', data.wipe_epoch);
+        kickThisDevice('Remote wipe.');
+        return;
+      }
+    }
     if (data && data.device_id && data.device_id !== did) {
       kickThisDevice('Signed in on another phone.');
     }
@@ -286,13 +309,29 @@ async function checkDeviceLock() {
 
 function kickThisDevice(msg) {
   if (typeof showStatusMessage === 'function') showStatusMessage(msg || 'Signed out on this phone.');
-  if (typeof playBurnFlash === 'function') {
-    playBurnFlash().then(() => {
-      if (typeof burnAccountLocal === 'function') burnAccountLocal();
-    });
-  } else if (typeof burnAccountLocal === 'function') {
-    burnAccountLocal();
-  }
+  const go = async () => {
+    try { if (typeof burnAllInbox === 'function') await burnAllInbox(true); } catch (e) {}
+    if (typeof burnAccountLocal === 'function') burnAccountLocal();
+  };
+  if (typeof playBurnFlash === 'function') playBurnFlash().then(go);
+  else go();
+}
+
+async function remoteWipeOthers() {
+  const sb = window.supabaseClient;
+  if (!sb || !window.__sbSession) throw new Error('Log in first');
+  if (!confirm('Burn inbox and sign out on your other devices? This device stays on.')) return;
+  const uid = window.__sbSession.user.id;
+  const mine = hwDeviceId();
+  const epoch = Date.now();
+  accSet('wipeEpochSeen', epoch);
+  await sb.from('profiles').update({ wipe_epoch: epoch, device_id: mine, device_name: deviceLabel() }).eq('id', uid);
+  try {
+    await sb.from('moose_devices').update({ revoked: true }).eq('user_id', uid).neq('device_id', mine);
+  } catch (e) {}
+  if (typeof showSaveToast === 'function') showSaveToast('Other devices will wipe when they next open the app');
+  else if (typeof showStatusMessage === 'function') showStatusMessage('Other devices will wipe when they next open the app.');
+  loadDeviceList();
 }
 
 async function runDeadManSwitch() {
@@ -432,6 +471,7 @@ function dismissModal(m) {
     mooseBookModal: 'closeMooseBook',
     helpModal: 'closeHelp',
     mooseQrModal: 'closeMooseQrButton',
+    roomQrModal: 'closeRoomQr',
     searchUserModal: 'searchCancelButton'
   };
   const id = clickers[m.id];
@@ -755,7 +795,8 @@ window.loggedFeatures = {
   bindWatchBurn,
   goCoverStory,
   compressVoiceBlob,
-  dropToFamily
+  dropToFamily,
+  remoteWipeOthers
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -801,6 +842,11 @@ document.addEventListener('DOMContentLoaded', () => {
     catch (e) { prompt('Copy watch burn link', u); }
     setTimeout(() => { copyWatch.textContent = 'Copy watch burn link'; }, 1500);
   };
+  const remoteWipeBtn = document.getElementById('remoteWipeBtn');
+  if (remoteWipeBtn) remoteWipeBtn.onclick = async () => {
+    try { await remoteWipeOthers(); }
+    catch (e) { alert(e.message || 'Could not wipe other devices'); }
+  };
   const familyBtn = document.getElementById('familyDropBtn');
   if (familyBtn) familyBtn.onclick = async () => {
     const text = prompt('Note to everyone tagged Family (or trusted if none tagged):');
@@ -808,6 +854,14 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const n = await dropToFamily(text, {});
       showStatusMessage('Sealed to ' + n + ' people.');
+    } catch (e) { alert(e.message); }
+  };
+  const pokeFamilyBtn = document.getElementById('pokeFamilyBtn');
+  if (pokeFamilyBtn) pokeFamilyBtn.onclick = async () => {
+    try {
+      const n = await dropToFamily('', { poke: true });
+      if (typeof showSaveToast === 'function') showSaveToast('Poked ' + n + ' family');
+      else showStatusMessage('Poked ' + n + ' family.');
     } catch (e) { alert(e.message); }
   };
   const photoToggle = document.getElementById('photoCodeToggle');

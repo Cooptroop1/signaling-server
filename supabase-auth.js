@@ -271,6 +271,18 @@ function subscribeInbox(uid) {
       const row = mapRow(payload.new);
       window.pendingInbox = (window.pendingInbox || []).concat([row]);
       if (typeof renderMooseInbox === 'function') renderMooseInbox();
+      if (row.kind === 'poke') {
+        try {
+          if (window.Notification && Notification.permission === 'granted') {
+            new Notification('Anonomoose', { body: 'moose poked you', silent: true });
+          } else if (window.Notification && Notification.permission === 'default') {
+            Notification.requestPermission().then((p) => {
+              if (p === 'granted') new Notification('Anonomoose', { body: 'moose poked you', silent: true });
+            });
+          }
+        } catch (e) {}
+        if (typeof showStatusMessage === 'function') showStatusMessage('moose poked you');
+      }
     })
     .subscribe();
 }

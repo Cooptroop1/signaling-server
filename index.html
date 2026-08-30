@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260831t">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260831t">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260831t">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260831t">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260831t">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260831t">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260831u">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260831u">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260831u">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260831u">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260831u">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260831u">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1094,11 +1094,32 @@
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
+    .live-burn-select {
+      font-size: 0.7rem;
+      height: 2.5rem;
+      border-radius: 0.5rem;
+      padding: 0 0.25rem;
+      max-width: 3.6rem;
+      background: #111827;
+      color: #fff;
+      border: 0;
+      flex-shrink: 0;
+    }
+    .message-bubble.burned-line {
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    .burn-tag {
+      font-size: 0.65rem;
+      opacity: 0.75;
+      margin-left: 0.35rem;
+    }
     #photoCodeModal .totp-modal-content,
     #sealedNotesModal .totp-modal-content,
     #mooseBookModal .totp-modal-content,
     #safetySettingsModal .totp-modal-content,
-    #pinUnlockModal .totp-modal-content {
+    #pinUnlockModal .totp-modal-content,
+    #roomQrModal .totp-modal-content {
       width: min(420px, calc(100vw - 2rem));
       max-width: 420px;
       margin: 0 auto;
@@ -1232,6 +1253,7 @@
           <button id="button2" aria-label="Join a random chat">Random Chat</button>
           <button id="textCodeButton" aria-label="Share chat code">Text Code</button>
           <button id="addUserText" class="hidden" aria-label="Add another person">Add User</button>
+          <button id="roomQrButton" aria-label="Show room QR">Room QR</button>
         </div>
         <div class="messages-wrapper">
           <div id="messages" role="log" aria-live="polite"></div>
@@ -1277,6 +1299,12 @@
             <button id="imageButton" class="composer-btn" title="Attach photo, file, voice or call" aria-label="Attach">📷</button>
             <label for="messageInput" class="sr-only">Type a message</label>
             <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
+            <select id="liveBurnSelect" class="live-burn-select" title="Burn this line on both phones" aria-label="Burn timer">
+              <option value="0">Keep</option>
+              <option value="10000">10s</option>
+              <option value="30000">30s</option>
+              <option value="60000">1m</option>
+            </select>
             <button id="audioOutputButton" title="Speaker" aria-label="Toggle speaker" class="composer-btn hidden">🔊</button>
             <button id="sendButton" class="composer-btn" data-mode="send" title="Send" aria-label="Send message">➤</button>
           </div>
@@ -1362,9 +1390,12 @@
       <p><strong>Add User:</strong> One tap adds one more seat. Same code. Up to 4 stays phone-to-phone. Past 4 switches to encrypted server backup (up to 50). Kick someone from their green dot to throw them out and close that seat.</p>
       <p><strong>Phone-to-phone only:</strong> Tick this if you never want the encrypted server backup. Green badge = phones talking directly. Amber = backup still encrypted.</p>
       <p><strong>Moose (corner):</strong> Tap once to burn this phone. Tap twice to wipe everyone still in the room, kill the code, and leave. Switching away for 20 seconds also burns a live room. Text Code and Random Board give you three minutes so you can pick a room or send a text without wiping. Refreshing or closing the tab burns this device.</p>
+      <p><strong>Burn timer:</strong> Next to send, pick 10s / 30s / 1 min. That line vanishes on both phones. Keep = normal.</p>
+      <p><strong>Room QR:</strong> In a chat, tap Room QR. They scan it to join. No typing.</p>
+      <p><strong>Typing:</strong> Nobody ever sees that you are typing.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
       <p><strong>Fingerprint / Face ID:</strong> After Sign Up, tap Save fingerprint. Next time tap Login then Fingerprint / Face ID — no password. First time only: in Supabase go Authentication → Passkeys, turn it on, RP ID <code>anonomoose.com</code>, origins <code>https://www.anonomoose.com</code> and <code>https://anonomoose.com</code>.</p>
-      <p><strong>Safety:</strong> Logged-in only. Trust names, hide last seen, panic PIN, one-phone lock, disappearing notes, read-once photos, timed meet codes. iPhone cannot fully block screenshots — the note hides if you leave the app.</p>
+      <p><strong>Safety:</strong> Logged-in only. Trust names, hide last seen, panic PIN, one-phone lock, disappearing notes, read-once photos, timed meet codes. Wipe other devices burns their inbox and signs them out. iPhone cannot fully block screenshots — the note hides if you leave the app.</p>
     </div>
   </div>
   <div id="addUserModal" class="add-user-modal" role="dialog" aria-label="Set maximum users" tabindex="-1">
@@ -1397,6 +1428,7 @@
     <div class="totp-modal-content safety-scroll">
       <h2 class="text-xl font-bold mb-3">Moose book</h2>
       <button id="familyDropBtn" type="button" class="mb-2">Note to family</button>
+      <button id="pokeFamilyBtn" type="button" class="mb-2">Poke family</button>
       <div id="bookList"></div>
       <button id="closeMooseBook" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-3">Close</button>
     </div>
@@ -1522,6 +1554,15 @@
       <button id="closeRecoveryKitButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600">I have saved it</button>
     </div>
   </div>
+  <div id="roomQrModal" class="totp-modal" role="dialog" aria-label="Room QR">
+    <div class="totp-modal-content">
+      <h2 class="text-xl font-bold mb-2">Scan to join</h2>
+      <p class="text-sm text-gray-600 mb-2">They scan this with their camera. No typing the code.</p>
+      <div id="roomQrBox" class="flex justify-center mb-3"></div>
+      <p id="roomQrCodeLabel" class="text-center font-mono text-sm mb-3"></p>
+      <button id="closeRoomQr" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full">Close</button>
+    </div>
+  </div>
   <div id="mooseQrModal" class="totp-modal hidden" role="dialog" aria-label="Your moose name QR">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-2">Your moose name</h2>
@@ -1556,7 +1597,8 @@
       <h2 id="sealedNoteFrom" class="text-xl font-bold mb-1"></h2>
       <p id="sealedNoteMeta" class="text-xs text-gray-500 mb-2"></p>
       <img id="sealedNoteImg" class="hidden w-full rounded mb-2" alt="Sealed photo">
-      <audio id="sealedNoteAudio" class="hidden w-full mb-2" controls></audio>
+      <audio id="sealedNoteAudio" class="hidden w-full mb-2"></audio>
+      <button id="sealedNoteHold" type="button" class="hidden bg-black text-white px-4 py-2 rounded w-full mb-2">Hold to play</button>
       <p id="sealedNoteText" class="mb-3 whitespace-pre-wrap"></p>
       <button id="sealedNoteJoin" class="bg-green-500 text-white px-4 py-2 rounded w-full mb-2 hidden">Join room</button>
       <button id="sealedNoteOk" class="bg-red-500 text-white px-4 py-2 rounded w-full">OK · burn</button>
@@ -1596,6 +1638,7 @@
       <h3 class="font-bold mb-1">Devices</h3>
       <p class="text-xs text-gray-500 mb-2">New login takes this phone. Revoke a stolen one.</p>
       <div id="deviceList"></div>
+      <button id="remoteWipeBtn" type="button" class="bg-red-600 text-white px-4 py-2 rounded w-full mb-4">Wipe other devices</button>
       <button id="closeSafetySettings" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-3">Close</button>
     </div>
   </div>
@@ -1607,15 +1650,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260831t"></script>
-  <script src="ratchet.js?v=260831t"></script>
-  <script src="utils.js?v=260831t"></script>
-  <script src="main.js?v=260831t"></script>
-  <script src="init.js?v=260831t"></script>
-  <script src="events.js?v=260831t"></script>
+    <script src="crypto.js?v=260831u"></script>
+  <script src="ratchet.js?v=260831u"></script>
+  <script src="utils.js?v=260831u"></script>
+  <script src="main.js?v=260831u"></script>
+  <script src="init.js?v=260831u"></script>
+  <script src="events.js?v=260831u"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260831t"></script>
-  <script src="account-ui.js?v=260831t"></script>
-  <script src="logged-features.js?v=260831t"></script>
+  <script src="supabase-auth.js?v=260831u"></script>
+  <script src="account-ui.js?v=260831u"></script>
+  <script src="logged-features.js?v=260831u"></script>
 </body>
 </html>

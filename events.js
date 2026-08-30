@@ -1254,6 +1254,17 @@ async function handleSocketMessage(event) {
         } else {
           messageDiv.appendChild(document.createTextNode(sanitizeMessage(contentOrData)));
         }
+        const burnMs = Number(metadata.burnMs) || 0;
+        if (burnMs > 0) {
+          const tag = document.createElement('span');
+          tag.className = 'burn-tag';
+          tag.textContent = Math.round(burnMs / 1000) + 's';
+          messageDiv.appendChild(tag);
+          setTimeout(() => {
+            messageDiv.classList.add('burned-line');
+            setTimeout(() => { try { messageDiv.remove(); } catch (e) {} }, 400);
+          }, burnMs);
+        }
         messages.prepend(messageDiv);
         messages.scrollTop = 0;
       } catch (error) {
@@ -2130,6 +2141,31 @@ document.addEventListener('DOMContentLoaded', () => {
     modal.classList.add('hidden');
   }
   document.getElementById('textCodeButton').onclick = () => openTextCodeModal();
+  const roomQrBtn = document.getElementById('roomQrButton');
+  if (roomQrBtn) roomQrBtn.onclick = () => {
+    if (!code) {
+      showStatusMessage('Start a chat first.');
+      return;
+    }
+    const modal = document.getElementById('roomQrModal');
+    const box = document.getElementById('roomQrBox');
+    const lab = document.getElementById('roomQrCodeLabel');
+    if (!modal || !box) return;
+    box.innerHTML = '';
+    const url = 'https://www.anonomoose.com/?code=' + encodeURIComponent(code);
+    if (lab) lab.textContent = code;
+    try { new QRCode(box, { text: url, width: 180, height: 180 }); }
+    catch (e) { box.textContent = url; }
+    modal.classList.remove('hidden');
+    modal.classList.add('active');
+  };
+  const closeRoomQr = document.getElementById('closeRoomQr');
+  if (closeRoomQr) closeRoomQr.onclick = () => {
+    const modal = document.getElementById('roomQrModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('active');
+  };
   document.getElementById('textCodeCancelButton').onclick = () => closeTextCodeModal();
   document.getElementById('textCodeCopyButton').onclick = async () => {
     const inviteCode = currentInviteCode();
@@ -2456,10 +2492,22 @@ function showUserSearchResult(searchedUsername, message) {
     const meetAt = document.createElement('input');
     meetAt.type = 'datetime-local';
     meetAt.className = 'border border-gray-300 p-2 w-full mt-2 rounded';
-    meetAt.title = 'Optional meet time';
+    meetAt.title = 'Hide until this time';
     const meetHint = document.createElement('p');
     meetHint.className = 'text-xs text-gray-500 mt-1';
-    meetHint.textContent = 'Optional: set a meet time. Code stays hidden until then, then burns.';
+    meetHint.textContent = 'Optional: hide until this time, then burns 30 min later.';
+    const meetAttach = document.createElement('label');
+    meetAttach.className = 'text-xs block mt-1';
+    meetAttach.innerHTML = '<input type="checkbox" id="meetAttachCode"> Attach this room’s code (must be in a chat)';
+    const pokeBtn = document.createElement('button');
+    pokeBtn.textContent = 'Poke (no text)';
+    pokeBtn.onclick = async () => {
+      try {
+        await sendOfflineMessage(searchedUsername, '', { poke: true });
+        pokeBtn.textContent = 'Poked';
+        setTimeout(() => { pokeBtn.textContent = 'Poke (no text)'; }, 1500);
+      } catch (e) { alert(e.message); }
+    };
     const offlineMsgContainer = document.createElement('div');
     const textarea = document.createElement('textarea');
     textarea.placeholder = 'Sealed note (they open it later)';
@@ -2481,7 +2529,8 @@ function showUserSearchResult(searchedUsername, message) {
         if (pendingVoice && typeof compressVoiceBlob === 'function') voice = await compressVoiceBlob(pendingVoice);
         else if (voiceInput.files && voiceInput.files[0] && typeof compressVoiceBlob === 'function') voice = await compressVoiceBlob(voiceInput.files[0]);
         const meet = meetAt.value ? new Date(meetAt.value).getTime() : 0;
-        await sendOfflineMessage(searchedUsername, msgText, { ttlMs, photo, voice, meetAt: meet });
+        const attachCode = !!(meetAttach.querySelector('input') && meetAttach.querySelector('input').checked);
+        await sendOfflineMessage(searchedUsername, msgText, { ttlMs, photo, voice, unlockAt: meet, meetAt: attachCode ? meet : 0 });
         textarea.value = '';
         sendBtn.textContent = 'Sent';
         setTimeout(() => {
@@ -2503,8 +2552,10 @@ function showUserSearchResult(searchedUsername, message) {
     offlineMsgContainer.appendChild(recBtn);
     offlineMsgContainer.appendChild(meetHint);
     offlineMsgContainer.appendChild(meetAt);
+    offlineMsgContainer.appendChild(meetAttach);
     offlineMsgContainer.appendChild(textarea);
     offlineMsgContainer.appendChild(sendBtn);
+    offlineMsgContainer.appendChild(pokeBtn);
     searchResult.appendChild(offlineMsgContainer);
   } else {
     searchResult.appendChild(document.createTextNode('They have no encryption key on file, so mail cannot be sent.'));
@@ -2515,8 +2566,8 @@ const offlineSendLock = new Set();
 
 async function sendOfflineMessage(toUsername, messageText, extra) {
   extra = extra || {};
-  if (!toUsername || !(messageText || extra.photo || extra.voice || extra.meetAt)) throw new Error('Missing recipient or message');
-  const lockKey = 'note:' + String(toUsername).toLowerCase() + ':' + (messageText || '') + ':' + (extra.meetAt || '') + ':' + (extra.photo ? 'p' : '');
+  if (!toUsername || !(messageText || extra.photo || extra.voice || extra.meetAt || extra.unlockAt || extra.poke)) throw new Error('Missing recipient or message');
+  const lockKey = 'note:' + String(toUsername).toLowerCase() + ':' + (extra.poke ? 'poke' : '') + ':' + (messageText || '') + ':' + (extra.meetAt || extra.unlockAt || '') + ':' + (extra.photo ? 'p' : '');
   if (offlineSendLock.has(lockKey)) throw new Error('Already sending that note.');
   offlineSendLock.add(lockKey);
   try {
@@ -2524,10 +2575,14 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   if (!userPublicKey) throw new Error('No public key for recipient');
   await ensurePersistentKeys();
   const messageId = generateMessageId();
-  let kind = extra.photo ? 'photo' : (extra.voice ? 'voice' : 'note');
-  let payload = { type: extra.photo ? 'photo' : (extra.voice ? 'voice' : 'message'), from: username, text: messageText || '', timestamp: Date.now(), identity: identityPubB64 || '' };
+  let kind = extra.photo ? 'photo' : (extra.voice ? 'voice' : (extra.poke ? 'poke' : 'note'));
+  let payload = { type: extra.poke ? 'poke' : (extra.photo ? 'photo' : (extra.voice ? 'voice' : 'message')), from: username, text: extra.poke ? '' : (messageText || ''), timestamp: Date.now(), identity: identityPubB64 || '' };
   if (extra.photo) payload.photo = extra.photo;
   if (extra.voice) payload.voice = extra.voice;
+  if (extra.unlockAt) {
+    payload.unlock_at = extra.unlockAt;
+    payload.burn_at = extra.unlockAt + 30 * 60 * 1000;
+  }
   if (extra.meetAt) {
     if (!code) throw new Error('Start a chat first, then send a timed meet code.');
     kind = 'meet';
@@ -2539,10 +2594,10 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   const plaintext = JSON.stringify(payload);
   const sealed = await sealOfflinePayload(userPublicKey, toUsername, plaintext, messageId);
   sealed.messageId = messageId;
-  const expiresAt = extra.ttlMs ? (Date.now() + extra.ttlMs) : (extra.meetAt ? extra.meetAt + 30 * 60 * 1000 : null);
+  const expiresAt = extra.ttlMs ? (Date.now() + extra.ttlMs) : (payload.burn_at || extra.meetAt ? extra.meetAt + 30 * 60 * 1000 : null);
   if (window.sbAuth && window.sbAuth.isLoggedIn()) {
     await window.sbAuth.sendOffline(toUsername, sealed, { kind, expiresAt });
-    showStatusMessage(kind === 'meet' ? 'Meet code sealed. Hidden until the time you set.' : 'Encrypted offline message sent.');
+    showStatusMessage(extra.poke ? 'Poke sent.' : (kind === 'meet' ? 'Meet code sealed. Hidden until the time you set.' : (payload.unlock_at ? 'Timed note sealed.' : 'Encrypted offline message sent.')));
     return;
   }
   socket.send(JSON.stringify({

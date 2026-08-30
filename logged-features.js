@@ -472,7 +472,8 @@ function dismissModal(m) {
     helpModal: 'closeHelp',
     mooseQrModal: 'closeMooseQrButton',
     roomQrModal: 'closeRoomQr',
-    searchUserModal: 'searchCancelButton'
+    searchUserModal: 'searchCancelButton',
+    vanityShopModal: 'closeVanityShop'
   };
   const id = clickers[m.id];
   if (id && document.getElementById(id)) {

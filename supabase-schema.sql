@@ -78,6 +78,12 @@ begin
   name := regexp_replace(name, '[^a-zA-Z0-9]', '', 'g');
   if char_length(name) < 1 then name := 'user'; end if;
   if char_length(name) > 16 then name := left(name, 16); end if;
+  if char_length(name) < 4 then
+    raise exception 'Display name must be 4-16 letters or numbers';
+  end if;
+  if name ~ '^[0-9]+$' and name::int >= 1 and name::int <= 999 then
+    raise exception 'Numbers 1-999 are reserved';
+  end if;
   if exists (select 1 from public.profiles where lower(display_name) = lower(name)) then
     raise exception 'Display name already taken';
   end if;
@@ -195,6 +201,70 @@ where p.id = d.id and d.rn > 1;
 
 create unique index if not exists profiles_display_name_ci
   on public.profiles (lower(display_name));
+
+-- Moose numbers 1-999 (held until you switch sales on)
+create table if not exists public.moose_shop (
+  id int primary key default 1,
+  numbers_on boolean default false,
+  letters_on boolean default false,
+  stripe_ready boolean default false
+);
+insert into public.moose_shop (id, numbers_on, letters_on, stripe_ready)
+values (1, false, false, false)
+on conflict (id) do nothing;
+
+create table if not exists public.vanity_numbers (
+  n int primary key check (n >= 1 and n <= 999),
+  status text not null default 'held' check (status in ('held', 'listed', 'sold')),
+  owner_id uuid references public.profiles (id) on delete set null,
+  price_cents int not null default 500,
+  updated_at timestamptz default now()
+);
+
+insert into public.vanity_numbers (n, status, price_cents)
+select g,
+  'held',
+  case when g <= 9 then 2500 when g <= 99 then 1000 else 500 end
+from generate_series(1, 999) g
+on conflict (n) do nothing;
+
+alter table public.moose_shop enable row level security;
+alter table public.vanity_numbers enable row level security;
+drop policy if exists "shop read" on public.moose_shop;
+create policy "shop read" on public.moose_shop for select using (true);
+drop policy if exists "vanity read" on public.vanity_numbers;
+create policy "vanity read" on public.vanity_numbers for select using (true);
+
+create or replace function public.moose_number_check(p_n int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  shop public.moose_shop%rowtype;
+  v public.vanity_numbers%rowtype;
+begin
+  if p_n is null or p_n < 1 or p_n > 999 then
+    return jsonb_build_object('ok', false, 'error', 'Pick a number from 1 to 999');
+  end if;
+  select * into shop from public.moose_shop where id = 1;
+  select * into v from public.vanity_numbers where n = p_n;
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'Not a reserved number');
+  end if;
+  return jsonb_build_object(
+    'ok', true,
+    'n', v.n,
+    'status', v.status,
+    'price_cents', v.price_cents,
+    'shop_on', coalesce(shop.numbers_on, false),
+    'available', (v.status = 'listed' and coalesce(shop.numbers_on, false))
+  );
+end;
+$$;
+
+grant execute on function public.moose_number_check(int) to authenticated, anon;
 
 -- Remote wipe
 alter table public.profiles add column if not exists wipe_epoch bigint;

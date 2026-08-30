@@ -495,10 +495,25 @@ async function confirmOffline(id) {
   await sb.from('offline_messages').delete().eq('id', id).eq('to_user_id', currentUser().id);
 }
 
-async function signUp(email, displayName, password) {
-  if (!/^[a-zA-Z0-9]{1,16}$/.test(displayName)) {
-    throw new Error('Display name must be 1-16 letters or numbers');
+function reservedMooseNumber(name) {
+  if (!/^[0-9]+$/.test(name)) return false;
+  const n = Number(name);
+  return n >= 1 && n <= 999;
+}
+
+function validMooseName(name) {
+  if (!/^[a-zA-Z0-9]{4,16}$/.test(name)) {
+    return 'Logged-in names must be 4-16 letters or numbers';
   }
+  if (reservedMooseNumber(name)) {
+    return 'Numbers 1-999 are reserved. Check Moose numbers if sales are on.';
+  }
+  return '';
+}
+
+async function signUp(email, displayName, password) {
+  const nameErr = validMooseName(displayName);
+  if (nameErr) throw new Error(nameErr);
   const { data: taken, error: takenErr } = await sb.from('profiles')
     .select('id')
     .ilike('display_name', displayName)
@@ -696,6 +711,93 @@ function offerPasskeyOnce() {
   }, 1200);
 }
 
+function pounds(cents) {
+  return '£' + (Number(cents || 0) / 100).toFixed(2);
+}
+
+async function loadMooseShop() {
+  const wrap = document.getElementById('vanityShopWrap');
+  if (!sb || !wrap) return;
+  try {
+    const { data } = await sb.from('moose_shop').select('numbers_on').eq('id', 1).maybeSingle();
+    wrap.classList.toggle('hidden', !(data && data.numbers_on));
+  } catch (e) {
+    wrap.classList.add('hidden');
+  }
+}
+
+async function checkMooseNumber(raw) {
+  const n = parseInt(String(raw || '').replace(/\D/g, ''), 10);
+  if (!n || n < 1 || n > 999) return { ok: false, error: 'Pick a number from 1 to 999' };
+  if (!sb) return { ok: false, error: 'Not ready' };
+  try {
+    const { data, error } = await sb.rpc('moose_number_check', { p_n: n });
+    if (error) throw error;
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    return row || { ok: false, error: 'Could not check' };
+  } catch (e) {
+    const { data } = await sb.from('vanity_numbers').select('n, status, price_cents').eq('n', n).maybeSingle();
+    if (!data) return { ok: false, error: 'Could not check that number' };
+    return { ok: true, n: data.n, status: data.status, price_cents: data.price_cents, available: data.status === 'listed' };
+  }
+}
+
+function openVanityShop() {
+  const m = document.getElementById('vanityShopModal');
+  if (!m) return;
+  m.classList.remove('hidden');
+  m.classList.add('active');
+  const out = document.getElementById('vanityShopResult');
+  if (out) out.textContent = '';
+}
+
+function bindVanityShop() {
+  const openBtn = document.getElementById('vanityShopBtn');
+  const closeBtn = document.getElementById('closeVanityShop');
+  const checkBtn = document.getElementById('vanityCheckBtn');
+  const buyBtn = document.getElementById('vanityBuyBtn');
+  const input = document.getElementById('vanityNumberInput');
+  const out = document.getElementById('vanityShopResult');
+  if (openBtn) openBtn.onclick = openVanityShop;
+  if (closeBtn) closeBtn.onclick = () => {
+    const m = document.getElementById('vanityShopModal');
+    if (!m) return;
+    m.classList.add('hidden');
+    m.classList.remove('active');
+  };
+  const runCheck = async () => {
+    if (!out) return;
+    out.textContent = 'Checking…';
+    if (buyBtn) buyBtn.classList.add('hidden');
+    const row = await checkMooseNumber(input && input.value);
+    if (!row || !row.ok) {
+      out.textContent = (row && row.error) || 'Could not check';
+      return;
+    }
+    if (row.status === 'sold') {
+      out.textContent = '#' + row.n + ' is taken.';
+      return;
+    }
+    if (row.status === 'held' || !row.shop_on && row.available === false && row.status !== 'listed') {
+      out.textContent = '#' + row.n + ' is reserved. Not for sale yet.';
+      return;
+    }
+    if (row.status === 'listed' || row.available) {
+      out.textContent = '#' + row.n + ' is available — ' + pounds(row.price_cents);
+      if (buyBtn) buyBtn.classList.remove('hidden');
+      return;
+    }
+    out.textContent = '#' + row.n + ' is reserved.';
+  };
+  if (checkBtn) checkBtn.onclick = runCheck;
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runCheck(); });
+  if (buyBtn) buyBtn.onclick = () => {
+    if (typeof showStatusMessage === 'function') showStatusMessage('Stripe payments are not live yet. This number stays reserved for you to buy later.');
+    if (out) out.textContent = (out.textContent || '') + ' Payments coming soon.';
+  };
+  loadMooseShop();
+}
+
 window.sbAuth = {
   isLoggedIn,
   getSession,
@@ -713,6 +815,7 @@ window.sbAuth = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+  bindVanityShop();
   if (!sb) {
     console.warn('Supabase client missing');
     return;

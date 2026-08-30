@@ -117,6 +117,8 @@ function renderMooseInbox() {
 
 async function openSealedNotes() {
   window.__notesUnlocked = false;
+  window.__moosePanic = false;
+  window.__bookUnlocked = false;
   if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
     const ok = await window.loggedFeatures.requireUnlock('Unlock notes', true);
     if (window.__moosePanic) {
@@ -331,6 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
     m.classList.remove('active');
     window.__notesUnlocked = false;
     window.__bookUnlocked = false;
+    window.__moosePanic = false;
   };
   const ethBtn = document.getElementById('copyEthDonate');
   if (ethBtn) {

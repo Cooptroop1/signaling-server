@@ -742,6 +742,14 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatusMessage('Sealed to ' + n + ' people.');
     } catch (e) { alert(e.message); }
   };
+  const photoToggle = document.getElementById('photoCodeToggle');
+  const stegoBox = document.getElementById('stegoBox');
+  if (photoToggle && stegoBox) {
+    photoToggle.onclick = () => {
+      const open = stegoBox.classList.toggle('hidden') === false;
+      photoToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+  }
   const encodeStego = document.getElementById('stegoEncodeBtn');
   const stegoFile = document.getElementById('stegoFile');
   if (encodeStego && stegoFile) encodeStego.onclick = async () => {

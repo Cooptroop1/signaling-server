@@ -828,6 +828,16 @@ async function handleSocketMessage(event) {
       if (message.turnUsername) turnUsername = message.turnUsername;
       if (message.turnCredential) turnCredential = message.turnCredential;
       updateRecentCodes(code);
+      if (!isInitiator && Array.isArray(message.roster) && !groupRelayOn()) {
+        message.roster.forEach((m) => {
+          if (!m.clientId || m.clientId === clientId) return;
+          setTimeout(() => {
+            if (!peerConnections.has(m.clientId) && features.enableP2P) {
+              startPeerConnection(m.clientId, true);
+            }
+          }, 2200);
+        });
+      }
       return;
     }
     if (message.type === 'initiator-changed') {
@@ -853,6 +863,13 @@ async function handleSocketMessage(event) {
       if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId) && !groupRelayOn()) {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
+      } else if (!isInitiator && message.clientId !== clientId && !groupRelayOn()) {
+        const otherId = message.clientId;
+        setTimeout(() => {
+          if (!peerConnections.has(otherId) && features.enableP2P) {
+            startPeerConnection(otherId, true);
+          }
+        }, 2200);
       }
       if (voiceCallActive) {
         renegotiate(message.clientId);

@@ -88,9 +88,10 @@ function renderMooseInbox() {
     openBtn.textContent = 'Open';
     openBtn.onclick = async () => {
       if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
-        const ok = await window.loggedFeatures.requireUnlock('Unlock note');
+        const ok = await window.loggedFeatures.requireUnlock('Unlock note', true);
         if (!ok) return;
       }
+      if (window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode()) return;
       openInboxItem(msg);
     };
     const burnBtn = document.createElement('button');
@@ -107,6 +108,7 @@ function renderMooseInbox() {
 }
 
 async function openInboxItem(msg) {
+  if (window.loggedFeatures && window.loggedFeatures.isPanicMode && window.loggedFeatures.isPanicMode()) return;
   try {
     const opened = await openOfflinePayload(msg);
     let parsed = null;

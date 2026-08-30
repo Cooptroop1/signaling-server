@@ -29,14 +29,14 @@ function isBookUnlocked() {
   return !!window.__bookUnlocked && !window.__moosePanic;
 }
 
-async function requireUnlock(reason) {
+async function requireUnlock(reason, everyTime) {
   if (isPanicMode()) return false;
   if (!accGet('realPin', '')) {
     window.__bookUnlocked = true;
     return true;
   }
-  if (window.__bookUnlocked) return true;
-  if (typeof passkeySupported === 'function' && passkeySupported()) {
+  if (!everyTime && window.__bookUnlocked) return true;
+  if (!everyTime && typeof passkeySupported === 'function' && passkeySupported()) {
     try {
       const chal = crypto.getRandomValues(new Uint8Array(32));
       await navigator.credentials.get({
@@ -81,11 +81,15 @@ function promptPinModal(title) {
     };
     go.onclick = async () => {
       const ok = await checkPinValue(input.value);
-      if (!ok && !isPanicMode()) {
+      if (isPanicMode()) {
+        finish(false);
+        return;
+      }
+      if (!ok) {
         err.textContent = 'Wrong PIN';
         return;
       }
-      finish(ok || isPanicMode());
+      finish(true);
     };
     cancel.onclick = () => finish(false);
     input.focus();
@@ -94,14 +98,21 @@ function promptPinModal(title) {
 
 async function checkPinValue(pin) {
   if (!pin) return false;
+  if (typeof isDuressPassword === 'function' && await isDuressPassword(pin)) {
+    window.__moosePanic = true;
+    window.__bookUnlocked = false;
+    if (typeof renderMooseInbox === 'function') renderMooseInbox();
+    if (typeof renderMooseBook === 'function') renderMooseBook();
+    return false;
+  }
   const h = await hashPin(pin);
   const panic = accGet('panicPin', '');
   if (panic && h === panic) {
     window.__moosePanic = true;
-    window.__bookUnlocked = true;
+    window.__bookUnlocked = false;
     if (typeof renderMooseInbox === 'function') renderMooseInbox();
     if (typeof renderMooseBook === 'function') renderMooseBook();
-    return true;
+    return false;
   }
   const real = accGet('realPin', '');
   if (real && h === real) {
@@ -416,6 +427,7 @@ async function savePinsFromForm() {
 }
 
 document.addEventListener('visibilitychange', () => {
+  if (document.hidden) window.__bookUnlocked = false;
   if (document.hidden && document.documentElement.classList.contains('shot-guard')) {
     const img = document.getElementById('sealedNoteImg');
     const text = document.getElementById('sealedNoteText');

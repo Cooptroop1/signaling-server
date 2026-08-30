@@ -295,11 +295,37 @@ function renderMooseBook() {
   const panic = !!(window.__moosePanic);
   const book = panic ? [] : getBook();
   if (!logged) return;
+  list.innerHTML = '';
+  const mine = panic ? [] : (window.__myNames || []);
+  if (mine.length) {
+    const head = document.createElement('p');
+    head.className = 'text-xs text-gray-500 mb-1';
+    head.textContent = 'Your names — mail to any of these reaches you';
+    list.appendChild(head);
+    mine.forEach((n) => {
+      const row = document.createElement('div');
+      row.className = 'book-row';
+      const label = document.createElement('strong');
+      label.textContent = n.name + (n.active ? ' (in chat)' : '');
+      row.appendChild(label);
+      if (!n.active) {
+        const useBtn = document.createElement('button');
+        useBtn.textContent = 'Use in chat';
+        useBtn.onclick = () => {
+          if (typeof setActiveOwnedName === 'function') setActiveOwnedName(n.name);
+        };
+        row.appendChild(useBtn);
+      }
+      list.appendChild(row);
+    });
+  }
   if (!book.length) {
-    list.innerHTML = '<p class="text-sm text-gray-500">Names you search stay here on this device.</p>';
+    const p = document.createElement('p');
+    p.className = 'text-sm text-gray-500';
+    p.textContent = mine.length ? 'People you search stay here on this device.' : 'Names you search stay here on this device.';
+    list.appendChild(p);
     return;
   }
-  list.innerHTML = '';
   book.forEach((entry) => {
     const row = document.createElement('div');
     row.className = 'book-row';
@@ -380,6 +406,9 @@ async function openMooseBook() {
   if (window.loggedFeatures && window.loggedFeatures.requireUnlock) {
     const ok = await window.loggedFeatures.requireUnlock('Unlock moose book', true);
     if (!ok || window.__moosePanic) return;
+  }
+  if (window.sbAuth && typeof window.sbAuth.loadMyNames === 'function') {
+    try { await window.sbAuth.loadMyNames(); } catch (e) {}
   }
   renderMooseBook();
   const m = document.getElementById('mooseBookModal');

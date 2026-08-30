@@ -50,6 +50,12 @@ async function generateSessionKeyPair() {
     ['deriveKey', 'deriveBits']
   );
 }
+async function ensureSessionKeyPair() {
+  if (!keyPair || !keyPair.publicKey) {
+    keyPair = await generateSessionKeyPair();
+  }
+  return keyPair;
+}
 console.log('generateUserKeypair function loaded'); // Confirm it's defined
 function getCookie(name) {
   const value = `; ${document.cookie}`;
@@ -750,6 +756,7 @@ async function handleSocketMessage(event) {
       statusElement.textContent = isInitiator ? 'Waiting for connection...' : 'Connecting...';
       initializeMaxClientsUI();
       updateFeaturesUI();
+      await ensureSessionKeyPair();
       if (isInitiator) {
         roomMaster = window.crypto.getRandomValues(new Uint8Array(32));
         signingSalt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -775,14 +782,21 @@ async function handleSocketMessage(event) {
           updateMaxClientsUI();
         }
       } else {
-        const publicKey = await exportPublicKey(keyPair.publicKey);
-        await initIdentityKeys();
-        let identityEcdh = null;
         try {
-          const me = await ensurePersistentKeys();
-          identityEcdh = me && me.ecdhPubB64;
-        } catch (e) {}
-        socket.send(JSON.stringify({ type: 'public-key', publicKey, identityPublic: identityPubB64, identityEcdh, clientId, code, token }));
+          const publicKey = await exportPublicKey(keyPair.publicKey);
+          await initIdentityKeys();
+          let identityEcdh = null;
+          try {
+            const me = await ensurePersistentKeys();
+            identityEcdh = me && me.ecdhPubB64;
+          } catch (e) {}
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'public-key', publicKey, identityPublic: identityPubB64, identityEcdh, clientId, code, token }));
+          }
+        } catch (err) {
+          console.error('Failed to send public-key:', err);
+          showStatusMessage('Key setup failed. Rejoin the room.');
+        }
       }
       updateMaxClientsUI();
       updateDots();
@@ -897,6 +911,7 @@ async function handleSocketMessage(event) {
           clientEcdhKeys.set(message.clientId, message.identityEcdh);
         }
         if (!isInitiator) return;
+        await ensureSessionKeyPair();
         const joinerPublic = await importPublicKey(message.publicKey);
         const sharedKey = await derivePakeWrapKey(keyPair.privateKey, joinerPublic, code);
         const payload = {
@@ -944,6 +959,7 @@ async function handleSocketMessage(event) {
           clientPublicKeys.set(message.clientId, message.publicKey);
         }
         const initiatorPublicImported = await importPublicKey(initiatorPublic);
+        await ensureSessionKeyPair();
         const sharedKey = await derivePakeWrapKey(keyPair.privateKey, initiatorPublicImported, code);
         const decryptedStr = await decryptRaw(sharedKey, message.encryptedKey, message.iv, 'room-key|' + code);
         const payload = JSON.parse(decryptedStr);

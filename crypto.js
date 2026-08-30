@@ -304,6 +304,9 @@ async function deriveSigningKey() {
 
 async function deriveMessageKey() {
   try {
+    if (!roomMaster || !(roomMaster instanceof Uint8Array || roomMaster instanceof ArrayBuffer)) {
+      throw new Error('Room key not ready yet');
+    }
     const hkdfKey = await window.crypto.subtle.importKey(
       'raw',
       roomMaster,

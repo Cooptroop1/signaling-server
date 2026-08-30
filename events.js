@@ -331,7 +331,7 @@ async function sendJoin(extra) {
     username,
     token,
     identityPublic: identityPubB64,
-    claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn())
+    sbAccess: (window.__sbSession && window.__sbSession.access_token) || undefined
   }, extra)));
 }
 lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code')) || code);
@@ -741,6 +741,12 @@ async function handleSocketMessage(event) {
       console.log(`Initialized client ${clientId}, username: ${username}, maxClients: ${maxClients}, isInitiator: ${isInitiator}, features: ${JSON.stringify(features)}`);
       usernames.set(clientId, username);
       claimedClients.set(clientId, !!(window.sbAuth && window.sbAuth.isLoggedIn()));
+      if (Array.isArray(message.roster)) {
+        message.roster.forEach((m) => {
+          if (m.clientId && m.username) usernames.set(m.clientId, m.username);
+          if (m.clientId) claimedClients.set(m.clientId, !!m.claimed);
+        });
+      }
       connectedClients.add(clientId);
       if (identityPubB64) clientIdentityKeys.set(clientId, identityPubB64);
       initialContainer.classList.add('hidden');
@@ -1123,8 +1129,7 @@ async function handleSocketMessage(event) {
         }
         const metadata = JSON.parse(metadataStr);
         const senderUsername = (senderId && usernames.get(senderId)) || metadata.username;
-        if (metadata.claimed && senderId) claimedClients.set(senderId, true);
-        const claimed = !!(senderId && claimedClients.get(senderId)) || !!metadata.claimed;
+        const claimed = !!(senderId && claimedClients.get(senderId));
         const timestamp = metadata.timestamp;
         const contentType = metadata.type;
         let base64Data = rawData.substring(metadataStr.length).trimEnd();

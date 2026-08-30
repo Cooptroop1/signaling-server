@@ -660,8 +660,7 @@ async function processReceivedMessage(data, targetId) {
     }
     const metadata = JSON.parse(metadataStr);
     senderUsername = usernames.get(targetId) || metadata.username;
-    if (typeof claimedClients !== 'undefined' && metadata.claimed) claimedClients.set(targetId, true);
-    claimed = !!(typeof claimedClients !== 'undefined' && claimedClients.get(targetId)) || !!metadata.claimed;
+    claimed = !!(typeof claimedClients !== 'undefined' && claimedClients.get(targetId));
     timestamp = metadata.timestamp;
     contentType = metadata.type;
     contentOrData = rawData.substring(metadataStr.length).trimEnd();

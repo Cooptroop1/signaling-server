@@ -23,6 +23,34 @@ async function hashPassword(password) {
 async function validatePassword(input, hash) {
   return bcrypt.compare(input, hash);
 }
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://crgmcdpmmxtrcocfbsac.supabase.co';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNyZ21jZHBtbXh0cmNvY2Zic2FjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NjI4NTksImV4cCI6MjA4OTIzODg1OX0.pgEIhCIRKEjmwgIQVeQtXdzIWZu2diPXr-gjpvV7pGs';
+const claimedLoginCache = new Map();
+async function verifyClaimedLogin(sbAccess) {
+  if (!sbAccess || typeof sbAccess !== 'string' || sbAccess.length < 40 || sbAccess.length > 8000) return false;
+  const cacheKey = crypto.createHash('sha256').update(sbAccess).digest('hex').slice(0, 24);
+  const hit = claimedLoginCache.get(cacheKey);
+  if (hit && hit.exp > Date.now()) return hit.ok;
+  try {
+    const r = await fetch(SUPABASE_URL + '/auth/v1/user', {
+      headers: {
+        Authorization: 'Bearer ' + sbAccess,
+        apikey: SUPABASE_ANON_KEY
+      }
+    });
+    const ok = r.ok;
+    claimedLoginCache.set(cacheKey, { ok, exp: Date.now() + 120000 });
+    if (claimedLoginCache.size > 500) {
+      const now = Date.now();
+      for (const [k, v] of claimedLoginCache) {
+        if (v.exp < now) claimedLoginCache.delete(k);
+      }
+    }
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
 // Main logger for general operations
 const logger = winston.createLogger({
   level: 'info',
@@ -534,6 +562,9 @@ function validateMessage(data) {
       }
       if (data.identityPublic && (!isValidBase64(data.identityPublic) || data.identityPublic.length < 80 || data.identityPublic.length > 400)) {
         return { valid: false, error: 'join: invalid identityPublic format or length' };
+      }
+      if (data.sbAccess && (typeof data.sbAccess !== 'string' || data.sbAccess.length > 8000)) {
+        return { valid: false, error: 'join: invalid sbAccess' };
       }
       break;
     case 'check-totp':
@@ -1151,6 +1182,13 @@ wss.on('connection', (ws, req) => {
         }
         // Set username
         await redisClient.set(clientKey, username, { EX: 86400 });
+        const claimed = await verifyClaimedLogin(data.sbAccess);
+        delete data.sbAccess;
+        if (claimed) {
+          await redisClient.set(`room:${code}:claimed:${clientId}`, '1', { EX: 86400 });
+        } else {
+          await redisClient.del(`room:${code}:claimed:${clientId}`);
+        }
         // Subscribe if not subscribed
         if (!subscribed.has(code)) {
           await subClient.subscribe(`room:${code}`, messageHandler);
@@ -1162,9 +1200,10 @@ wss.on('connection', (ws, req) => {
           rooms.set(code, { initiator: roomState.initiator, clients: new Map(), maxClients: roomState.maxClients, forceRelay: !!roomState.forceRelay });
         }
         const room = rooms.get(code);
-        room.clients.set(clientId, { ws, username });
+        room.clients.set(clientId, { ws, username, claimed });
         ws.code = code;
         ws.username = username;
+        ws.claimed = claimed;
         // Check if initiator online
         const isInitiatorLocal = clientId === roomState.initiator;
         const initiatorOnline = await redisClient.sIsMember(clientsKey, roomState.initiator);
@@ -1178,7 +1217,24 @@ wss.on('connection', (ws, req) => {
           return;
         }
         const turn = issueTurnCredentials(clientId);
-        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, forceRelay: !!room.forceRelay || room.maxClients > 4, features, ...turn }));
+        let roster = [];
+        try {
+          const ids = await redisClient.sMembers(clientsKey);
+          const rosterPipe = redisClient.multi();
+          ids.forEach((id) => {
+            rosterPipe.get(`room:${code}:client:${id}`);
+            rosterPipe.get(`room:${code}:claimed:${id}`);
+          });
+          const rosterVals = await rosterPipe.exec();
+          roster = ids.map((id, i) => ({
+            clientId: id,
+            username: rosterVals[i * 2] || '',
+            claimed: rosterVals[i * 2 + 1] === '1'
+          }));
+        } catch (e) {
+          roster = [{ clientId, username, claimed }];
+        }
+        ws.send(JSON.stringify({ type: 'init', clientId, maxClients: room.maxClients, isInitiator: isInitiatorLocal, forceRelay: !!room.forceRelay || room.maxClients > 4, features, roster, ...turn }));
         logStats({ clientId, username, code, event: 'join', totalClients: currentSize });
         if (room.clients.size > 0) {
           room.clients.forEach((_, existingClientId) => {
@@ -1195,7 +1251,7 @@ wss.on('connection', (ws, req) => {
         }
         // Broadcast join-notify
         const totalClients = currentSize;
-        const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients, identityPublic: data.identityPublic || null, claimed: !!data.claimed };
+        const notifyMsg = { type: 'join-notify', clientId, username, code, totalClients, identityPublic: data.identityPublic || null, claimed };
         pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(notifyMsg) }));
         // New: Remove from randomCodes if this is a non-initiator joining a random code (one-time use)
         if (randomCodes.has(code) && clientId !== roomState.initiator) {

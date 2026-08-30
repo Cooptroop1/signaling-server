@@ -498,11 +498,17 @@ function goCoverStory() {
 
 const STEGO_MAGIC = [77, 79, 79, 83, 69, 49];
 function embedTextInPng(image, text) {
+  const srcW = image.naturalWidth || image.width;
+  const srcH = image.naturalHeight || image.height;
+  if (!srcW || !srcH) throw new Error('Could not read that photo');
+  const minSide = 1600;
+  const scale = Math.max(1, minSide / Math.min(srcW, srcH));
   const c = document.createElement('canvas');
-  c.width = image.naturalWidth || image.width;
-  c.height = image.naturalHeight || image.height;
+  c.width = Math.min(2200, Math.round(srcW * scale));
+  c.height = Math.min(2200, Math.round(srcH * scale));
   const ctx = c.getContext('2d');
-  ctx.drawImage(image, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(image, 0, 0, c.width, c.height);
   const imgd = ctx.getImageData(0, 0, c.width, c.height);
   const bytes = STEGO_MAGIC.concat([text.length], Array.from(new TextEncoder().encode(text)));
   let bit = 0;
@@ -541,6 +547,62 @@ function extractTextFromPng(image) {
   const arr = [];
   for (let i = 0; i < len; i++) arr.push(readByte((STEGO_MAGIC.length + 1 + i) * 8));
   return new TextDecoder().decode(new Uint8Array(arr));
+}
+async function offerStegoFile(canvas) {
+  if (typeof suppressAutoBurnUntil !== 'undefined') suppressAutoBurnUntil = Date.now() + 180000;
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not make photo'))), 'image/png');
+  });
+  const file = new File([blob], 'holiday.png', { type: 'image/png' });
+  const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '');
+  if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+    try {
+      await navigator.share({ files: [file], title: 'holiday.png' });
+      return 'shared';
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancel';
+    }
+  }
+  if (mobile) {
+    showStegoKeepModal(blob);
+    return 'modal';
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'holiday.png';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 20000);
+  return 'download';
+}
+function showStegoKeepModal(blob) {
+  let m = document.getElementById('stegoShareModal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'stegoShareModal';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:4500;display:flex;align-items:center;justify-content:center;padding:1rem;';
+    m.innerHTML = '<div style="background:#fff;border-radius:12px;padding:1rem;max-width:22rem;width:100%;text-align:center">' +
+      '<p style="font-size:14px;margin:0 0 8px">Send as a <b>file / document</b>, not a photo. Photo mode (especially small pics) wipes the hidden code.</p>' +
+      '<img id="stegoSharePreview" alt="" style="max-width:100%;max-height:36vh;border-radius:8px">' +
+      '<button type="button" id="stegoShareSend" class="bg-gray-800 text-white px-3 py-2 rounded text-sm w-full mt-2">Send</button>' +
+      '<button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button></div>';
+    document.body.appendChild(m);
+  }
+  const url = URL.createObjectURL(blob);
+  m.querySelector('#stegoSharePreview').src = url;
+  m.style.display = 'flex';
+  m.querySelector('#stegoShareSend').onclick = async () => {
+    const file = new File([blob], 'holiday.png', { type: 'image/png' });
+    try {
+      if (navigator.share) await navigator.share({ files: [file], title: 'holiday.png' });
+    } catch (e) {}
+  };
+  m.querySelector('#stegoShareClose').onclick = () => {
+    m.style.display = 'none';
+    URL.revokeObjectURL(url);
+  };
 }
 async function fileToImage(file) {
   const url = URL.createObjectURL(file);
@@ -698,16 +760,9 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const img = await fileToImage(stegoFile.files[0]);
       const canvas = embedTextInPng(img, code);
-      const a = document.createElement('a');
-      a.href = canvas.toDataURL('image/png');
-      a.download = 'holiday.png';
-      a.click();
-      if (!chatOn && typeof window.enterHostedRoom === 'function') {
-        window.enterHostedRoom();
-        showStatusMessage('Photo saved. You are in the room — wait here. They decode the photo and join you.');
-      } else {
-        showStatusMessage('Photo saved. Stay in this chat — they decode it and join you here.');
-      }
+      if (!chatOn && typeof window.enterHostedRoom === 'function') window.enterHostedRoom();
+      await offerStegoFile(canvas);
+      showStatusMessage('Stay in this room. Send the PNG as a FILE, not a photo, or the code gets wiped.');
     } catch (e) { alert(e.message || 'Could not hide the code'); }
   };
   const decodeStego = document.getElementById('stegoDecodeBtn');

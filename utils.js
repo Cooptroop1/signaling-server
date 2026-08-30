@@ -3,9 +3,10 @@ function showStatusMessage(message, duration = 3000) {
     statusElement.textContent = message;
     statusElement.setAttribute('aria-live', 'assertive');
     setTimeout(() => {
-      if (typeof updateRoomHeadcount === 'function') updateRoomHeadcount();
+      const inChat = typeof chatContainer !== 'undefined' && chatContainer && !chatContainer.classList.contains('hidden');
+      if (inChat && typeof updateRoomHeadcount === 'function') updateRoomHeadcount();
       else if (statusElement) {
-        statusElement.textContent = isConnected ? (totalClients + ' / ' + maxClients + ' in this room') : 'Waiting for connection...';
+        statusElement.textContent = 'Start a new chat or connect to an existing one';
       }
       statusElement.setAttribute('aria-live', 'polite');
     }, duration);

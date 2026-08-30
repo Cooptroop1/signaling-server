@@ -81,6 +81,22 @@ function setAuthUi(session) {
     }
     window.pendingInbox = [];
     if (typeof updateSealedNotesBadge === 'function') updateSealedNotesBadge();
+    const bookWrap = document.getElementById('mooseBookWrap');
+    if (bookWrap) bookWrap.classList.add('hidden');
+    const bookModal = document.getElementById('mooseBookModal');
+    if (bookModal) {
+      bookModal.classList.add('hidden');
+      bookModal.classList.remove('active');
+    }
+    const safety = document.getElementById('safetySettingsModal');
+    if (safety) {
+      safety.classList.add('hidden');
+      safety.classList.remove('active');
+    }
+    if (typeof statusElement !== 'undefined' && statusElement) {
+      const inChat = typeof chatContainer !== 'undefined' && chatContainer && !chatContainer.classList.contains('hidden');
+      if (!inChat) statusElement.textContent = 'Start a new chat or connect to an existing one';
+    }
   }
 }
 
@@ -457,6 +473,7 @@ function signOut() {
   window.__sbSession = null;
   window.pendingInbox = [];
   setAuthUi(null);
+  if (typeof showStatusMessage === 'function') showStatusMessage('Signed out.');
   if (sb && sb.auth && typeof sb.auth.signOut === 'function') {
     sb.auth.signOut().catch(() => {});
   }

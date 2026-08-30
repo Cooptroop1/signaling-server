@@ -743,14 +743,20 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { alert(e.message); }
   };
   const photoToggle = document.getElementById('photoCodeToggle');
-  const stegoBox = document.getElementById('stegoBox');
-  if (photoToggle && stegoBox) {
+  const photoModal = document.getElementById('photoCodeModal');
+  const closePhoto = document.getElementById('closePhotoCode');
+  if (photoToggle && photoModal) {
     photoToggle.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const open = stegoBox.classList.toggle('open');
-      photoToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      photoModal.classList.add('active');
     };
+  }
+  if (closePhoto && photoModal) {
+    closePhoto.onclick = () => photoModal.classList.remove('active');
+    photoModal.addEventListener('click', (e) => {
+      if (e.target === photoModal) photoModal.classList.remove('active');
+    });
   }
   function labelFilePick(input, fallback) {
     if (!input) return;
@@ -786,6 +792,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const img = await fileToImage(stegoFile.files[0]);
       const packed = await makeStegoBlob(img, code);
+      document.getElementById('photoCodeModal')?.classList.remove('active');
       if (!chatOn && typeof window.enterHostedRoom === 'function') window.enterHostedRoom();
       await offerStegoFile(packed.blob, packed.name, packed.mime);
       showStatusMessage('Stay in this room. Send holiday.png as a FILE, not a compressed photo.');
@@ -798,6 +805,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const img = await fileToImage(stegoIn.files[0]);
       const found = extractTextFromPng(img);
+      document.getElementById('photoCodeModal')?.classList.remove('active');
       showStatusMessage('Joining their room: ' + found);
       if (typeof autoConnect === 'function') autoConnect(found);
     } catch (e) { alert(e.message || 'No invite in that photo'); }

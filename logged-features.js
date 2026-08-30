@@ -497,6 +497,210 @@ function goCoverStory() {
 }
 
 const STEGO_MAGIC = [77, 79, 79, 83, 69, 49];
+const STEGO_MAGIC2 = [77, 79, 79, 83, 69, 50];
+const STEGO_BLOCK = 16;
+const STEGO_PAIR = 32;
+const STEGO_COPIES = 4;
+
+function stegoPayloadBytes(text) {
+  return STEGO_MAGIC2.concat([text.length], Array.from(new TextEncoder().encode(text)));
+}
+function stegoBlockMean(data, w, x, y, bw, bh) {
+  let s = 0;
+  let n = 0;
+  for (let j = 0; j < bh; j++) {
+    for (let i = 0; i < bw; i++) {
+      const p = ((y + j) * w + (x + i)) * 4;
+      s += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+      n++;
+    }
+  }
+  return n ? s / n : 0;
+}
+function stegoAdjustBlock(data, w, x, y, bw, bh, delta) {
+  const d = Math.round(delta);
+  if (!d) return;
+  for (let j = 0; j < bh; j++) {
+    for (let i = 0; i < bw; i++) {
+      const p = ((y + j) * w + (x + i)) * 4;
+      data[p] = Math.max(0, Math.min(255, data[p] + d));
+      data[p + 1] = Math.max(0, Math.min(255, data[p + 1] + d));
+      data[p + 2] = Math.max(0, Math.min(255, data[p + 2] + d));
+    }
+  }
+}
+function stegoBitPos(b, w) {
+  const perRow = Math.floor(w / STEGO_PAIR);
+  if (perRow < 1) return null;
+  return { x: (b % perRow) * STEGO_PAIR, y: Math.floor(b / perRow) * STEGO_BLOCK, perRow };
+}
+function embedRobustCanvas(image, text, gap) {
+  const srcW = image.naturalWidth || image.width;
+  const srcH = image.naturalHeight || image.height;
+  if (!srcW || !srcH) throw new Error('Could not read that photo');
+  const long = 1280;
+  const scale = long / Math.max(srcW, srcH);
+  const c = document.createElement('canvas');
+  c.width = Math.max(STEGO_PAIR * 8, Math.round(srcW * scale));
+  c.height = Math.max(STEGO_BLOCK * 8, Math.round(srcH * scale));
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(image, 0, 0, c.width, c.height);
+  const imgd = ctx.getImageData(0, 0, c.width, c.height);
+  const bytes = stegoPayloadBytes(text);
+  const payloadBits = bytes.length * 8;
+  const bitsNeeded = payloadBits * STEGO_COPIES;
+  const pos0 = stegoBitPos(bitsNeeded - 1, c.width);
+  if (!pos0 || pos0.y + STEGO_BLOCK > c.height) throw new Error('Photo too small');
+  const bitAt = (idx) => (bytes[Math.floor(idx / 8)] >> (7 - (idx % 8))) & 1;
+  for (let b = 0; b < bitsNeeded; b++) {
+    const pos = stegoBitPos(b, c.width);
+    const left = stegoBlockMean(imgd.data, c.width, pos.x, pos.y, STEGO_BLOCK, STEGO_BLOCK);
+    const right = stegoBlockMean(imgd.data, c.width, pos.x + STEGO_BLOCK, pos.y, STEGO_BLOCK, STEGO_BLOCK);
+    const wantLeft = bitAt(b % payloadBits) === 1;
+    if (wantLeft && left >= right + gap) continue;
+    if (!wantLeft && right >= left + gap) continue;
+    const half = gap / 2 + 2;
+    if (wantLeft) {
+      stegoAdjustBlock(imgd.data, c.width, pos.x, pos.y, STEGO_BLOCK, STEGO_BLOCK, half);
+      stegoAdjustBlock(imgd.data, c.width, pos.x + STEGO_BLOCK, pos.y, STEGO_BLOCK, STEGO_BLOCK, -half);
+    } else {
+      stegoAdjustBlock(imgd.data, c.width, pos.x, pos.y, STEGO_BLOCK, STEGO_BLOCK, -half);
+      stegoAdjustBlock(imgd.data, c.width, pos.x + STEGO_BLOCK, pos.y, STEGO_BLOCK, STEGO_BLOCK, half);
+    }
+  }
+  ctx.putImageData(imgd, 0, 0);
+  return c;
+}
+function extractRobustFromImageData(imgd, w, h) {
+  const bits = [];
+  const maxBits = STEGO_COPIES * 8 * 48;
+  for (let b = 0; b < maxBits; b++) {
+    const pos = stegoBitPos(b, w);
+    if (!pos || pos.y + STEGO_BLOCK > h) break;
+    const left = stegoBlockMean(imgd.data, w, pos.x, pos.y, STEGO_BLOCK, STEGO_BLOCK);
+    const right = stegoBlockMean(imgd.data, w, pos.x + STEGO_BLOCK, pos.y, STEGO_BLOCK, STEGO_BLOCK);
+    bits.push(left >= right ? 1 : 0);
+  }
+  const takeByte = (startBit) => {
+    let v = 0;
+    for (let i = 0; i < 8; i++) {
+      if (startBit + i >= bits.length) return -1;
+      v = (v << 1) | bits[startBit + i];
+    }
+    return v;
+  };
+  const magicLen = STEGO_MAGIC2.length;
+  const firstMagic = [];
+  for (let i = 0; i < magicLen; i++) firstMagic.push(takeByte(i * 8));
+  const magicMatch = firstMagic.every((v, i) => v === STEGO_MAGIC2[i]);
+  if (!magicMatch) throw new Error('No invite in that photo');
+  let len = takeByte(magicLen * 8);
+  if (len < 1 || len > 80) throw new Error('No invite in that photo');
+  const payloadBits = (magicLen + 1 + len) * 8;
+  const voteByte = (byteIndex) => {
+    const counts = {};
+    for (let c = 0; c < STEGO_COPIES; c++) {
+      const v = takeByte(c * payloadBits + byteIndex * 8);
+      if (v < 0) continue;
+      counts[v] = (counts[v] || 0) + 1;
+    }
+    let best = -1;
+    let n = 0;
+    Object.keys(counts).forEach((k) => {
+      if (counts[k] > n) {
+        n = counts[k];
+        best = Number(k);
+      }
+    });
+    return best;
+  };
+  for (let i = 0; i < magicLen; i++) {
+    if (voteByte(i) !== STEGO_MAGIC2[i]) throw new Error('No invite in that photo');
+  }
+  const votedLen = voteByte(magicLen);
+  if (votedLen >= 1 && votedLen <= 80) len = votedLen;
+  const arr = [];
+  for (let i = 0; i < len; i++) arr.push(voteByte(magicLen + 1 + i));
+  return new TextDecoder().decode(new Uint8Array(arr));
+}
+function extractRobust(image) {
+  const c = document.createElement('canvas');
+  c.width = image.naturalWidth || image.width;
+  c.height = image.naturalHeight || image.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(image, 0, 0);
+  return extractRobustFromImageData(ctx.getImageData(0, 0, c.width, c.height), c.width, c.height);
+}
+function extractLsb(image) {
+  const c = document.createElement('canvas');
+  c.width = image.naturalWidth || image.width;
+  c.height = image.naturalHeight || image.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(image, 0, 0);
+  const imgd = ctx.getImageData(0, 0, c.width, c.height);
+  const readByte = (startBit) => {
+    let v = 0;
+    for (let i = 0; i < 8; i++) {
+      const pi = (startBit + i) * 4;
+      v = (v << 1) | (imgd.data[pi] & 1);
+    }
+    return v;
+  };
+  for (let i = 0; i < STEGO_MAGIC.length; i++) {
+    if (readByte(i * 8) !== STEGO_MAGIC[i]) throw new Error('No invite in that photo');
+  }
+  const len = readByte(STEGO_MAGIC.length * 8);
+  if (len < 1 || len > 80) throw new Error('No invite in that photo');
+  const arr = [];
+  for (let i = 0; i < len; i++) arr.push(readByte((STEGO_MAGIC.length + 1 + i) * 8));
+  return new TextDecoder().decode(new Uint8Array(arr));
+}
+function extractTextFromPng(image) {
+  const tries = [image];
+  const w = image.naturalWidth || image.width;
+  const h = image.naturalHeight || image.height;
+  if (w && Math.max(w, h) !== 1280) {
+    const c = document.createElement('canvas');
+    const s = 1280 / Math.max(w, h);
+    c.width = Math.round(w * s);
+    c.height = Math.round(h * s);
+    c.getContext('2d').drawImage(image, 0, 0, c.width, c.height);
+    tries.push(c);
+  }
+  let last = null;
+  for (let i = 0; i < tries.length; i++) {
+    try { return extractRobust(tries[i]); } catch (e) { last = e; }
+  }
+  try { return extractLsb(image); } catch (e) { last = e; }
+  throw last || new Error('No invite in that photo');
+}
+function canvasToBlob(canvas, mime, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not make photo'))), mime, quality);
+  });
+}
+async function makeStegoBlob(image, text) {
+  let gap = 22;
+  let lastErr = null;
+  for (let i = 0; i < 4; i++) {
+    const canvas = embedRobustCanvas(image, text, gap);
+    const blob = await canvasToBlob(canvas, 'image/jpeg', 0.68);
+    try {
+      const testImg = await blobToImage(blob);
+      if (extractRobust(testImg) === text) {
+        const send = await canvasToBlob(canvas, 'image/jpeg', 0.86);
+        return { blob: send, name: 'holiday.jpg', mime: 'image/jpeg' };
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+    gap += 8;
+  }
+  const png = embedTextInPng(image, text);
+  const blob = await canvasToBlob(png, 'image/png');
+  return { blob, name: 'holiday.png', mime: 'image/png' };
+}
 function embedTextInPng(image, text) {
   const srcW = image.naturalWidth || image.width;
   const srcH = image.naturalHeight || image.height;
@@ -524,67 +728,40 @@ function embedTextInPng(image, text) {
   ctx.putImageData(imgd, 0, 0);
   return c;
 }
-function extractTextFromPng(image) {
-  const c = document.createElement('canvas');
-  c.width = image.naturalWidth || image.width;
-  c.height = image.naturalHeight || image.height;
-  const ctx = c.getContext('2d');
-  ctx.drawImage(image, 0, 0);
-  const imgd = ctx.getImageData(0, 0, c.width, c.height);
-  const readByte = (startBit) => {
-    let v = 0;
-    for (let i = 0; i < 8; i++) {
-      const pi = (startBit + i) * 4;
-      v = (v << 1) | (imgd.data[pi] & 1);
-    }
-    return v;
-  };
-  for (let i = 0; i < STEGO_MAGIC.length; i++) {
-    if (readByte(i * 8) !== STEGO_MAGIC[i]) throw new Error('No invite in that photo');
-  }
-  const len = readByte(STEGO_MAGIC.length * 8);
-  if (len < 1 || len > 80) throw new Error('No invite in that photo');
-  const arr = [];
-  for (let i = 0; i < len; i++) arr.push(readByte((STEGO_MAGIC.length + 1 + i) * 8));
-  return new TextDecoder().decode(new Uint8Array(arr));
-}
-async function offerStegoFile(canvas) {
+async function offerStegoFile(blob, fileName, mime) {
   if (typeof suppressAutoBurnUntil !== 'undefined') suppressAutoBurnUntil = Date.now() + 180000;
-  const blob = await new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not make photo'))), 'image/png');
-  });
-  const file = new File([blob], 'holiday.png', { type: 'image/png' });
+  const file = new File([blob], fileName || 'holiday.jpg', { type: mime || blob.type || 'image/jpeg' });
   const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '');
   if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
     try {
-      await navigator.share({ files: [file], title: 'holiday.png' });
+      await navigator.share({ files: [file], title: file.name });
       return 'shared';
     } catch (e) {
       if (e && e.name === 'AbortError') return 'cancel';
     }
   }
   if (mobile) {
-    showStegoKeepModal(blob);
+    showStegoKeepModal(blob, file);
     return 'modal';
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'holiday.png';
+  a.download = file.name;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 20000);
   return 'download';
 }
-function showStegoKeepModal(blob) {
+function showStegoKeepModal(blob, file) {
   let m = document.getElementById('stegoShareModal');
   if (!m) {
     m = document.createElement('div');
     m.id = 'stegoShareModal';
     m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:4500;display:flex;align-items:center;justify-content:center;padding:1rem;';
     m.innerHTML = '<div style="background:#fff;border-radius:12px;padding:1rem;max-width:22rem;width:100%;text-align:center">' +
-      '<p style="font-size:14px;margin:0 0 8px">Send as a <b>file / document</b>, not a photo. Photo mode (especially small pics) wipes the hidden code.</p>' +
+      '<p style="font-size:14px;margin:0 0 8px">Send this like a normal photo. The code is baked in so Telegram compress is OK.</p>' +
       '<img id="stegoSharePreview" alt="" style="max-width:100%;max-height:36vh;border-radius:8px">' +
       '<button type="button" id="stegoShareSend" class="bg-gray-800 text-white px-3 py-2 rounded text-sm w-full mt-2">Send</button>' +
       '<button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button></div>';
@@ -594,15 +771,27 @@ function showStegoKeepModal(blob) {
   m.querySelector('#stegoSharePreview').src = url;
   m.style.display = 'flex';
   m.querySelector('#stegoShareSend').onclick = async () => {
-    const file = new File([blob], 'holiday.png', { type: 'image/png' });
     try {
-      if (navigator.share) await navigator.share({ files: [file], title: 'holiday.png' });
+      if (navigator.share) await navigator.share({ files: [file], title: file.name });
     } catch (e) {}
   };
   m.querySelector('#stegoShareClose').onclick = () => {
     m.style.display = 'none';
     URL.revokeObjectURL(url);
   };
+}
+async function blobToImage(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    return await new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = url;
+    });
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
 }
 async function fileToImage(file) {
   const url = URL.createObjectURL(file);
@@ -759,10 +948,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     try {
       const img = await fileToImage(stegoFile.files[0]);
-      const canvas = embedTextInPng(img, code);
+      const packed = await makeStegoBlob(img, code);
       if (!chatOn && typeof window.enterHostedRoom === 'function') window.enterHostedRoom();
-      await offerStegoFile(canvas);
-      showStatusMessage('Stay in this room. Send the PNG as a FILE, not a photo, or the code gets wiped.');
+      await offerStegoFile(packed.blob, packed.name, packed.mime);
+      showStatusMessage('Stay in this room. Send that picture normally — compression should keep the code.');
     } catch (e) { alert(e.message || 'Could not hide the code'); }
   };
   const decodeStego = document.getElementById('stegoDecodeBtn');

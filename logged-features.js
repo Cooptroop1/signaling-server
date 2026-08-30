@@ -394,6 +394,64 @@ async function saveSettings() {
     if (error) console.warn('settings', error.message);
   }
   if (typeof showStatusMessage === 'function') showStatusMessage('Safety settings saved.');
+  flashSavedBtn(document.getElementById('saveSafetySettings'), 'Saved');
+  showSaveToast('Settings saved on this device');
+}
+
+function showSaveToast(msg) {
+  let t = document.getElementById('saveToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'saveToast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._tm);
+  t._tm = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function flashSavedBtn(btn, label) {
+  if (!btn) return;
+  const old = btn.textContent;
+  const oldBg = btn.style.background;
+  btn.textContent = label || 'Saved';
+  btn.style.background = '#15803d';
+  setTimeout(() => {
+    btn.textContent = old;
+    btn.style.background = oldBg;
+  }, 1800);
+}
+
+function dismissModal(m) {
+  if (!m || (!m.classList.contains('active') && !m.classList.contains('totp-modal'))) return;
+  const clickers = {
+    pinUnlockModal: 'pinUnlockCancel',
+    sealedNotesModal: 'closeSealedNotes',
+    photoCodeModal: 'closePhotoCode',
+    safetySettingsModal: 'closeSafetySettings',
+    helpModal: 'closeHelp',
+    mooseQrModal: 'closeMooseQrButton',
+    searchUserModal: 'searchCancelButton'
+  };
+  const id = clickers[m.id];
+  if (id && document.getElementById(id)) {
+    document.getElementById(id).click();
+    return;
+  }
+  m.classList.remove('active');
+  m.classList.add('hidden');
+}
+
+function bindModalBackdropClose() {
+  document.addEventListener('mousedown', (e) => {
+    const t = e.target;
+    if (!t || !t.classList) return;
+    const isOverlay = t.classList.contains('totp-modal') || t.classList.contains('help-modal') || t.classList.contains('add-user-modal');
+    if (!isOverlay) return;
+    if (!t.classList.contains('active') && t.classList.contains('hidden')) return;
+    if (!t.classList.contains('active')) return;
+    dismissModal(t);
+  });
 }
 
 async function savePinsFromForm() {
@@ -410,7 +468,8 @@ async function savePinsFromForm() {
   }
   document.getElementById('setRealPin').value = '';
   document.getElementById('setPanicPin').value = '';
-  if (typeof showStatusMessage === 'function') showStatusMessage('PINs saved on this device only.');
+  flashSavedBtn(document.getElementById('savePinSettings'), 'PINs saved');
+  showSaveToast('PINs saved on this device');
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -699,6 +758,7 @@ window.loggedFeatures = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+  bindModalBackdropClose();
   const safetyBtn = document.getElementById('safetySettingsBtn');
   if (safetyBtn) safetyBtn.onclick = async () => {
     const ok = await requireUnlock('Unlock settings', true);
@@ -729,7 +789,8 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await saveDuressPassword(p);
       document.getElementById('setDuressPass').value = '';
-      if (typeof showStatusMessage === 'function') showStatusMessage('Duress password saved on this phone.');
+      flashSavedBtn(saveDuress, 'Password saved');
+      showSaveToast('Duress password saved on this device');
     } catch (e) { alert(e.message); }
   };
   const copyWatch = document.getElementById('copyWatchLink');

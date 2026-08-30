@@ -130,6 +130,10 @@ const VAPID_PRIVATE = process.env.VAPID_PRIVATE || '5-E26pjHBd9TwjyCFvuRQs-ShLur
 if (webpush) {
   try { webpush.setVapidDetails('mailto:hello@anonomoose.com', VAPID_PUBLIC, VAPID_PRIVATE); } catch (e) { logger.warn('vapid setup %s', e.message); }
 }
+let stripe = null;
+try {
+  if (process.env.STRIPE_SECRET_KEY) stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+} catch (e) { logger.warn('stripe %s', e.message); }
 function readJsonBody(req, limit) {
   return new Promise((resolve, reject) => {
     let raw = '';
@@ -267,11 +271,14 @@ server.on('request', (req, res) => {
   const origin = req.headers.origin || '';
   const allowOrigin = (origin === 'https://www.anonomoose.com' || origin === 'https://anonomoose.com') ? origin : 'https://www.anonomoose.com';
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
-  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping') {
-    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
+  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping' || fullUrl.pathname === '/vanity-checkout' || fullUrl.pathname === '/vanity-claim' || fullUrl.pathname === '/stripe-webhook') {
+    const vanityCors = fullUrl.pathname !== '/stripe-webhook';
+    if (vanityCors) {
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+    if (req.method === 'OPTIONS' && vanityCors) {
       res.writeHead(204);
       res.end();
       return;
@@ -281,7 +288,84 @@ server.on('request', (req, res) => {
       res.end();
       return;
     }
+    if (fullUrl.pathname === '/stripe-webhook') {
+      readJsonBody(req, 20000).then(async (body) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ received: true }));
+        try {
+          const name = (body.data && body.data.object && body.data.object.metadata && body.data.object.metadata.name) || '';
+          const userId = (body.data && body.data.object && body.data.object.metadata && body.data.object.metadata.userId) || '';
+          if (name && userId) await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
+        } catch (e) {}
+      }).catch(() => { if (!res.headersSent) { res.writeHead(400); res.end(); } });
+      return;
+    }
     readJsonBody(req).then(async (body) => {
+      if (fullUrl.pathname === '/vanity-checkout') {
+        if (!stripe) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Stripe is not live yet. Add STRIPE_SECRET_KEY on Render to take payment.' }));
+          return;
+        }
+        const kind = body.kind === 'letter' ? 'letter' : 'number';
+        const name = String(body.name || body.n || '').trim();
+        const userId = String(body.userId || '');
+        if (!name || !userId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Missing name' }));
+          return;
+        }
+        let amount = 500;
+        if (kind === 'number') {
+          const n = parseInt(name, 10);
+          if (n === 1 || n === 7) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'That number is not for sale' }));
+            return;
+          }
+          amount = n <= 9 ? 2500 : n <= 99 ? 1000 : 500;
+          if ([2,3,4,5,6,8,9].includes(n)) amount = ({ 2: 10000, 3: 8000, 4: 6000, 5: 8000, 6: 5000, 8: 5000, 9: 8000 })[n];
+        } else {
+          amount = name.length === 1 ? 5000 : name.length === 2 ? 2500 : 1000;
+        }
+        const session = await stripe.checkout.sessions.create({
+          mode: 'payment',
+          success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
+          cancel_url: 'https://www.anonomoose.com/',
+          metadata: { kind, name, userId },
+          line_items: [{
+            quantity: 1,
+            price_data: {
+              currency: 'gbp',
+              unit_amount: amount,
+              product_data: { name: 'Anonomoose name ' + name }
+            }
+          }]
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, url: session.url }));
+        return;
+      }
+      if (fullUrl.pathname === '/vanity-claim') {
+        const sessionId = String(body.sessionId || '');
+        if (!stripe || !sessionId) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false }));
+          return;
+        }
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        if (!session || session.payment_status !== 'paid') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false }));
+          return;
+        }
+        const name = session.metadata && session.metadata.name;
+        const userId = session.metadata && session.metadata.userId;
+        if (name && userId) await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, name, userId }));
+        return;
+      }
       if (fullUrl.pathname === '/push-sub') {
         const name = String(body.to || body.username || '').trim().toLowerCase();
         const sub = body.subscription || body;

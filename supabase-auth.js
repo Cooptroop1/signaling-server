@@ -715,12 +715,31 @@ function pounds(cents) {
   return '£' + (Number(cents || 0) / 100).toFixed(2);
 }
 
+async function applyBoughtName(name) {
+  if (!isLoggedIn() || !name) return;
+  const uid = currentUser().id;
+  try {
+    await sb.from('profiles').update({ display_name: String(name) }).eq('id', uid);
+  } catch (e) {}
+  try {
+    await sb.auth.updateUser({ data: { display_name: String(name) } });
+  } catch (e) {}
+  if (typeof username !== 'undefined') {
+    username = String(name);
+    try { sessionStorage.setItem('username', username); } catch (x) {}
+    try { localStorage.setItem('username', username); } catch (x) {}
+  }
+  if (typeof showStatusMessage === 'function') showStatusMessage('Your name is now ' + name);
+  if (typeof setAuthUi === 'function') setAuthUi(window.__sbSession);
+}
+
 async function loadMooseShop() {
   const wrap = document.getElementById('vanityShopWrap');
   if (!sb || !wrap) return;
   try {
-    const { data } = await sb.from('moose_shop').select('numbers_on').eq('id', 1).maybeSingle();
-    wrap.classList.toggle('hidden', !(data && data.numbers_on));
+    const { data } = await sb.from('moose_shop').select('numbers_on, letters_on, stripe_ready').eq('id', 1).maybeSingle();
+    wrap.classList.toggle('hidden', !(data && (data.numbers_on || data.letters_on)));
+    window.__mooseShop = data || {};
   } catch (e) {
     wrap.classList.add('hidden');
   }
@@ -733,12 +752,30 @@ async function checkMooseNumber(raw) {
   try {
     const { data, error } = await sb.rpc('moose_number_check', { p_n: n });
     if (error) throw error;
-    const row = typeof data === 'string' ? JSON.parse(data) : data;
-    return row || { ok: false, error: 'Could not check' };
+    return (typeof data === 'string' ? JSON.parse(data) : data) || { ok: false, error: 'Could not check' };
   } catch (e) {
-    const { data } = await sb.from('vanity_numbers').select('n, status, price_cents').eq('n', n).maybeSingle();
+    const { data } = await sb.from('vanity_numbers').select('*').eq('n', n).maybeSingle();
     if (!data) return { ok: false, error: 'Could not check that number' };
-    return { ok: true, n: data.n, status: data.status, price_cents: data.price_cents, available: data.status === 'listed' };
+    const forever = !!data.held_forever || n === 1 || n === 7;
+    return {
+      ok: true, kind: 'number', n: data.n, status: forever ? 'held' : data.status,
+      price_cents: data.buy_now_cents || data.price_cents, gold: data.gold,
+      held_forever: forever, current_bid_cents: data.current_bid_cents,
+      available: !forever && data.status === 'listed'
+    };
+  }
+}
+
+async function checkMooseLetter(raw) {
+  const name = String(raw || '').replace(/[^A-Za-z]/g, '');
+  if (name.length < 1 || name.length > 3) return { ok: false, error: 'Use 1 to 3 letters' };
+  if (!sb) return { ok: false, error: 'Not ready' };
+  try {
+    const { data, error } = await sb.rpc('moose_letter_check', { p_name: name });
+    if (error) throw error;
+    return (typeof data === 'string' ? JSON.parse(data) : data) || { ok: false, error: 'Could not check' };
+  } catch (e) {
+    return { ok: false, error: 'Could not check that name' };
   }
 }
 
@@ -751,51 +788,161 @@ function openVanityShop() {
   if (out) out.textContent = '';
 }
 
+function setVanityTab(tab) {
+  window.__vanityTab = tab;
+  const input = document.getElementById('vanityNumberInput');
+  const tn = document.getElementById('vanityTabNum');
+  const tl = document.getElementById('vanityTabLet');
+  if (input) {
+    input.value = '';
+    input.maxLength = tab === 'letter' ? 3 : 3;
+    input.placeholder = tab === 'letter' ? 'A to ZZZ' : '1 to 999';
+    input.inputMode = tab === 'letter' ? 'text' : 'numeric';
+  }
+  if (tn) tn.className = tab === 'number' ? 'bg-gray-800 text-white px-3 py-1 rounded text-sm' : 'bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm';
+  if (tl) tl.className = tab === 'letter' ? 'bg-gray-800 text-white px-3 py-1 rounded text-sm' : 'bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm';
+}
+
+async function startVanityCheckout(row) {
+  if (!isLoggedIn()) {
+    if (typeof showStatusMessage === 'function') showStatusMessage('Log in first to buy a name.');
+    return;
+  }
+  const body = {
+    kind: row.kind || (window.__vanityTab === 'letter' ? 'letter' : 'number'),
+    n: row.n || null,
+    name: row.name || (row.n != null ? String(row.n) : ''),
+    userId: currentUser().id,
+    access: (window.__sbSession && window.__sbSession.access_token) || ''
+  };
+  try {
+    const r = await fetch('https://signal.anonomoose.com/vanity-checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (data && data.url) {
+      window.location.href = data.url;
+      return;
+    }
+    if (typeof showStatusMessage === 'function') {
+      showStatusMessage(data && data.error ? data.error : 'Stripe is not live yet. Add keys on the server to take payment.');
+    }
+  } catch (e) {
+    if (typeof showStatusMessage === 'function') showStatusMessage('Could not start checkout.');
+  }
+}
+
+async function finishVanityReturn() {
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get('vanity') !== 'ok') return;
+    const sessionId = q.get('session_id');
+    if (!sessionId) return;
+    const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId })
+    });
+    const data = await r.json();
+    if (data && data.ok && data.name) await applyBoughtName(data.name);
+    history.replaceState({}, '', location.pathname);
+  } catch (e) {}
+}
+
 function bindVanityShop() {
   const openBtn = document.getElementById('vanityShopBtn');
   const closeBtn = document.getElementById('closeVanityShop');
   const checkBtn = document.getElementById('vanityCheckBtn');
   const buyBtn = document.getElementById('vanityBuyBtn');
+  const bidBtn = document.getElementById('vanityBidBtn');
+  const bidInput = document.getElementById('vanityBidInput');
   const input = document.getElementById('vanityNumberInput');
   const out = document.getElementById('vanityShopResult');
+  window.__vanityTab = 'number';
   if (openBtn) openBtn.onclick = openVanityShop;
+  const tn = document.getElementById('vanityTabNum');
+  const tl = document.getElementById('vanityTabLet');
+  if (tn) tn.onclick = () => setVanityTab('number');
+  if (tl) tl.onclick = () => setVanityTab('letter');
   if (closeBtn) closeBtn.onclick = () => {
     const m = document.getElementById('vanityShopModal');
     if (!m) return;
     m.classList.add('hidden');
     m.classList.remove('active');
   };
+  const hideActs = () => {
+    if (buyBtn) buyBtn.classList.add('hidden');
+    if (bidBtn) bidBtn.classList.add('hidden');
+    if (bidInput) bidInput.classList.add('hidden');
+  };
   const runCheck = async () => {
     if (!out) return;
     out.textContent = 'Checking…';
-    if (buyBtn) buyBtn.classList.add('hidden');
-    const row = await checkMooseNumber(input && input.value);
+    hideActs();
+    const row = window.__vanityTab === 'letter'
+      ? await checkMooseLetter(input && input.value)
+      : await checkMooseNumber(input && input.value);
+    window.__vanityLast = row;
     if (!row || !row.ok) {
       out.textContent = (row && row.error) || 'Could not check';
       return;
     }
+    const label = row.kind === 'letter' ? row.name : ('#' + row.n);
+    if (row.held_forever) {
+      out.textContent = label + ' is kept by Anonomoose. Not for sale.';
+      return;
+    }
     if (row.status === 'sold') {
-      out.textContent = '#' + row.n + ' is taken.';
+      out.textContent = label + ' is taken.';
       return;
     }
-    if (row.status === 'held' || !row.shop_on && row.available === false && row.status !== 'listed') {
-      out.textContent = '#' + row.n + ' is reserved. Not for sale yet.';
+    if (row.status === 'held' || !row.available) {
+      out.textContent = label + ' is reserved. Not for sale yet.';
       return;
     }
-    if (row.status === 'listed' || row.available) {
-      out.textContent = '#' + row.n + ' is available — ' + pounds(row.price_cents);
-      if (buyBtn) buyBtn.classList.remove('hidden');
-      return;
+    let msg = label + ' is available — ' + pounds(row.price_cents);
+    if (row.gold) msg = 'Gold ' + msg;
+    if (row.current_bid_cents) msg += '. Highest bid ' + pounds(row.current_bid_cents);
+    out.textContent = msg;
+    if (buyBtn) buyBtn.classList.remove('hidden');
+    if (row.gold) {
+      if (bidBtn) bidBtn.classList.remove('hidden');
+      if (bidInput) bidInput.classList.remove('hidden');
     }
-    out.textContent = '#' + row.n + ' is reserved.';
   };
   if (checkBtn) checkBtn.onclick = runCheck;
   if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runCheck(); });
-  if (buyBtn) buyBtn.onclick = () => {
-    if (typeof showStatusMessage === 'function') showStatusMessage('Stripe payments are not live yet. This number stays reserved for you to buy later.');
-    if (out) out.textContent = (out.textContent || '') + ' Payments coming soon.';
+  if (buyBtn) buyBtn.onclick = () => startVanityCheckout(window.__vanityLast || {});
+  if (bidBtn) bidBtn.onclick = async () => {
+    if (!isLoggedIn()) {
+      if (typeof showStatusMessage === 'function') showStatusMessage('Log in to bid.');
+      return;
+    }
+    const row = window.__vanityLast;
+    const poundsIn = Number(bidInput && bidInput.value);
+    if (!row || !poundsIn || poundsIn <= 0) return;
+    const amount = Math.round(poundsIn * 100);
+    const min = row.current_bid_cents || Math.round((row.price_cents || 0) * 0.2);
+    if (amount <= min) {
+      if (out) out.textContent = 'Bid more than ' + pounds(min);
+      return;
+    }
+    const { data, error } = await sb.rpc('moose_place_bid', {
+      p_kind: row.kind || 'number',
+      p_target: String(row.name || row.n),
+      p_amount: amount
+    });
+    if (error || (data && data.ok === false)) {
+      if (out) out.textContent = (data && data.error) || (error && error.message) || 'Could not bid';
+      return;
+    }
+    row.current_bid_cents = amount;
+    if (out) out.textContent = 'Bid in at ' + pounds(amount) + '. Winner pays later with Stripe.';
   };
   loadMooseShop();
+  finishVanityReturn();
 }
 
 window.sbAuth = {

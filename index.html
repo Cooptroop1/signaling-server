@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260832c">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260832c">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260832c">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260832c">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260832c">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260832c">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260832d">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260832d">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260832d">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260832d">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260832d">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260832d">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1226,7 +1226,7 @@
           <div class="start-btn-wrap"><button type="button" id="connectToggleButton" class="bg-green-500 text-white rounded hover:bg-green-600">Connect to Chat</button></div>
           <div class="start-btn-wrap"><button type="button" id="photoCodeToggle" class="text-white rounded hover:bg-orange-600">Photo Code</button></div>
           <div class="start-btn-wrap hidden" id="vanityShopWrap">
-            <button type="button" id="vanityShopBtn" class="text-white rounded" style="background:#0f766e">Moose numbers</button>
+            <button type="button" id="vanityShopBtn" class="text-white rounded" style="background:#0f766e">Moose shop</button>
           </div>
           <div class="start-btn-wrap logged-only-opt hidden" id="sealedNotesWrap">
             <button type="button" id="sealedNotesBtn">Sealed Notes<span id="sealedNotesDot" class="mail-dot hidden"></span></button>
@@ -1399,7 +1399,7 @@
       <p><strong>Typing:</strong> Nobody ever sees that you are typing.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
       <p><strong>Fingerprint / Face ID:</strong> After Sign Up, tap Save fingerprint. Next time tap Login then Fingerprint / Face ID — no password. First time only: in Supabase go Authentication → Passkeys, turn it on, RP ID <code>anonomoose.com</code>, origins <code>https://www.anonomoose.com</code> and <code>https://anonomoose.com</code>.</p>
-      <p><strong>Names:</strong> Logged-in names are 4–16 letters or numbers. Capitals do not make a new name. Numbers 1–999 and 1–3 letter names are reserved for later sale.</p>
+      <p><strong>Names:</strong> Logged-in names are 4–16 letters or numbers. Capitals do not make a new name. Numbers 1–999 and 1–3 letter names are in the Moose shop. #1 and #7 stay unsold. Gold singles can be bid on.</p>
       <p><strong>Call:</strong> Logged-in Search or Moose Book → Call. If they have the app open they get a ring (Answer / Decline). If not, it sits in Sealed Notes as a missed call for 30 minutes. Answering joins a phone-to-phone room and starts the voice call. On iPhone: Add to Home Screen and Allow notifications so calls and sealed notes can ping when the app is in the background.</p>
       <p><strong>Safety:</strong> Logged-in only. Trust names, hide last seen, panic PIN, one-phone lock, disappearing notes, read-once photos, timed meet codes. Wipe other devices burns their inbox and signs them out. iPhone cannot fully block screenshots — the note hides if you leave the app.</p>
     </div>
@@ -1410,17 +1410,24 @@
       <div id="addUserRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
     </div>
   </div>
-  <div id="vanityShopModal" class="totp-modal" role="dialog" aria-label="Moose numbers">
+  <div id="vanityShopModal" class="totp-modal" role="dialog" aria-label="Moose shop">
     <div class="totp-modal-content">
-      <h2 class="text-xl font-bold mb-3">Moose numbers</h2>
-      <p class="text-sm text-gray-600 mb-3">Numbers 1–999 are reserved names. Check if one is for sale. Payments (Stripe) are not live yet.</p>
-      <input id="vanityNumberInput" type="number" min="1" max="999" placeholder="1 to 999" class="border border-gray-300 p-3 w-full mb-3 rounded">
-      <button id="vanityCheckBtn" type="button" class="bg-gray-800 text-white px-4 py-2 rounded w-full">Check number</button>
+      <h2 class="text-xl font-bold mb-3">Moose shop</h2>
+      <p class="text-sm text-gray-600 mb-3">Short names and 1–999 are reserved. Check a number or 1–3 letters. Stripe checkout is wired; it only charges when keys are on the server.</p>
+      <div class="flex gap-2 mb-3">
+        <button type="button" id="vanityTabNum" class="bg-gray-800 text-white px-3 py-1 rounded text-sm">Numbers</button>
+        <button type="button" id="vanityTabLet" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Letters</button>
+      </div>
+      <input id="vanityNumberInput" type="text" inputmode="numeric" placeholder="1 to 999" class="border border-gray-300 p-3 w-full mb-3 rounded" maxlength="3">
+      <button id="vanityCheckBtn" type="button" class="bg-gray-800 text-white px-4 py-2 rounded w-full">Check</button>
       <p id="vanityShopResult" class="text-sm text-gray-700 mt-3 mb-2"></p>
-      <button id="vanityBuyBtn" type="button" class="bg-green-600 text-white px-4 py-2 rounded w-full mb-2 hidden">Buy (Stripe soon)</button>
+      <input id="vanityBidInput" type="number" min="1" placeholder="Your bid (£)" class="border border-gray-300 p-3 w-full mb-2 rounded hidden">
+      <button id="vanityBidBtn" type="button" class="bg-yellow-600 text-white px-4 py-2 rounded w-full mb-2 hidden">Place bid</button>
+      <button id="vanityBuyBtn" type="button" class="bg-green-600 text-white px-4 py-2 rounded w-full mb-2 hidden">Buy now</button>
       <button id="closeVanityShop" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full">Close</button>
     </div>
   </div>
+  <div id="photoCodeModal" class="totp-modal" role="dialog" aria-label="Photo Code">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-3">Photo Code</h2>
       <p class="text-sm text-gray-600 mb-3">Hide a room code in a photo. On Telegram send the PNG as a <b>file / document</b>, not a compressed photo. You stay in the room; they decode and join you.</p>
@@ -1666,15 +1673,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260832c"></script>
-  <script src="ratchet.js?v=260832c"></script>
-  <script src="utils.js?v=260832c"></script>
-  <script src="main.js?v=260832c"></script>
-  <script src="init.js?v=260832c"></script>
-  <script src="events.js?v=260832c"></script>
+    <script src="crypto.js?v=260832d"></script>
+  <script src="ratchet.js?v=260832d"></script>
+  <script src="utils.js?v=260832d"></script>
+  <script src="main.js?v=260832d"></script>
+  <script src="init.js?v=260832d"></script>
+  <script src="events.js?v=260832d"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260832c"></script>
-  <script src="account-ui.js?v=260832c"></script>
-  <script src="logged-features.js?v=260832c"></script>
+  <script src="supabase-auth.js?v=260832d"></script>
+  <script src="account-ui.js?v=260832d"></script>
+  <script src="logged-features.js?v=260832d"></script>
 </body>
 </html>

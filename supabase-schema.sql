@@ -266,6 +266,145 @@ $$;
 
 grant execute on function public.moose_number_check(int) to authenticated, anon;
 
+alter table public.vanity_numbers add column if not exists gold boolean default false;
+alter table public.vanity_numbers add column if not exists held_forever boolean default false;
+alter table public.vanity_numbers add column if not exists buy_now_cents int;
+alter table public.vanity_numbers add column if not exists current_bid_cents int;
+
+update public.vanity_numbers
+set held_forever = true, gold = true, status = 'held'
+where n in (1, 7);
+
+update public.vanity_numbers
+set gold = true,
+    buy_now_cents = case n
+      when 2 then 10000 when 3 then 8000 when 4 then 6000 when 5 then 8000
+      when 6 then 5000 when 8 then 5000 when 9 then 8000 else 10000 end
+where n in (2,3,4,5,6,8,9);
+
+create table if not exists public.vanity_letters (
+  name text primary key,
+  status text not null default 'listed' check (status in ('held', 'listed', 'sold')),
+  owner_id uuid references public.profiles (id) on delete set null,
+  price_cents int not null default 1000,
+  gold boolean default false,
+  updated_at timestamptz default now(),
+  constraint vanity_letter_format check (name ~ '^[A-Za-z]{1,3}$')
+);
+alter table public.vanity_letters enable row level security;
+drop policy if exists "letters read" on public.vanity_letters;
+create policy "letters read" on public.vanity_letters for select using (true);
+
+create table if not exists public.vanity_bids (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null,
+  target text not null,
+  user_id uuid references public.profiles (id) on delete cascade,
+  amount_cents int not null,
+  created_at timestamptz default now()
+);
+alter table public.vanity_bids enable row level security;
+drop policy if exists "bids read" on public.vanity_bids;
+create policy "bids read" on public.vanity_bids for select using (true);
+drop policy if exists "bids insert own" on public.vanity_bids;
+create policy "bids insert own" on public.vanity_bids
+  for insert to authenticated with check (auth.uid() = user_id);
+
+create or replace function public.moose_letter_check(p_name text)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  shop public.moose_shop%rowtype;
+  v public.vanity_letters%rowtype;
+  nm text;
+  price int;
+begin
+  nm := regexp_replace(trim(p_name), '[^A-Za-z]', '', 'g');
+  if char_length(nm) < 1 or char_length(nm) > 3 then
+    return jsonb_build_object('ok', false, 'error', 'Use 1 to 3 letters');
+  end if;
+  select * into shop from public.moose_shop where id = 1;
+  price := case char_length(nm) when 1 then 5000 when 2 then 2500 else 1000 end;
+  select * into v from public.vanity_letters where lower(name) = lower(nm);
+  if found then
+    return jsonb_build_object(
+      'ok', true, 'kind', 'letter', 'name', v.name, 'status', v.status,
+      'price_cents', v.price_cents, 'gold', coalesce(v.gold, false),
+      'shop_on', coalesce(shop.letters_on, false),
+      'available', (v.status = 'listed' and coalesce(shop.letters_on, false))
+    );
+  end if;
+  return jsonb_build_object(
+    'ok', true, 'kind', 'letter', 'name', nm, 'status',
+    case when coalesce(shop.letters_on, false) then 'listed' else 'held' end,
+    'price_cents', price, 'gold', char_length(nm) = 1,
+    'shop_on', coalesce(shop.letters_on, false),
+    'available', coalesce(shop.letters_on, false)
+  );
+end;
+$$;
+grant execute on function public.moose_letter_check(text) to authenticated, anon;
+
+create or replace function public.moose_place_bid(p_kind text, p_target text, p_amount int)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  n int;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'error', 'Log in to bid');
+  end if;
+  if p_amount is null or p_amount < 100 then
+    return jsonb_build_object('ok', false, 'error', 'Bid too small');
+  end if;
+  insert into public.vanity_bids (kind, target, user_id, amount_cents)
+  values (p_kind, p_target, me, p_amount);
+  if p_kind = 'number' then
+    update public.vanity_numbers v
+      set current_bid_cents = greatest(coalesce(v.current_bid_cents, 0), p_amount)
+      where v.n = (p_target)::int and coalesce(v.held_forever, false) = false;
+  end if;
+  return jsonb_build_object('ok', true, 'amount_cents', p_amount);
+end;
+$$;
+grant execute on function public.moose_place_bid(text, text, int) to authenticated;
+
+create or replace function public.moose_number_check(p_n int)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  shop public.moose_shop%rowtype;
+  v public.vanity_numbers%rowtype;
+  forever boolean := false;
+begin
+  if p_n is null or p_n < 1 or p_n > 999 then
+    return jsonb_build_object('ok', false, 'error', 'Pick a number from 1 to 999');
+  end if;
+  select * into shop from public.moose_shop where id = 1;
+  select * into v from public.vanity_numbers where n = p_n;
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'Not a reserved number');
+  end if;
+  forever := coalesce(v.held_forever, false) or p_n in (1, 7);
+  return jsonb_build_object(
+    'ok', true,
+    'kind', 'number',
+    'n', v.n,
+    'status', case when forever then 'held' else v.status end,
+    'price_cents', coalesce(v.buy_now_cents, v.price_cents),
+    'gold', coalesce(v.gold, false),
+    'held_forever', forever,
+    'current_bid_cents', v.current_bid_cents,
+    'shop_on', coalesce(shop.numbers_on, false),
+    'available', (not forever and v.status = 'listed' and coalesce(shop.numbers_on, false))
+  );
+end;
+$$;
+
 -- Remote wipe
 alter table public.profiles add column if not exists wipe_epoch bigint;
 do $$

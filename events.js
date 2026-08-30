@@ -2311,14 +2311,20 @@ function showUserSearchResult(searchedUsername, message) {
     const ttl = document.createElement('select');
     ttl.className = 'border border-gray-300 p-2 w-full mt-2 rounded';
     ttl.innerHTML = '<option value="0">Keep until they open</option><option value="3600000">Burn in 1 hour if unopened</option><option value="86400000">Burn in 24 hours if unopened</option>';
+    const photoLab = document.createElement('p');
+    photoLab.className = 'text-xs text-gray-500 mt-2 mb-0';
+    photoLab.textContent = 'Photo (read once)';
     const photoInput = document.createElement('input');
     photoInput.type = 'file';
     photoInput.accept = 'image/*';
-    photoInput.className = 'mt-2';
+    photoInput.setAttribute('aria-label', 'Photo');
+    const voiceLab = document.createElement('p');
+    voiceLab.className = 'text-xs text-gray-500 mt-2 mb-0';
+    voiceLab.textContent = 'Voice file (or record below)';
     const voiceInput = document.createElement('input');
     voiceInput.type = 'file';
     voiceInput.accept = 'audio/*';
-    voiceInput.className = 'mt-2';
+    voiceInput.setAttribute('aria-label', 'Voice');
     let pendingVoice = null;
     const recBtn = document.createElement('button');
     recBtn.textContent = 'Record voice (5s)';
@@ -2381,7 +2387,9 @@ function showUserSearchResult(searchedUsername, message) {
       }
     };
     offlineMsgContainer.appendChild(ttl);
+    offlineMsgContainer.appendChild(photoLab);
     offlineMsgContainer.appendChild(photoInput);
+    offlineMsgContainer.appendChild(voiceLab);
     offlineMsgContainer.appendChild(voiceInput);
     offlineMsgContainer.appendChild(recBtn);
     offlineMsgContainer.appendChild(meetHint);

@@ -334,6 +334,25 @@ async function sendJoin(extra) {
     sbAccess: (window.__sbSession && window.__sbSession.access_token) || undefined
   }, extra)));
 }
+function enterHostedRoom() {
+  initialContainer.classList.add('hidden');
+  usernameContainer.classList.add('hidden');
+  connectContainer.classList.add('hidden');
+  chatContainer.classList.remove('hidden');
+  if (codeDisplayElement) {
+    codeDisplayElement.textContent = 'Your code: ' + code;
+    codeDisplayElement.classList.remove('hidden');
+  }
+  copyCodeButton?.classList.remove('hidden');
+  messages.classList.add('waiting');
+  statusElement.textContent = 'Waiting for them to join…';
+  sendJoin().catch((err) => {
+    console.error(err);
+    showStatusMessage('Failed to start chat.');
+  });
+  document.getElementById('messageInput')?.focus();
+}
+window.enterHostedRoom = enterHostedRoom;
 lastWsUrl = serverForCode((new URLSearchParams(window.location.search).get('code')) || code);
 const bootCode = new URLSearchParams(window.location.search).get('code');
 if (bootCode) {

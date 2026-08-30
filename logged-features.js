@@ -682,12 +682,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const encodeStego = document.getElementById('stegoEncodeBtn');
   const stegoFile = document.getElementById('stegoFile');
   if (encodeStego && stegoFile) encodeStego.onclick = async () => {
+    if (!stegoFile.files || !stegoFile.files[0]) return alert('Pick a normal-looking photo first.');
     const chatOn = document.getElementById('chatContainer') && !document.getElementById('chatContainer').classList.contains('hidden');
-    if (!chatOn || !code) {
-      alert('Start a chat first, stay on that screen, then hide that room’s code in a photo. They decode it and walk into YOUR room.');
-      return;
+    if (!chatOn) {
+      username = (username || sessionStorage.getItem('username') || localStorage.getItem('username') || '').trim();
+      if (typeof validateUsername !== 'function' || !validateUsername(username)) {
+        alert('Put your name in first: tap Start Chat, type a name, come back and hide the photo — or log in.');
+        document.getElementById('startChatToggleButton')?.click();
+        return;
+      }
+      if (typeof generateCode === 'function' && (typeof validateCode !== 'function' || !validateCode(code))) {
+        code = generateCode();
+      }
     }
-    if (!stegoFile.files || !stegoFile.files[0]) return alert('Pick a normal-looking photo.');
     try {
       const img = await fileToImage(stegoFile.files[0]);
       const canvas = embedTextInPng(img, code);
@@ -695,7 +702,12 @@ document.addEventListener('DOMContentLoaded', () => {
       a.href = canvas.toDataURL('image/png');
       a.download = 'holiday.png';
       a.click();
-      showStatusMessage('Photo saved. Stay in this chat — when they decode it they join you here.');
+      if (!chatOn && typeof window.enterHostedRoom === 'function') {
+        window.enterHostedRoom();
+        showStatusMessage('Photo saved. You are in the room — wait here. They decode the photo and join you.');
+      } else {
+        showStatusMessage('Photo saved. Stay in this chat — they decode it and join you here.');
+      }
     } catch (e) { alert(e.message || 'Could not hide the code'); }
   };
   const decodeStego = document.getElementById('stegoDecodeBtn');

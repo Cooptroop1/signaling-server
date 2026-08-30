@@ -933,7 +933,7 @@ async function checkMooseNumber(raw) {
   } catch (e) {
     const { data } = await sb.from('vanity_numbers').select('*').eq('n', n).maybeSingle();
     if (!data) return { ok: false, error: 'Could not check that number' };
-    const forever = !!data.held_forever || n === 1 || n === 7;
+    const forever = !!data.held_forever;
     const shopOn = !!(window.__mooseShop && window.__mooseShop.numbers_on);
     return {
       ok: true, kind: 'number', n: data.n, status: forever ? 'held' : (shopOn ? 'listed' : data.status),
@@ -1057,7 +1057,7 @@ function bindVanityShop() {
     }
     const label = row.kind === 'letter' ? row.name : ('#' + row.n);
     const n = Number(row.n);
-    const forever = !!row.held_forever || n === 1 || n === 7;
+    const forever = !!row.held_forever;
     const shop = window.__mooseShop || {};
     const saleOn = row.kind === 'letter'
       ? (shop.letters_on === true || row.shop_on === true)

@@ -431,7 +431,7 @@ begin
   if not found then
     return jsonb_build_object('ok', false, 'error', 'Not a reserved number');
   end if;
-  forever := coalesce(v.held_forever, false) or p_n in (1, 7);
+  forever := coalesce(v.held_forever, false);
   return jsonb_build_object(
     'ok', true,
     'kind', 'number',
@@ -471,7 +471,7 @@ begin
   end if;
   if nm ~ '^[0-9]+$' then
     n := nm::int;
-    if n < 1 or n > 999 or n in (1, 7) then
+    if n < 1 or n > 999 then
       return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
     end if;
     update public.vanity_numbers
@@ -572,7 +572,7 @@ begin
   end if;
   if nm ~ '^[0-9]+$' then
     n := nm::int;
-    if n in (1, 7) then
+    if n < 1 or n > 999 then
       return jsonb_build_object('ok', false, 'error', 'Not for sale');
     end if;
     update public.vanity_numbers vn
@@ -616,7 +616,7 @@ begin
   end if;
   if nm ~ '^[0-9]+$' then
     n := nm::int;
-    if n < 1 or n > 999 or n in (1, 7) then
+    if n < 1 or n > 999 then
       return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
     end if;
     update public.vanity_numbers vn

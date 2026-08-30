@@ -237,7 +237,7 @@ async function lookupVanityAmount(kind, name) {
   const headers = { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY };
   if (kind === 'number') {
     const n = parseInt(name, 10);
-    if (!n || n === 1 || n === 7) return { error: 'That number is not for sale' };
+    if (!n || n < 1 || n > 999) return { error: 'That number is not for sale' };
     const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + n + '&select=buy_now_cents,price_cents,held_forever,status', { headers });
     const rows = await vr.json();
     const row = Array.isArray(rows) ? rows[0] : null;

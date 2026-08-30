@@ -101,7 +101,8 @@ end $$;
 alter table public.profiles add column if not exists hide_last_seen boolean default false;
 alter table public.profiles add column if not exists discover text default 'anyone';
 alter table public.profiles add column if not exists device_id text;
-alter table public.profiles add column if not exists device_name text;
+alter table public.profiles add column if not exists qr_token text;
+alter table public.profiles add column if not exists qr_expires timestamptz;
 
 alter table public.offline_messages add column if not exists expires_at timestamptz;
 alter table public.offline_messages add column if not exists kind text;

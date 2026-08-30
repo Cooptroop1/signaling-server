@@ -261,6 +261,7 @@ server.on('request', (req, res) => {
 });
 const wss = new WebSocket.Server({ server });
 const rooms = new Map();
+const watchBinds = new Map();
 const dailyUsers = new Map();
 const dailyConnections = new Map();
 const LOG_FILE = path.join(__dirname, 'user_counts.log');
@@ -673,6 +674,17 @@ function validateMessage(data) {
     case 'get-turn-credentials':
     case 'room-wipe':
       break;
+    case 'watch-bind':
+      if (!data.token || typeof data.token !== 'string' || data.token.length < 8) {
+        return { valid: false, error: 'watch-bind: token required' };
+      }
+      if (!data.code) return { valid: false, error: 'watch-bind: code required' };
+      break;
+    case 'watch-burn':
+      if (!data.token || typeof data.token !== 'string' || data.token.length < 8) {
+        return { valid: false, error: 'watch-burn: token required' };
+      }
+      break;
     case 'set-totp':
       if (!data.code) {
         return { valid: false, error: 'set-totp: code required' };
@@ -951,7 +963,7 @@ wss.on('connection', (ws, req) => {
         ws.close();
         return;
       }
-      if (data.type !== 'connect' && data.type !== 'refresh-token') {
+      if (data.type !== 'connect' && data.type !== 'refresh-token' && data.type !== 'watch-burn') {
         if (!data.token) {
           ws.send(JSON.stringify({ type: 'error', message: 'Missing authentication token' }));
           return;
@@ -1512,6 +1524,26 @@ wss.on('connection', (ws, req) => {
           clientMessage: JSON.stringify({ type: 'room-wipe', clientId: data.clientId })
         }));
         setTimeout(() => { destroyRoom(data.code).catch(() => {}); }, 400);
+        return;
+      }
+      if (data.type === 'watch-bind') {
+        watchBinds.set(data.token, { code: data.code, at: Date.now() });
+        ws.send(JSON.stringify({ type: 'watch-bound', ok: true }));
+        return;
+      }
+      if (data.type === 'watch-burn') {
+        const bound = watchBinds.get(data.token);
+        if (!bound || Date.now() - bound.at > 6 * 60 * 60 * 1000) {
+          ws.send(JSON.stringify({ type: 'error', message: 'No room on this link.' }));
+          return;
+        }
+        pubClient.publish(`room:${bound.code}`, JSON.stringify({
+          type: 'broadcast',
+          clientMessage: JSON.stringify({ type: 'room-wipe', clientId: 'watch' })
+        }));
+        setTimeout(() => { destroyRoom(bound.code).catch(() => {}); }, 400);
+        watchBinds.delete(data.token);
+        ws.send(JSON.stringify({ ok: true, type: 'watch-burned' }));
         return;
       }
       if (data.type === 'ping') {

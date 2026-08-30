@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ping</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #111; color: #fff; font-family: sans-serif; }
+    button { font-size: 1.4rem; padding: 1.2rem 2rem; border: 0; border-radius: 1rem; background: #dc2626; color: #fff; }
+  </style>
+</head>
+<body>
+  <button id="go" type="button">Burn room</button>
+  <script>
+    const token = (location.hash || location.search.replace(/^\?t=/, '') || '').replace(/^#/, '');
+    const go = document.getElementById('go');
+    function send() {
+      if (!token) { go.textContent = 'No link'; return; }
+      go.textContent = 'Sending…';
+      const ws = new WebSocket('wss://signal.anonomoose.com');
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'watch-burn', token }));
+      };
+      ws.onmessage = (e) => {
+        try {
+          const m = JSON.parse(e.data);
+          go.textContent = m.ok ? 'Burned' : (m.message || 'Done');
+        } catch (err) { go.textContent = 'Sent'; }
+        setTimeout(() => { try { ws.close(); } catch (x) {} }, 400);
+      };
+      ws.onerror = () => { go.textContent = 'Failed'; };
+    }
+    go.onclick = send;
+    if (token) setTimeout(send, 50);
+  </script>
+</body>
+</html>

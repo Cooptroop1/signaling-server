@@ -496,6 +496,10 @@ function handleSocketError(error) {
 function handleSocketClose() {
   console.log('WebSocket closed');
   stopKeepAlive();
+  if (window.__lanLock) {
+    console.log('LAN lock: not reconnecting');
+    return;
+  }
   if (pinReconnect) return;
   if (!code && !pendingCode && !pendingJoin) return;
   if (serverUrlIndex < serverUrls.length - 1 && reconnectAttempts === 0) {
@@ -2097,7 +2101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         requestRoomWipe();
         playBurnFlash().then(() => {
           burnChatSession();
-          showStatusMessage('Chat burned, moose book wiped, signed out.');
+          if (window.loggedFeatures && window.loggedFeatures.goCoverStory) window.loggedFeatures.goCoverStory();
         });
         return;
       }
@@ -2114,7 +2118,7 @@ document.addEventListener('DOMContentLoaded', () => {
       requestRoomWipe();
       playBurnFlash().then(() => {
         burnChatSession();
-        showStatusMessage('Chat burned on this phone and anyone still in the room.');
+        if (window.loggedFeatures && window.loggedFeatures.goCoverStory) window.loggedFeatures.goCoverStory();
       });
     });
   } else {
@@ -2310,6 +2314,29 @@ function showUserSearchResult(searchedUsername, message) {
     photoInput.type = 'file';
     photoInput.accept = 'image/*';
     photoInput.className = 'mt-2';
+    const voiceInput = document.createElement('input');
+    voiceInput.type = 'file';
+    voiceInput.accept = 'audio/*';
+    voiceInput.className = 'mt-2';
+    let pendingVoice = null;
+    const recBtn = document.createElement('button');
+    recBtn.textContent = 'Record voice (5s)';
+    recBtn.onclick = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const rec = new MediaRecorder(stream);
+        const chunks = [];
+        rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+        rec.onstop = () => {
+          stream.getTracks().forEach((t) => t.stop());
+          pendingVoice = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+          recBtn.textContent = 'Voice ready';
+        };
+        rec.start();
+        recBtn.textContent = 'Recording…';
+        setTimeout(() => { try { rec.stop(); } catch (e) {} }, 5000);
+      } catch (e) { alert('Mic blocked'); }
+    };
     const meetAt = document.createElement('input');
     meetAt.type = 'datetime-local';
     meetAt.className = 'border border-gray-300 p-2 w-full mt-2 rounded';
@@ -2326,7 +2353,7 @@ function showUserSearchResult(searchedUsername, message) {
     sendBtn.onclick = async () => {
       const msgText = textarea.value.trim();
       if (sendBtn.disabled) return;
-      if (!msgText && !(photoInput.files && photoInput.files[0]) && !meetAt.value) return;
+      if (!msgText && !(photoInput.files && photoInput.files[0]) && !meetAt.value && !(voiceInput.files && voiceInput.files[0]) && !pendingVoice) return;
       sendBtn.disabled = true;
       sendBtn.textContent = 'Sending…';
       try {
@@ -2334,8 +2361,11 @@ function showUserSearchResult(searchedUsername, message) {
         const photo = (photoInput.files && photoInput.files[0] && typeof compressPhotoFile === 'function')
           ? await compressPhotoFile(photoInput.files[0])
           : null;
+        let voice = null;
+        if (pendingVoice && typeof compressVoiceBlob === 'function') voice = await compressVoiceBlob(pendingVoice);
+        else if (voiceInput.files && voiceInput.files[0] && typeof compressVoiceBlob === 'function') voice = await compressVoiceBlob(voiceInput.files[0]);
         const meet = meetAt.value ? new Date(meetAt.value).getTime() : 0;
-        await sendOfflineMessage(searchedUsername, msgText, { ttlMs, photo, meetAt: meet });
+        await sendOfflineMessage(searchedUsername, msgText, { ttlMs, photo, voice, meetAt: meet });
         textarea.value = '';
         sendBtn.textContent = 'Sent';
         setTimeout(() => {
@@ -2351,6 +2381,8 @@ function showUserSearchResult(searchedUsername, message) {
     };
     offlineMsgContainer.appendChild(ttl);
     offlineMsgContainer.appendChild(photoInput);
+    offlineMsgContainer.appendChild(voiceInput);
+    offlineMsgContainer.appendChild(recBtn);
     offlineMsgContainer.appendChild(meetHint);
     offlineMsgContainer.appendChild(meetAt);
     offlineMsgContainer.appendChild(textarea);
@@ -2365,7 +2397,7 @@ const offlineSendLock = new Set();
 
 async function sendOfflineMessage(toUsername, messageText, extra) {
   extra = extra || {};
-  if (!toUsername || !(messageText || extra.photo || extra.meetAt)) throw new Error('Missing recipient or message');
+  if (!toUsername || !(messageText || extra.photo || extra.voice || extra.meetAt)) throw new Error('Missing recipient or message');
   const lockKey = 'note:' + String(toUsername).toLowerCase() + ':' + (messageText || '') + ':' + (extra.meetAt || '') + ':' + (extra.photo ? 'p' : '');
   if (offlineSendLock.has(lockKey)) throw new Error('Already sending that note.');
   offlineSendLock.add(lockKey);
@@ -2374,9 +2406,10 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   if (!userPublicKey) throw new Error('No public key for recipient');
   await ensurePersistentKeys();
   const messageId = generateMessageId();
-  let kind = extra.photo ? 'photo' : 'note';
-  let payload = { type: extra.photo ? 'photo' : 'message', from: username, text: messageText || '', timestamp: Date.now(), identity: identityPubB64 || '' };
+  let kind = extra.photo ? 'photo' : (extra.voice ? 'voice' : 'note');
+  let payload = { type: extra.photo ? 'photo' : (extra.voice ? 'voice' : 'message'), from: username, text: messageText || '', timestamp: Date.now(), identity: identityPubB64 || '' };
   if (extra.photo) payload.photo = extra.photo;
+  if (extra.voice) payload.voice = extra.voice;
   if (extra.meetAt) {
     if (!code) throw new Error('Start a chat first, then send a timed meet code.');
     kind = 'meet';

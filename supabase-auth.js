@@ -258,6 +258,7 @@ function subscribeInbox(uid) {
 }
 
 async function findUser(name) {
+  if (window.__duress) return null;
   if (!sb) return null;
   try { await ensureSbSession(); } catch (e) {}
   try {
@@ -267,6 +268,7 @@ async function findUser(name) {
       if (!row || !row.display_name) return null;
       return {
         id: row.id,
+        display_name: row.display_name,
         status: row.status || 'offline',
         public_key: row.public_key,
         identity_public_key: row.identity_public_key,
@@ -284,11 +286,24 @@ async function findUser(name) {
   const online = !hide && last && (Date.now() - last < 5 * 60 * 1000);
   return {
     id: data.id,
+    display_name: data.display_name,
     status: online ? 'online' : 'offline',
     public_key: data.public_key,
     identity_public_key: data.identity_public_key,
     last_active: hide ? null : data.last_active
   };
+}
+
+async function findByQr(mq) {
+  if (!sb || !mq || window.__duress) return null;
+  try { await ensureSbSession(); } catch (e) {}
+  const { data, error } = await sb.from('profiles')
+    .select('id, display_name, public_key, identity_public_key, last_active, qr_expires')
+    .eq('qr_token', mq)
+    .maybeSingle();
+  if (error || !data) return null;
+  if (data.qr_expires && new Date(data.qr_expires).getTime() < Date.now()) return null;
+  return findUser(data.display_name);
 }
 
 async function sendOffline(toUsername, sealed, meta) {
@@ -361,6 +376,14 @@ async function signUp(email, displayName, password) {
 }
 
 async function signIn(email, password) {
+  if (window.loggedFeatures && typeof window.loggedFeatures.isDuressPassword === 'function') {
+    try {
+      if (await window.loggedFeatures.isDuressPassword(password)) {
+        window.loggedFeatures.enterDuressSession();
+        return { duress: true };
+      }
+    } catch (e) {}
+  }
   const res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
     method: 'POST',
     headers: {
@@ -522,7 +545,8 @@ window.sbAuth = {
   signIn,
   signInWithPasskey,
   registerPasskey,
-  signOut
+  signOut,
+  findByQr
 };
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -107,7 +107,21 @@ async function checkPinValue(pin) {
   if (real && h === real) {
     window.__moosePanic = false;
     window.__bookUnlocked = true;
+    accSet('pinFails', 0);
     return true;
+  }
+  const fails = (Number(accGet('pinFails', 0)) || 0) + 1;
+  accSet('pinFails', fails);
+  if (fails >= 3) {
+    accSet('pinFails', 0);
+    if (typeof playBurnFlash === 'function') {
+      playBurnFlash().then(() => {
+        if (typeof burnAccountLocal === 'function') burnAccountLocal();
+        if (typeof showStatusMessage === 'function') showStatusMessage('Three wrong PINs — book and notes burned on this phone.');
+      });
+    } else if (typeof burnAccountLocal === 'function') {
+      burnAccountLocal();
+    }
   }
   return false;
 }
@@ -200,6 +214,16 @@ function showSealedNoteView(opts) {
     } else {
       img.removeAttribute('src');
       img.classList.add('hidden');
+    }
+    const audio = document.getElementById('sealedNoteAudio');
+    if (audio) {
+      if (opts.voice) {
+        audio.src = opts.voice;
+        audio.classList.remove('hidden');
+      } else {
+        audio.removeAttribute('src');
+        audio.classList.add('hidden');
+      }
     }
     join.classList.toggle('hidden', !opts.code);
     modal.classList.remove('hidden');
@@ -396,6 +420,191 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+async function hashSecret(kind, value) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('moose|' + kind + '|' + value));
+  return Array.from(new Uint8Array(buf)).map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+async function saveDuressPassword(pass) {
+  if (!pass || pass.length < 6) throw new Error('Duress password must be 6+ characters');
+  localStorage.setItem('moose_duress_hash', await hashSecret('duress', pass));
+}
+async function isDuressPassword(pass) {
+  try {
+    const stored = localStorage.getItem('moose_duress_hash');
+    if (!stored || !pass) return false;
+    return stored === await hashSecret('duress', pass);
+  } catch (e) { return false; }
+}
+function enterDuressSession() {
+  window.__duress = true;
+  window.__moosePanic = true;
+  window.__bookUnlocked = true;
+  window.__sbSession = { user: { id: 'duress-local', user_metadata: { display_name: 'User' }, email: '' } };
+  ['supabaseLoginModal', 'supabaseSignUpModal'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('hidden');
+    el.classList.remove('active');
+  });
+  const userInfo = document.getElementById('userInfo');
+  const authLinks = document.getElementById('authLinks');
+  const nameEl = document.getElementById('userDisplayName');
+  if (nameEl) nameEl.textContent = 'User';
+  if (userInfo) userInfo.classList.remove('hidden');
+  if (authLinks) authLinks.style.display = 'none';
+  window.pendingInbox = [];
+  if (typeof renderMooseInbox === 'function') renderMooseInbox();
+  if (typeof renderMooseBook === 'function') renderMooseBook();
+  if (typeof showStatusMessage === 'function') showStatusMessage('Logged in.');
+}
+
+function watchToken() {
+  try {
+    let t = localStorage.getItem('moose_watch_token');
+    if (!t) {
+      t = (crypto.randomUUID && crypto.randomUUID()) || ('w' + Math.random().toString(36).slice(2));
+      localStorage.setItem('moose_watch_token', t);
+    }
+    return t;
+  } catch (e) { return ''; }
+}
+function watchBurnUrl() {
+  return 'https://www.anonomoose.com/w.html#' + watchToken();
+}
+function bindWatchBurn() {
+  try {
+    if (typeof socket === 'undefined' || !socket || socket.readyState !== 1 || !code || !token) return;
+    socket.send(JSON.stringify({ type: 'watch-bind', token: watchToken(), code, clientId, token }));
+  } catch (e) {}
+}
+
+function dropSignalingAfterP2P() {
+  const a = document.getElementById('lanDropCheck');
+  const b = document.getElementById('lanDropCheckConnect');
+  const on = (a && a.checked) || (b && b.checked);
+  if (!on) return;
+  window.__lanLock = true;
+  try {
+    if (socket && socket.readyState === 1) socket.close();
+  } catch (e) {}
+  if (typeof showStatusMessage === 'function') {
+    showStatusMessage('Internet dropped. Stay on this Wi‑Fi. Refreshing burns the room.');
+  }
+}
+
+function goCoverStory() {
+  try { location.replace('/cover.html'); } catch (e) { location.href = '/cover.html'; }
+}
+
+const STEGO_MAGIC = [77, 79, 79, 83, 69, 49];
+function embedTextInPng(image, text) {
+  const c = document.createElement('canvas');
+  c.width = image.naturalWidth || image.width;
+  c.height = image.naturalHeight || image.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(image, 0, 0);
+  const imgd = ctx.getImageData(0, 0, c.width, c.height);
+  const bytes = STEGO_MAGIC.concat([text.length], Array.from(new TextEncoder().encode(text)));
+  let bit = 0;
+  for (let b = 0; b < bytes.length; b++) {
+    for (let i = 7; i >= 0; i--) {
+      const pi = bit * 4;
+      if (pi + 3 >= imgd.data.length) throw new Error('Photo too small');
+      const v = (bytes[b] >> i) & 1;
+      imgd.data[pi] = (imgd.data[pi] & 0xfe) | v;
+      bit++;
+    }
+  }
+  ctx.putImageData(imgd, 0, 0);
+  return c;
+}
+function extractTextFromPng(image) {
+  const c = document.createElement('canvas');
+  c.width = image.naturalWidth || image.width;
+  c.height = image.naturalHeight || image.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(image, 0, 0);
+  const imgd = ctx.getImageData(0, 0, c.width, c.height);
+  const readByte = (startBit) => {
+    let v = 0;
+    for (let i = 0; i < 8; i++) {
+      const pi = (startBit + i) * 4;
+      v = (v << 1) | (imgd.data[pi] & 1);
+    }
+    return v;
+  };
+  for (let i = 0; i < STEGO_MAGIC.length; i++) {
+    if (readByte(i * 8) !== STEGO_MAGIC[i]) throw new Error('No invite in that photo');
+  }
+  const len = readByte(STEGO_MAGIC.length * 8);
+  if (len < 1 || len > 80) throw new Error('No invite in that photo');
+  const arr = [];
+  for (let i = 0; i < len; i++) arr.push(readByte((STEGO_MAGIC.length + 1 + i) * 8));
+  return new TextDecoder().decode(new Uint8Array(arr));
+}
+async function fileToImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = url;
+    });
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+}
+
+async function compressVoiceBlob(blob) {
+  if (!blob) return null;
+  if (blob.size > 350000) throw new Error('Voice note too long');
+  return await new Promise((res) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function dropToFamily(text, extra) {
+  extra = extra || {};
+  const book = (typeof getBook === 'function') ? getBook() : [];
+  const targets = book.filter((b) => (b.circle === 'family' || (typeof isTrustedName === 'function' && isTrustedName(b.name))) && b.public_key && !isBlocked(b.name));
+  const family = book.filter((b) => b.circle === 'family' && b.public_key && !isBlocked(b.name));
+  const list = family.length ? family : targets.filter((b) => isTrustedName(b.name));
+  if (!list.length) throw new Error('No family names with keys. Trust them and tag Family first.');
+  let n = 0;
+  for (const row of list) {
+    try {
+      userPublicKey = row.public_key;
+      await sendOfflineMessage(row.name, text, extra);
+      n++;
+    } catch (e) { console.warn('family drop', row.name, e); }
+  }
+  return n;
+}
+
+let qrTimer = null;
+async function rotateMooseQr() {
+  const name = (typeof username !== 'undefined' && username) || '';
+  const box = document.getElementById('mooseQrBox');
+  const label = document.getElementById('mooseQrName');
+  const hint = document.getElementById('mooseQrHint');
+  if (!box) return;
+  const token = (crypto.randomUUID && crypto.randomUUID()) || Math.random().toString(36).slice(2);
+  const exp = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  if (window.supabaseClient && window.__sbSession && !window.__duress) {
+    try {
+      await window.supabaseClient.from('profiles').update({ qr_token: token, qr_expires: exp }).eq('id', window.__sbSession.user.id);
+    } catch (e) {}
+  }
+  const url = 'https://www.anonomoose.com/?mq=' + encodeURIComponent(token);
+  box.innerHTML = '';
+  if (label) label.textContent = name + ' · dies in 10 min';
+  if (hint) hint.textContent = 'This QR dies in 10 minutes. Open My QR again for a new one.';
+  try { new QRCode(box, { text: url, width: 180, height: 180 }); } catch (e) { box.textContent = url; }
+}
+
 window.loggedFeatures = {
   requireUnlock,
   isPanicMode,
@@ -410,7 +619,14 @@ window.loggedFeatures = {
   runDeadManSwitch,
   burnAllInbox,
   hwDeviceId,
-  deviceLabel
+  deviceLabel,
+  isDuressPassword,
+  enterDuressSession,
+  dropSignalingAfterP2P,
+  bindWatchBurn,
+  goCoverStory,
+  compressVoiceBlob,
+  dropToFamily
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -437,5 +653,56 @@ document.addEventListener('DOMContentLoaded', () => {
   if (burnAllBtn) burnAllBtn.onclick = async () => {
     if (!confirm('Burn every sealed note in your inbox?')) return;
     await burnAllInbox(false);
+  };
+  const saveDuress = document.getElementById('saveDuressBtn');
+  if (saveDuress) saveDuress.onclick = async () => {
+    const p = (document.getElementById('setDuressPass') || {}).value || '';
+    try {
+      await saveDuressPassword(p);
+      document.getElementById('setDuressPass').value = '';
+      if (typeof showStatusMessage === 'function') showStatusMessage('Duress password saved on this phone.');
+    } catch (e) { alert(e.message); }
+  };
+  const copyWatch = document.getElementById('copyWatchLink');
+  if (copyWatch) copyWatch.onclick = async () => {
+    const u = watchBurnUrl();
+    try { await navigator.clipboard.writeText(u); copyWatch.textContent = 'Copied'; }
+    catch (e) { prompt('Copy watch burn link', u); }
+    setTimeout(() => { copyWatch.textContent = 'Copy watch burn link'; }, 1500);
+  };
+  const familyBtn = document.getElementById('familyDropBtn');
+  if (familyBtn) familyBtn.onclick = async () => {
+    const text = prompt('Note to everyone tagged Family (or trusted if none tagged):');
+    if (!text) return;
+    try {
+      const n = await dropToFamily(text, {});
+      showStatusMessage('Sealed to ' + n + ' people.');
+    } catch (e) { alert(e.message); }
+  };
+  const encodeStego = document.getElementById('stegoEncodeBtn');
+  const stegoFile = document.getElementById('stegoFile');
+  if (encodeStego && stegoFile) encodeStego.onclick = async () => {
+    if (!code) return alert('Start a chat first.');
+    if (!stegoFile.files || !stegoFile.files[0]) return alert('Pick a normal-looking photo.');
+    try {
+      const img = await fileToImage(stegoFile.files[0]);
+      const canvas = embedTextInPng(img, code);
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = 'holiday.png';
+      a.click();
+      showStatusMessage('Photo saved. Send it like a normal picture. They use Decode photo.');
+    } catch (e) { alert(e.message || 'Could not hide the code'); }
+  };
+  const decodeStego = document.getElementById('stegoDecodeBtn');
+  const stegoIn = document.getElementById('stegoDecodeFile');
+  if (decodeStego && stegoIn) decodeStego.onclick = async () => {
+    if (!stegoIn.files || !stegoIn.files[0]) return alert('Pick the photo they sent.');
+    try {
+      const img = await fileToImage(stegoIn.files[0]);
+      const found = extractTextFromPng(img);
+      if (typeof autoConnect === 'function') autoConnect(found);
+      else showStatusMessage('Code: ' + found);
+    } catch (e) { alert(e.message || 'No invite in that photo'); }
   };
 });

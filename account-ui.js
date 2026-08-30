@@ -175,12 +175,13 @@ async function openInboxItem(msg) {
       }
       return;
     }
-    const text = (parsed && parsed.text) || (parsed && parsed.photo ? '' : opened);
+    const text = (parsed && parsed.text) || (parsed && (parsed.photo || parsed.voice) ? '' : opened);
     const act = await showSealedNoteView({
       from: fromName,
-      meta: parsed && parsed.photo ? 'Read-once photo' : 'Sealed note',
+      meta: parsed && parsed.voice ? 'Read-once voice' : (parsed && parsed.photo ? 'Read-once photo' : 'Sealed note'),
       text: text,
-      photo: parsed && parsed.photo
+      photo: parsed && parsed.photo,
+      voice: parsed && parsed.voice
     });
     await playBurnFlash();
     await burnInboxItem(msg);
@@ -266,17 +267,13 @@ function renderMooseBook() {
 }
 
 function showMooseQr() {
-  const name = (typeof username !== 'undefined' && username) || (document.getElementById('userDisplayName') || {}).textContent || '';
   const modal = document.getElementById('mooseQrModal');
-  const box = document.getElementById('mooseQrBox');
-  const label = document.getElementById('mooseQrName');
-  if (!modal || !box) return;
-  label.textContent = name;
-  box.innerHTML = '';
-  const url = 'https://www.anonomoose.com/?find=' + encodeURIComponent(name);
-  try { new QRCode(box, { text: url, width: 180, height: 180 }); } catch (e) { box.textContent = url; }
+  if (!modal) return;
   modal.classList.remove('hidden');
   modal.classList.add('active');
+  if (typeof rotateMooseQr === 'function') rotateMooseQr();
+  if (window._mooseQrTimer) clearInterval(window._mooseQrTimer);
+  window._mooseQrTimer = setInterval(() => { if (typeof rotateMooseQr === 'function') rotateMooseQr(); }, 10 * 60 * 1000);
 }
 
 window.renderMooseInbox = renderMooseInbox;
@@ -324,7 +321,24 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
   const find = new URLSearchParams(location.search).get('find');
-  if (find) {
+  const mq = new URLSearchParams(location.search).get('mq');
+  if (mq && window.sbAuth) {
+    setTimeout(async () => {
+      try {
+        const found = await window.sbAuth.findByQr(mq);
+        if (!found) {
+          showStatusMessage('That QR has died. Ask them for a new one.');
+          return;
+        }
+        const modal = document.getElementById('searchUserModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('active');
+        if (typeof showUserSearchResult === 'function') showUserSearchResult(found.display_name || found.name, found);
+      } catch (e) {
+        showStatusMessage('That QR has died.');
+      }
+    }, 900);
+  } else if (find) {
     setTimeout(() => {
       const modal = document.getElementById('searchUserModal');
       const input = document.getElementById('searchUsernameInput');

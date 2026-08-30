@@ -466,6 +466,8 @@ function setupDataChannel(dataChannel, targetId) {
       document.getElementById('audioOutputButton')?.classList.remove('hidden');
     }
     processMessageQueue(targetId);
+    if (window.loggedFeatures && window.loggedFeatures.bindWatchBurn) window.loggedFeatures.bindWatchBurn();
+    if (window.loggedFeatures && window.loggedFeatures.dropSignalingAfterP2P) window.loggedFeatures.dropSignalingAfterP2P();
   };
   dataChannel.onmessage = async (event) => {
     let data;

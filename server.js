@@ -357,65 +357,142 @@ async function loadSellerPayoutByAccount(accountId) {
   const rows = await r.json();
   return Array.isArray(rows) ? rows[0] : null;
 }
-async function syncConnectAccount(account) {
+const STRIPE_V2_VERSION = '2026-08-26.preview';
+async function stripeV2(method, path, body) {
+  const r = await fetch('https://api.stripe.com' + path, {
+    method,
+    headers: {
+      Authorization: 'Bearer ' + stripeKey,
+      'Stripe-Version': STRIPE_V2_VERSION,
+      'Content-Type': 'application/json'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
+  if (!r.ok) {
+    const msg = (data && data.error && (data.error.message || data.error.code)) || (data && data.message) || text.slice(0, 180);
+    throw new Error(String(msg || 'Stripe v2 error'));
+  }
+  return data;
+}
+function connectPayoutsOn(account) {
+  if (!account) return false;
+  if (account.payouts_enabled) return true;
+  try {
+    const st = account.configuration.recipient.capabilities.stripe_balance.stripe_transfers.status;
+    if (st === 'active') return true;
+  } catch (e) {}
+  return false;
+}
+function connectDetailsOn(account) {
+  if (!account) return false;
+  if (account.details_submitted) return true;
+  const due = account.requirements && (account.requirements.currently_due || account.requirements.currentlyDue);
+  if (Array.isArray(due) && due.length === 0) return true;
+  return false;
+}
+async function retrieveConnectAccount(accountId) {
+  try {
+    return await stripeV2('GET', '/v2/core/accounts/' + encodeURIComponent(accountId) + '?include=configuration.recipient&include=identity&include=requirements');
+  } catch (e) {
+    if (stripe) return stripe.accounts.retrieve(accountId);
+    throw e;
+  }
+}
+async function createConnectAccount(shopUser) {
+  return stripeV2('POST', '/v2/core/accounts', {
+    contact_email: shopUser.email || 'seller@anonomoose.com',
+    display_name: 'Anonomoose seller',
+    dashboard: 'express',
+    identity: { country: 'GB', entity_type: 'individual' },
+    defaults: {
+      responsibilities: {
+        fees_collector: 'application',
+        losses_collector: 'application'
+      }
+    },
+    configuration: {
+      recipient: {
+        capabilities: {
+          stripe_balance: {
+            stripe_transfers: { requested: true }
+          }
+        }
+      }
+    },
+    include: ['configuration.recipient', 'identity', 'requirements']
+  });
+}
+async function createConnectLink(accountId) {
+  try {
+    const link = await stripeV2('POST', '/v2/core/account_links', {
+      account: accountId,
+      use_case: {
+        type: 'account_onboarding',
+        account_onboarding: {
+          configurations: ['recipient'],
+          refresh_url: 'https://www.anonomoose.com/?connect=refresh',
+          return_url: 'https://www.anonomoose.com/?connect=ok'
+        }
+      }
+    });
+    const url = link && (link.url || (link.use_case && link.use_case.account_onboarding && link.use_case.account_onboarding.url));
+    if (url) return url;
+  } catch (e) {
+    logger.warn('connect v2 link %s', e && e.message);
+  }
+  const link = await stripe.accountLinks.create({
+    account: accountId,
+    refresh_url: 'https://www.anonomoose.com/?connect=refresh',
+    return_url: 'https://www.anonomoose.com/?connect=ok',
+    type: 'account_onboarding'
+  });
+  return link && link.url;
+}
+async function syncConnectAccount(account, userIdHint) {
   if (!account || !account.id) return;
-  const payouts = !!account.payouts_enabled;
-  const details = !!account.details_submitted;
-  const metaUser = account.metadata && account.metadata.userId;
+  const metaUser = (account.metadata && (account.metadata.userId || account.metadata.user_id)) || '';
   const existing = metaUser ? await loadSellerPayout(metaUser) : await loadSellerPayoutByAccount(account.id);
-  const userId = metaUser || (existing && existing.user_id);
+  const userId = userIdHint || metaUser || (existing && existing.user_id);
   if (!userId) return;
   await saveSellerPayout({
     user_id: userId,
     stripe_account_id: account.id,
-    payouts_enabled: payouts,
-    details_submitted: details
+    payouts_enabled: connectPayoutsOn(account),
+    details_submitted: connectDetailsOn(account)
   });
 }
 async function ensureSellerPayouts(shopUser, opts) {
   opts = opts || {};
   if (!shopUser || !shopUser.id) return { ok: false, error: 'Log in first' };
-  if (!stripe) return { ok: false, error: 'Payments are not available right now' };
+  if (!stripeKey) return { ok: false, error: 'Payments are not available right now' };
   let row = await loadSellerPayout(shopUser.id);
   let accountId = row && row.stripe_account_id;
   let account = null;
   try {
     if (accountId) {
-      account = await stripe.accounts.retrieve(accountId);
+      account = await retrieveConnectAccount(accountId);
     } else {
-      account = await stripe.accounts.create({
-        type: 'express',
-        country: 'GB',
-        email: shopUser.email || undefined,
-        capabilities: { transfers: { requested: true } },
-        business_profile: { product_description: 'Sale of Anonomoose chat names' },
-        metadata: { userId: shopUser.id }
-      });
+      account = await createConnectAccount(shopUser);
       accountId = account.id;
     }
   } catch (e) {
     logger.warn('connect account %s', e && e.message);
-    const msg = String(e && e.message || '');
-    return { ok: false, error: 'Stripe Connect is not enabled on this account yet. Stripe test mode ON → Settings → Connect → Marketplace → Express, finish the setup. (' + msg.slice(0, 140) + ')' };
+    return { ok: false, error: 'Could not start bank setup. ' + String(e && e.message || '').slice(0, 160) };
   }
-  await syncConnectAccount(account);
-  if (account.payouts_enabled) {
-    return { ok: true, ready: true };
-  }
-  if (opts.forceLink === false && row && row.payouts_enabled) {
+  await syncConnectAccount(account, shopUser.id);
+  if (connectPayoutsOn(account) || (opts.forceLink === false && row && row.payouts_enabled)) {
     return { ok: true, ready: true };
   }
   try {
-    const link = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: 'https://www.anonomoose.com/?connect=refresh',
-      return_url: 'https://www.anonomoose.com/?connect=ok',
-      type: 'account_onboarding'
-    });
-    return { ok: true, ready: false, onboard: true, url: link.url };
+    const url = await createConnectLink(accountId);
+    if (!url) throw new Error('No onboarding URL');
+    return { ok: true, ready: false, onboard: true, url };
   } catch (e) {
     logger.warn('connect link %s', e && e.message);
-    return { ok: false, error: 'Could not open Stripe bank form. Try again.' };
+    return { ok: false, error: 'Could not open Stripe bank form. ' + String(e && e.message || '').slice(0, 120) };
   }
 }
 async function markSalePaid(sessionId, transferId) {

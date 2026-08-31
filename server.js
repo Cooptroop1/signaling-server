@@ -206,54 +206,79 @@ async function supabaseAs(path, method, payload, bearer) {
 
 async function attachPaidName(userId, name, sessionId, amount) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
-  if (!SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('Add SUPABASE_SERVICE_ROLE_KEY on Render so paid names can be saved');
-  }
+  if (!userId || !nm) throw new Error('Missing name');
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error('Could not save the name you paid for');
+  const kind = /^\d+$/.test(nm) ? 'number' : 'letter';
   const headers = {
     apikey: SUPABASE_SERVICE_ROLE_KEY,
     Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation'
   };
-  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_paid', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      p_user: userId,
-      p_name: nm,
-      p_session: sessionId || ('sess-' + Date.now()),
-      p_amount: amount || 0
-    })
-  });
-  const text = await r.text();
-  let row = null;
-  try { row = text ? JSON.parse(text) : null; } catch (e) {}
-  if (r.ok && row && row.ok !== false) return true;
-  const kind = /^\d+$/.test(nm) ? 'number' : 'letter';
   try {
-    await supabaseAs('/rest/v1/owned_names', 'POST', { name: nm, user_id: userId, kind });
-    if (kind === 'number') {
-      await supabaseAs('/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10), 'PATCH', {
-        status: 'sold', owner_id: userId
+    await fetch(SUPABASE_URL + '/rest/v1/vanity_receipts', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        session_id: sessionId || ('sess-' + Date.now()),
+        user_id: userId,
+        name: nm,
+        amount_cents: amount || 0
+      })
+    });
+  } catch (e) {}
+  const ownedRes = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&select=name,user_id',
+    { headers }
+  );
+  const ownedRows = await ownedRes.json();
+  const owned = Array.isArray(ownedRows)
+    ? ownedRows.find((x) => String(x.name || '').toLowerCase() === nm.toLowerCase())
+    : null;
+  if (owned && owned.user_id && owned.user_id !== userId) throw new Error('Already owned');
+  if (!owned) {
+    const ins = await fetch(SUPABASE_URL + '/rest/v1/owned_names', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: nm, user_id: userId, kind })
+    });
+    if (!ins.ok && ins.status !== 409) {
+      const t = await ins.text();
+      logger.warn('owned_names insert %s', t && t.slice(0, 180));
+      throw new Error('Could not save the name you paid for');
+    }
+  }
+  if (kind === 'number') {
+    const num = parseInt(nm, 10);
+    await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + num, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ status: 'sold', owner_id: userId, updated_at: new Date().toISOString() })
+    });
+  } else {
+    const lr = await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm) + '&select=name', { headers });
+    const lrows = await lr.json();
+    if (Array.isArray(lrows) && lrows.length) {
+      await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm), {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status: 'sold', owner_id: userId })
       });
     } else {
-      try {
-        await supabaseAs('/rest/v1/vanity_letters', 'POST', {
-          name: nm, status: 'sold', owner_id: userId, price_cents: amount || 1000
-        });
-      } catch (e) {
-        await supabaseAs('/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm), 'PATCH', {
-          status: 'sold', owner_id: userId
-        });
-      }
+      await fetch(SUPABASE_URL + '/rest/v1/vanity_letters', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ name: nm, status: 'sold', owner_id: userId, price_cents: amount || 1000 })
+      });
     }
-    const check = await fetch(
-      SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + userId + '&name=eq.' + encodeURIComponent(nm) + '&select=name',
-      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY } }
-    );
-    const rows = await check.json();
-    if (Array.isArray(rows) && rows.length) return true;
-  } catch (e) {}
-  throw new Error((row && row.error) || text || 'Could not attach name');
+  }
+  const check = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&name=ilike.' + encodeURIComponent(nm) + '&select=name',
+    { headers }
+  );
+  const rows = await check.json();
+  if (Array.isArray(rows) && rows.length) return { ok: true, name: nm };
+  throw new Error('Could not save the name you paid for');
 }
 
 async function lookupVanityAmount(kind, name) {

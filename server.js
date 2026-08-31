@@ -396,10 +396,7 @@ async function ensureSellerPayouts(shopUser, opts) {
   } catch (e) {
     logger.warn('connect account %s', e && e.message);
     const msg = String(e && e.message || '');
-    if (/signed up for Connect|not enabled|Connect/i.test(msg)) {
-      return { ok: false, error: 'Stripe Connect is not on yet. Turn it on in Stripe → Connect settings.' };
-    }
-    return { ok: false, error: 'Could not start bank setup. Try again.' };
+    return { ok: false, error: 'Stripe Connect is not enabled on this account yet. Stripe test mode ON → Settings → Connect → Marketplace → Express, finish the setup. (' + msg.slice(0, 140) + ')' };
   }
   await syncConnectAccount(account);
   if (account.payouts_enabled) {

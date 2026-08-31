@@ -910,8 +910,13 @@ async function listOwnedName(name) {
   const abroad = pounds(sellerNetGuess(price, true));
   if (!window.confirm('UK card you get about ' + uk + '. Overseas card (up to 5.5% + 2% conversion) about ' + abroad + '. List ' + name + ' at ' + pounds(price) + '?')) return;
   try {
-    const { data, error } = await sb.rpc('moose_list_name', { p_name: name, p_price_cents: price });
-    if (error) throw error;
+    const { data, error } = await sb.rpc('moose_list_name', {
+      p_name: String(name),
+      p_price_cents: parseInt(price, 10)
+    });
+    if (error) {
+      throw new Error([error.message, error.details, error.hint].filter(Boolean).join(' — ') || 'Could not list');
+    }
     const row = typeof data === 'string' ? JSON.parse(data) : data;
     if (row && row.ok === false) throw new Error(row.error || 'Could not list');
     if (typeof showStatusMessage === 'function') showStatusMessage(name + ' listed in Used at ' + pounds(price) + '.');

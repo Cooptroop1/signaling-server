@@ -876,3 +876,83 @@ end;
 $$;
 revoke all on function public.moose_apply_resale(uuid, uuid, text, text, int, int) from public, anon, authenticated;
 grant execute on function public.moose_apply_resale(uuid, uuid, text, text, int, int) to service_role;
+
+-- Repair used-name list RPC types (int vs numeric 400s) and reload PostgREST.
+drop function if exists public.moose_list_name(text, int);
+drop function if exists public.moose_list_name(text, numeric);
+create or replace function public.moose_list_name(p_name text, p_price_cents numeric)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  nm text;
+  n int;
+  kind text;
+  price int;
+begin
+  if me is null then
+    return jsonb_build_object('ok', false, 'error', 'Log in first');
+  end if;
+  nm := regexp_replace(trim(coalesce(p_name, '')), '[^A-Za-z0-9]', '', 'g');
+  if char_length(nm) < 1 then
+    return jsonb_build_object('ok', false, 'error', 'Missing name');
+  end if;
+  if lower(nm) in ('1', '2') then
+    return jsonb_build_object('ok', false, 'error', 'That name stays with Anonomoose');
+  end if;
+  price := round(coalesce(p_price_cents, 0))::int;
+  if price < 200 or price > 2000000 then
+    return jsonb_build_object('ok', false, 'error', 'Price must be £2 to £20,000');
+  end if;
+  select o.kind into kind
+  from public.owned_names o
+  where o.user_id = me and lower(o.name) = lower(nm)
+  limit 1;
+  if kind is null then
+    return jsonb_build_object('ok', false, 'error', 'You do not own that name');
+  end if;
+  if kind is not distinct from 'signup' then
+    return jsonb_build_object('ok', false, 'error', 'Free signup names cannot be sold');
+  end if;
+  if nm ~ '^[0-9]+$' then
+    n := nm::int;
+    if exists (select 1 from public.vanity_numbers v where v.n = n and coalesce(v.held_forever, false)) then
+      return jsonb_build_object('ok', false, 'error', 'That number is not for sale');
+    end if;
+  end if;
+  update public.owned_names
+    set listed_for_sale = true, sale_price_cents = price
+    where user_id = me and lower(name) = lower(nm);
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'Could not list that name');
+  end if;
+  return jsonb_build_object('ok', true, 'name', nm, 'price_cents', price);
+end;
+$$;
+grant execute on function public.moose_list_name(text, numeric) to authenticated;
+
+drop function if exists public.moose_used_listings();
+create or replace function public.moose_used_listings()
+returns jsonb
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'name', o.name,
+    'kind', o.kind,
+    'price_cents', o.sale_price_cents
+  ) order by o.sale_price_cents desc, lower(o.name)), '[]'::jsonb)
+  from public.owned_names o
+  where o.listed_for_sale = true
+    and coalesce(o.sale_price_cents, 0) >= 200
+    and coalesce(o.kind, '') is distinct from 'signup'
+    and lower(o.name) not in ('1', '2');
+$$;
+grant execute on function public.moose_used_listings() to anon, authenticated;
+
+notify pgrst, 'reload schema';

@@ -853,8 +853,6 @@ async function loadMyNames() {
 
 function canSellName(n) {
   if (!n || !n.name) return false;
-  const nm = String(n.name);
-  if (nm === '1' || nm === '2') return false;
   return n.kind === 'number' || n.kind === 'letter';
 }
 function sellerNetGuess(price, abroad) {

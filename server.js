@@ -277,7 +277,7 @@ async function lookupVanityAmount(kind, name) {
 
 async function lookupResaleAmount(name) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
-  if (!nm || nm === '1' || nm === '2') return { error: 'Not for sale' };
+  if (!nm) return { error: 'Not for sale' };
   if (!SUPABASE_SERVICE_ROLE_KEY) return { error: 'Used names are not available right now' };
   const r = await fetch(
     SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&listed_for_sale=eq.true&select=name,kind,user_id,sale_price_cents',
@@ -311,7 +311,6 @@ async function loadUsedNameRows() {
     const nm = String(row && row.name || '');
     const price = Number(row && row.sale_price_cents) || 0;
     if (price < 200) return false;
-    if (nm === '1' || nm === '2') return false;
     if (String(row.kind) === 'signup') return false;
     return true;
   }).map((row) => ({
@@ -323,7 +322,6 @@ async function loadUsedNameRows() {
 async function setNameListing(userId, name, priceCents) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
   if (!userId || !nm) return { ok: false, error: 'Missing name' };
-  if (nm === '1' || nm === '2') return { ok: false, error: 'That name stays with Anonomoose' };
   if (!SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Listing is not available right now' };
   const listed = priceCents != null;
   const price = listed ? Math.round(Number(priceCents) || 0) : 0;
@@ -339,7 +337,7 @@ async function setNameListing(userId, name, priceCents) {
   if (listed && /^\d+$/.test(nm)) {
     const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10) + '&select=held_forever', { headers: svcHeaders() });
     const vrows = await vr.json();
-    if (Array.isArray(vrows) && vrows[0] && vrows[0].held_forever) {
+    if (Array.isArray(vrows) && vrows[0] && vrows[0].held_forever && nm !== '1' && nm !== '2') {
       return { ok: false, error: 'That number is not for sale' };
     }
   }

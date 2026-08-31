@@ -162,6 +162,7 @@ async function applyLoggedInSession(session) {
   finishVanityReturn();
   ensureSbSession().then(() => {
     if (signedOut) return;
+    loadMyNames().catch((e) => console.warn('names', e));
     publishKeys().catch((e) => console.warn('publishKeys', e));
     loadInbox().catch((e) => console.warn('inbox', e));
     subscribeInbox(session.user.id);
@@ -575,14 +576,19 @@ async function signIn(email, password) {
   closeAuthModals();
   setAuthUi(data);
   if (sb && data.access_token && data.refresh_token) {
-    sb.auth.setSession({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token
-    }).catch((e) => console.warn('setSession', e));
+    try {
+      const set = await sb.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token
+      });
+      if (set && set.data && set.data.session) window.__sbSession = set.data.session;
+    } catch (e) {
+      console.warn('setSession', e);
+    }
   }
   if (afterLoginTimer) clearTimeout(afterLoginTimer);
   afterLoginTimer = setTimeout(() => {
-    if (!signedOut) applyLoggedInSession(data);
+    if (!signedOut) applyLoggedInSession(window.__sbSession || data);
   }, 0);
   return data;
 }
@@ -823,7 +829,14 @@ async function loadMyNames() {
     renderMyNames([]);
     return [];
   }
-  const uid = currentUser().id;
+  try {
+    await ensureSbSession();
+  } catch (e) {}
+  const uid = currentUser() && currentUser().id;
+  if (!uid) {
+    renderMyNames([]);
+    return [];
+  }
   let rows = [];
   try {
     let got = await sb.from('owned_names').select('name, kind, listed_for_sale, sale_price_cents').eq('user_id', uid);

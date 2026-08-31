@@ -1032,3 +1032,18 @@ $$;
 revoke all on function public.moose_apply_resale(uuid, uuid, text, text, int, int) from public, anon, authenticated;
 grant execute on function public.moose_apply_resale(uuid, uuid, text, text, int, int) to service_role;
 notify pgrst, 'reload schema';
+
+
+-- Stripe Connect Express for used-name sellers. Service role only.
+create table if not exists public.seller_payouts (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  stripe_account_id text unique,
+  payouts_enabled boolean not null default false,
+  details_submitted boolean not null default false,
+  updated_at timestamptz default now()
+);
+alter table public.seller_payouts enable row level security;
+revoke all on public.seller_payouts from public, anon, authenticated;
+grant all on public.seller_payouts to service_role;
+
+alter table public.name_sales add column if not exists stripe_transfer_id text;

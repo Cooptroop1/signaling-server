@@ -319,6 +319,139 @@ async function loadUsedNameRows() {
     price_cents: Number(row.sale_price_cents) || 0
   }));
 }
+
+async function saveSellerPayout(row) {
+  if (!SUPABASE_SERVICE_ROLE_KEY || !row || !row.user_id) return;
+  const headers = Object.assign({}, svcHeaders(), { Prefer: 'resolution=merge-duplicates,return=minimal' });
+  const r = await fetch(SUPABASE_URL + '/rest/v1/seller_payouts?on_conflict=user_id', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      user_id: row.user_id,
+      stripe_account_id: row.stripe_account_id || null,
+      payouts_enabled: !!row.payouts_enabled,
+      details_submitted: !!row.details_submitted,
+      updated_at: new Date().toISOString()
+    })
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    logger.warn('seller_payouts save %s', text && text.slice(0, 180));
+  }
+}
+async function loadSellerPayout(userId) {
+  if (!SUPABASE_SERVICE_ROLE_KEY || !userId) return null;
+  const r = await fetch(
+    SUPABASE_URL + '/rest/v1/seller_payouts?user_id=eq.' + encodeURIComponent(userId) + '&select=user_id,stripe_account_id,payouts_enabled,details_submitted',
+    { headers: svcHeaders() }
+  );
+  const rows = await r.json();
+  return Array.isArray(rows) ? rows[0] : null;
+}
+async function loadSellerPayoutByAccount(accountId) {
+  if (!SUPABASE_SERVICE_ROLE_KEY || !accountId) return null;
+  const r = await fetch(
+    SUPABASE_URL + '/rest/v1/seller_payouts?stripe_account_id=eq.' + encodeURIComponent(accountId) + '&select=user_id,stripe_account_id,payouts_enabled,details_submitted',
+    { headers: svcHeaders() }
+  );
+  const rows = await r.json();
+  return Array.isArray(rows) ? rows[0] : null;
+}
+async function syncConnectAccount(account) {
+  if (!account || !account.id) return;
+  const payouts = !!account.payouts_enabled;
+  const details = !!account.details_submitted;
+  const metaUser = account.metadata && account.metadata.userId;
+  const existing = metaUser ? await loadSellerPayout(metaUser) : await loadSellerPayoutByAccount(account.id);
+  const userId = metaUser || (existing && existing.user_id);
+  if (!userId) return;
+  await saveSellerPayout({
+    user_id: userId,
+    stripe_account_id: account.id,
+    payouts_enabled: payouts,
+    details_submitted: details
+  });
+}
+async function ensureSellerPayouts(shopUser, opts) {
+  opts = opts || {};
+  if (!shopUser || !shopUser.id) return { ok: false, error: 'Log in first' };
+  if (!stripe) return { ok: false, error: 'Payments are not available right now' };
+  let row = await loadSellerPayout(shopUser.id);
+  let accountId = row && row.stripe_account_id;
+  let account = null;
+  try {
+    if (accountId) {
+      account = await stripe.accounts.retrieve(accountId);
+    } else {
+      account = await stripe.accounts.create({
+        type: 'express',
+        country: 'GB',
+        email: shopUser.email || undefined,
+        capabilities: { transfers: { requested: true } },
+        business_profile: { product_description: 'Sale of Anonomoose chat names' },
+        metadata: { userId: shopUser.id }
+      });
+      accountId = account.id;
+    }
+  } catch (e) {
+    logger.warn('connect account %s', e && e.message);
+    const msg = String(e && e.message || '');
+    if (/signed up for Connect|not enabled|Connect/i.test(msg)) {
+      return { ok: false, error: 'Stripe Connect is not on yet. Turn it on in Stripe → Connect settings.' };
+    }
+    return { ok: false, error: 'Could not start bank setup. Try again.' };
+  }
+  await syncConnectAccount(account);
+  if (account.payouts_enabled) {
+    return { ok: true, ready: true };
+  }
+  if (opts.forceLink === false && row && row.payouts_enabled) {
+    return { ok: true, ready: true };
+  }
+  try {
+    const link = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: 'https://www.anonomoose.com/?connect=refresh',
+      return_url: 'https://www.anonomoose.com/?connect=ok',
+      type: 'account_onboarding'
+    });
+    return { ok: true, ready: false, onboard: true, url: link.url };
+  } catch (e) {
+    logger.warn('connect link %s', e && e.message);
+    return { ok: false, error: 'Could not open Stripe bank form. Try again.' };
+  }
+}
+async function markSalePaid(sessionId, transferId) {
+  if (!SUPABASE_SERVICE_ROLE_KEY || !sessionId) return;
+  await fetch(
+    SUPABASE_URL + '/rest/v1/name_sales?stripe_session_id=eq.' + encodeURIComponent(sessionId),
+    {
+      method: 'PATCH',
+      headers: svcHeaders(),
+      body: JSON.stringify({
+        status: 'paid',
+        stripe_transfer_id: transferId || null
+      })
+    }
+  );
+}
+async function paySellerConnect(sellerId, netCents, sessionId, name) {
+  const net = Math.round(Number(netCents) || 0);
+  if (!sellerId || net < 1 || !stripe) return;
+  const row = await loadSellerPayout(sellerId);
+  if (!row || !row.stripe_account_id || !row.payouts_enabled) {
+    logger.info('connect hold %s net %s', sellerId, net);
+    return;
+  }
+  const transfer = await stripe.transfers.create({
+    amount: net,
+    currency: 'gbp',
+    destination: row.stripe_account_id,
+    metadata: { sellerId: String(sellerId), sessionId: String(sessionId || ''), name: String(name || '') }
+  });
+  await markSalePaid(sessionId, transfer && transfer.id);
+}
+
 async function setNameListing(userId, name, priceCents) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
   if (!userId || !nm) return { ok: false, error: 'Missing name' };
@@ -431,7 +564,12 @@ async function fulfillPaidSession(session, userAccess) {
   try {
     if (metaKind === 'resale') {
       const fee = await stripeFeeFromSession(session);
-      await attachResaleName(userId, sellerId, name, session.id, paidAmount || locked, fee);
+      const moved = await attachResaleName(userId, sellerId, name, session.id, paidAmount || locked, fee);
+      try {
+        await paySellerConnect(sellerId, moved && moved.seller_net_cents, session.id, name);
+      } catch (e) {
+        logger.warn('connect transfer %s', e && e.message);
+      }
     } else {
       await attachPaidName(userId, name, session.id, paidAmount || locked);
     }
@@ -630,7 +768,7 @@ server.on('request', (req, res) => {
   const origin = req.headers.origin || '';
   const allowOrigin = (origin === 'https://www.anonomoose.com' || origin === 'https://anonomoose.com') ? origin : 'https://www.anonomoose.com';
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
-  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping' || fullUrl.pathname === '/vanity-checkout' || fullUrl.pathname === '/vanity-claim' || fullUrl.pathname === '/vanity-list' || fullUrl.pathname === '/vanity-unlist' || fullUrl.pathname === '/vanity-used' || fullUrl.pathname === '/stripe-webhook') {
+  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping' || fullUrl.pathname === '/vanity-checkout' || fullUrl.pathname === '/vanity-claim' || fullUrl.pathname === '/vanity-list' || fullUrl.pathname === '/vanity-unlist' || fullUrl.pathname === '/vanity-used' || fullUrl.pathname === '/connect-onboard' || fullUrl.pathname === '/stripe-webhook') {
     const vanityCors = fullUrl.pathname !== '/stripe-webhook';
     if (vanityCors) {
       res.setHeader('Access-Control-Allow-Origin', allowOrigin);
@@ -662,11 +800,15 @@ server.on('request', (req, res) => {
         let session = null;
         const sig = req.headers['stripe-signature'];
         const whsec = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim();
+        let account = null;
         if (stripe && whsec) {
           try {
             const event = stripe.webhooks.constructEvent(raw, sig, whsec);
             if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
               session = event.data && event.data.object;
+            }
+            if (event.type === 'account.updated') {
+              account = event.data && event.data.object;
             }
           } catch (e) {
             logger.warn('stripe webhook sig %s', e && e.message);
@@ -682,11 +824,15 @@ server.on('request', (req, res) => {
           if (eventId && (eventType === 'checkout.session.completed' || eventType === 'checkout.session.async_payment_succeeded' || !eventType)) {
             session = await stripe.checkout.sessions.retrieve(eventId);
           }
+          if (eventType === 'account.updated' && body.data && body.data.object) account = body.data.object;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ received: true }));
         if (session) {
           try { await fulfillPaidSession(session); } catch (e) { logger.warn('stripe webhook fulfill %s', e && e.message); }
+        }
+        if (account) {
+          try { await syncConnectAccount(account); } catch (e) { logger.warn('stripe account.updated %s', e && e.message); }
         }
       }).catch(() => { if (!res.headersSent) { res.writeHead(400); res.end(); } });
       return;
@@ -791,6 +937,18 @@ server.on('request', (req, res) => {
         res.end(JSON.stringify(result));
         return;
       }
+      if (fullUrl.pathname === '/connect-onboard') {
+        const shopUser = await verifySbUser(bearerFrom(req, body));
+        if (!shopUser) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Log in first' }));
+          return;
+        }
+        const result = await ensureSellerPayouts(shopUser, { forceLink: !body.check });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        return;
+      }
       if (fullUrl.pathname === '/vanity-list' || fullUrl.pathname === '/vanity-unlist') {
         const shopUser = await verifySbUser(bearerFrom(req, body));
         if (!shopUser) {
@@ -800,6 +958,14 @@ server.on('request', (req, res) => {
         }
         const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
         const price = fullUrl.pathname === '/vanity-list' ? Math.round(Number(body.price_cents || body.price || 0)) : null;
+        if (fullUrl.pathname === '/vanity-list') {
+          const pay = await ensureSellerPayouts(shopUser, { forceLink: true });
+          if (!pay.ready) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(pay.ok === false ? pay : { ok: false, onboard: true, url: pay.url, error: pay.error || 'Add your bank to get paid' }));
+            return;
+          }
+        }
         const result = await setNameListing(shopUser.id, name, price);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));

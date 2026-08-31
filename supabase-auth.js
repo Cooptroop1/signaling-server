@@ -165,6 +165,7 @@ async function applyLoggedInSession(session) {
   startHeartbeat();
   registerPushAlerts();
   finishVanityReturn();
+  finishConnectReturn();
   ensureSbSession().then(() => {
     if (signedOut) return;
     loadMyNames().catch((e) => console.warn('names', e));
@@ -926,18 +927,9 @@ function renderMyNames(list) {
   const openBtn = document.getElementById('myNamesBtn');
   const rows = sortOwnedNames(list || []);
   if (openBtn) openBtn.textContent = rows.length ? ('My names (' + rows.length + ')') : 'My names';
-  const active = rows.find((n) => n.active);
   if (box) {
-    if (!isLoggedIn() || !rows.length) {
-      box.innerHTML = '';
-      box.classList.add('hidden');
-    } else {
-      box.classList.remove('hidden');
-      const using = active ? String(active.name) : String(rows[0].name);
-      box.innerHTML = '<button type="button" id="myNamesSummary">Using ' + using + ' in chat · ' + rows.length + ' name' + (rows.length === 1 ? '' : 's') + '</button>';
-      const sum = document.getElementById('myNamesSummary');
-      if (sum) sum.onclick = openMyNames;
-    }
+    box.innerHTML = '';
+    box.classList.add('hidden');
   }
   if (!locker) return;
   if (!isLoggedIn() || !rows.length) {
@@ -977,35 +969,88 @@ function renderMyNames(list) {
     btn.onclick = () => unlistOwnedName(btn.getAttribute('data-unlist'));
   });
 }
-async function listOwnedName(name) {
+async function postVanityList(name, price) {
+  const r = await fetch('https://signal.anonomoose.com/vanity-list', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      name: String(name),
+      price_cents: parseInt(price, 10),
+      access: sbBearer()
+    })
+  });
+  return r.json();
+}
+async function listOwnedName(name, presetPrice) {
   if (!isLoggedIn() || !name) return;
-  const raw = window.prompt('List ' + name + ' for how many £? Min 2. Buyer pays that. Stripe fee + 5% comes out of it.');
-  if (raw == null || String(raw).trim() === '') return;
-  const poundsIn = Number(raw);
-  const price = Math.round(poundsIn * 100);
-  if (!poundsIn || price < 200) {
-    if (typeof showStatusMessage === 'function') showStatusMessage('Min £2.');
-    return;
+  let price = presetPrice;
+  if (!price) {
+    const raw = window.prompt('List ' + name + ' for how many £? Min 2. Buyer pays that. Stripe fee + 5% comes out. Stripe pays your bank after it sells.');
+    if (raw == null || String(raw).trim() === '') return;
+    const poundsIn = Number(raw);
+    price = Math.round(poundsIn * 100);
+    if (!poundsIn || price < 200) {
+      if (typeof showStatusMessage === 'function') showStatusMessage('Min £2.');
+      return;
+    }
+    const uk = pounds(sellerNetGuess(price, false));
+    const abroad = pounds(sellerNetGuess(price, true));
+    if (!window.confirm('UK card you get about ' + uk + '. Overseas card (up to 5.5% + 2% conversion) about ' + abroad + '. List ' + name + ' at ' + pounds(price) + '?')) return;
   }
-  const uk = pounds(sellerNetGuess(price, false));
-  const abroad = pounds(sellerNetGuess(price, true));
-  if (!window.confirm('UK card you get about ' + uk + '. Overseas card (up to 5.5% + 2% conversion) about ' + abroad + '. List ' + name + ' at ' + pounds(price) + '?')) return;
   try {
-    const r = await fetch('https://signal.anonomoose.com/vanity-list', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        name: String(name),
-        price_cents: parseInt(price, 10),
-        access: sbBearer()
-      })
-    });
-    const row = await r.json();
+    const row = await postVanityList(name, price);
+    if (row && row.onboard && row.url) {
+      try { localStorage.setItem('pendingList', JSON.stringify({ name: String(name), price_cents: parseInt(price, 10) })); } catch (e) {}
+      if (window.confirm('To get paid when it sells, add your bank with Stripe. About 2 minutes. Continue?')) {
+        window.location.href = row.url;
+      }
+      return;
+    }
     if (!row || row.ok === false) throw new Error((row && row.error) || 'Could not list');
+    try { localStorage.removeItem('pendingList'); } catch (e) {}
     if (typeof showStatusMessage === 'function') showStatusMessage(name + ' listed in Used at ' + pounds(price) + '.');
     await loadMyNames();
   } catch (e) {
     if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not list');
+  }
+}
+async function finishConnectReturn() {
+  if (window.__connectReturnDone) return;
+  let flag = '';
+  try { flag = new URLSearchParams(location.search).get('connect') || ''; } catch (e) {}
+  if (!flag) return;
+  window.__connectReturnDone = true;
+  try { history.replaceState({}, '', location.pathname); } catch (e) {}
+  if (!isLoggedIn()) {
+    if (typeof showStatusMessage === 'function') showStatusMessage('Log in to finish bank setup.');
+    window.__connectReturnDone = false;
+    return;
+  }
+  try {
+    const r = await fetch('https://signal.anonomoose.com/connect-onboard', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ access: sbBearer(), check: true })
+    });
+    const row = await r.json();
+    if (row && row.ready) {
+      if (typeof showStatusMessage === 'function') showStatusMessage('Bank linked. You can list names now.');
+      let pending = null;
+      try { pending = JSON.parse(localStorage.getItem('pendingList') || 'null'); } catch (e) {}
+      if (pending && pending.name && pending.price_cents) {
+        await listOwnedName(pending.name, pending.price_cents);
+      }
+      return;
+    }
+    if (row && row.onboard && row.url && flag === 'refresh') {
+      window.location.href = row.url;
+      return;
+    }
+    if (typeof showStatusMessage === 'function') {
+      showStatusMessage((row && row.error) || 'Stripe still needs a few bank details. Tap Sell again.');
+    }
+  } catch (e) {
+    if (typeof showStatusMessage === 'function') showStatusMessage('Could not finish bank setup. Tap Sell again.');
   }
 }
 async function unlistOwnedName(name) {

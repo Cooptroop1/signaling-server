@@ -102,6 +102,7 @@ function renderMooseInbox() {
       : msg.kind === 'voice' ? 'Sealed voice'
       : msg.kind === 'poke' ? 'Moose poked you'
       : msg.kind === 'call' ? 'Incoming call'
+      : msg.kind === 'admin' ? 'Admin deal'
       : 'Sealed note'
     ) + '</div>';
     const openBtn = document.createElement('button');
@@ -263,13 +264,15 @@ async function openInboxItem(msg) {
       return;
     }
     const text = (parsed && parsed.text) || (parsed && (parsed.photo || parsed.voice) ? '' : opened);
+    const keep = msg.kind === 'admin' || !!(parsed && parsed.keep);
     const act = await showSealedNoteView({
       from: fromName,
-      meta: parsed && parsed.voice ? 'Read-once voice' : (parsed && parsed.photo ? 'Read-once photo' : 'Sealed note'),
+      meta: keep ? 'Stays until you burn it' : (parsed && parsed.voice ? 'Read-once voice' : (parsed && parsed.photo ? 'Read-once photo' : 'Sealed note')),
       text: text,
       photo: parsed && parsed.photo,
       voice: parsed && parsed.voice
     });
+    if (keep) return;
     await playBurnFlash();
     await burnInboxItem(msg);
   } catch (e) {

@@ -2609,8 +2609,8 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   if (!theirPub) throw new Error('No public key for recipient. They need to open Anonomoose logged in once.');
   await ensurePersistentKeys();
   const messageId = generateMessageId();
-  let kind = extra.photo ? 'photo' : (extra.voice ? 'voice' : (extra.poke ? 'poke' : 'note'));
-  let payload = { type: extra.poke ? 'poke' : (extra.photo ? 'photo' : (extra.voice ? 'voice' : 'message')), from: username, text: extra.poke ? '' : (messageText || ''), timestamp: Date.now(), identity: identityPubB64 || '' };
+  let kind = extra.kind || (extra.photo ? 'photo' : (extra.voice ? 'voice' : (extra.poke ? 'poke' : 'note')));
+  let payload = { type: extra.poke ? 'poke' : (extra.photo ? 'photo' : (extra.voice ? 'voice' : 'message')), from: username, text: extra.poke ? '' : (messageText || ''), timestamp: Date.now(), identity: identityPubB64 || '', keep: !!extra.keep };
   if (extra.photo) payload.photo = extra.photo;
   if (extra.voice) payload.voice = extra.voice;
   if (extra.unlockAt) {
@@ -2628,7 +2628,7 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   const plaintext = JSON.stringify(payload);
   const sealed = await sealOfflinePayload(theirPub, toUsername, plaintext, messageId);
   sealed.messageId = messageId;
-  const expiresAt = extra.ttlMs ? (Date.now() + extra.ttlMs) : (payload.burn_at || extra.meetAt ? extra.meetAt + 30 * 60 * 1000 : null);
+  const expiresAt = extra.keep ? null : (extra.ttlMs ? (Date.now() + extra.ttlMs) : (payload.burn_at || extra.meetAt ? extra.meetAt + 30 * 60 * 1000 : null));
   if (window.sbAuth && window.sbAuth.isLoggedIn()) {
     await window.sbAuth.sendOffline(toUsername, sealed, { kind, expiresAt });
     showStatusMessage(extra.poke ? 'Poke sent.' : (kind === 'meet' ? 'Meet code sealed. Hidden until the time you set.' : (payload.unlock_at ? 'Timed note sealed.' : 'Encrypted offline message sent.')));

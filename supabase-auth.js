@@ -1376,7 +1376,7 @@ async function messageListingOwner(row) {
     if (!dest || !dest.public_key) throw new Error('Admin needs to open Anonomoose logged in once so keys exist.');
     userPublicKey = dest.public_key;
     if (dest.identity_public_key) userPublicKeyIdentity = dest.identity_public_key;
-    await sendOfflineMessage('admin', body, { ttlMs: 14 * 24 * 3600 * 1000 });
+    await sendOfflineMessage('admin', body, { kind: 'admin', keep: true });
     shopNote('Sent to admin. They will contact you to take payment and move ' + name + '.');
   } catch (e) {
     shopNote((e && e.message) || 'Could not reach admin. Try Sealed Notes to admin.');

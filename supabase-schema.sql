@@ -1047,3 +1047,140 @@ revoke all on public.seller_payouts from public, anon, authenticated;
 grant all on public.seller_payouts to service_role;
 
 alter table public.name_sales add column if not exists stripe_transfer_id text;
+
+-- Fix ambiguous column "n" in paid/resale functions (Postgres 42702).
+create or replace function public.moose_apply_paid(p_user uuid, p_name text, p_session text, p_amount int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_variable
+declare
+  nm text;
+  num int;
+begin
+  if auth.role() is distinct from 'service_role' then
+    return jsonb_build_object('ok', false, 'error', 'forbidden');
+  end if;
+  if p_user is null or p_session is null or p_amount is null or p_amount < 100 then
+    return jsonb_build_object('ok', false, 'error', 'Bad payment');
+  end if;
+  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
+  if char_length(nm) < 1 or char_length(nm) > 16 then
+    return jsonb_build_object('ok', false, 'error', 'Bad name');
+  end if;
+  insert into public.vanity_receipts (session_id, user_id, name, amount_cents)
+  values (p_session, p_user, nm, p_amount)
+  on conflict (session_id) do nothing;
+  if exists (select 1 from public.owned_names o where lower(o.name) = lower(nm) and o.user_id <> p_user) then
+    return jsonb_build_object('ok', false, 'error', 'Already owned');
+  end if;
+  if nm ~ '^[0-9]+$' then
+    num := nm::int;
+    if num < 1 or num > 999 then
+      return jsonb_build_object('ok', false, 'error', 'Not for sale');
+    end if;
+    update public.vanity_numbers vn
+      set status = 'sold', owner_id = p_user, updated_at = now()
+      where vn.n = num and coalesce(vn.held_forever, false) = false
+        and (coalesce(vn.status, 'held') <> 'sold' or vn.owner_id = p_user);
+  else
+    insert into public.vanity_letters (name, status, owner_id, price_cents)
+    values (nm, 'sold', p_user, p_amount)
+    on conflict (name) do update
+      set status = 'sold', owner_id = p_user
+      where vanity_letters.owner_id is null or vanity_letters.owner_id = p_user;
+  end if;
+  insert into public.owned_names (name, user_id, kind)
+  values (nm, p_user, case when nm ~ '^[0-9]+$' then 'number' else 'letter' end)
+  on conflict do nothing;
+  return jsonb_build_object('ok', true, 'name', nm);
+end;
+$$;
+revoke all on function public.moose_apply_paid(uuid, text, text, int) from public, anon, authenticated;
+grant execute on function public.moose_apply_paid(uuid, text, text, int) to service_role;
+
+create or replace function public.moose_apply_resale(p_buyer uuid, p_seller uuid, p_name text, p_session text, p_amount int, p_stripe_fee int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_variable
+declare
+  nm text;
+  num int;
+  seller uuid;
+  price int;
+  platform int;
+  fee int;
+  net int;
+  fallback text;
+begin
+  if auth.role() is distinct from 'service_role' then
+    return jsonb_build_object('ok', false, 'error', 'forbidden');
+  end if;
+  if p_buyer is null or p_session is null or p_amount is null or p_amount < 200 then
+    return jsonb_build_object('ok', false, 'error', 'Bad payment');
+  end if;
+  if p_buyer is not distinct from p_seller then
+    return jsonb_build_object('ok', false, 'error', 'Cannot buy your own listing');
+  end if;
+  nm := regexp_replace(trim(p_name), '[^A-Za-z0-9]', '', 'g');
+  insert into public.vanity_receipts (session_id, user_id, name, amount_cents)
+  values (p_session, p_buyer, nm, p_amount)
+  on conflict (session_id) do nothing;
+  if exists (select 1 from public.owned_names o where lower(o.name) = lower(nm) and o.user_id = p_buyer) then
+    return jsonb_build_object('ok', true, 'name', nm, 'already', true);
+  end if;
+  select o.user_id, o.sale_price_cents into seller, price
+  from public.owned_names o
+  where lower(o.name) = lower(nm) and o.kind in ('number', 'letter')
+  limit 1;
+  if seller is null then
+    return jsonb_build_object('ok', false, 'error', 'Name is not for resale');
+  end if;
+  if p_seller is not null and seller is distinct from p_seller then
+    return jsonb_build_object('ok', false, 'error', 'Listing changed');
+  end if;
+  fee := greatest(0, coalesce(p_stripe_fee, 0));
+  platform := greatest(1, round(p_amount * 5.0 / 100.0)::int);
+  net := greatest(0, p_amount - fee - platform);
+  update public.owned_names
+    set user_id = p_buyer, listed_for_sale = false, sale_price_cents = null
+    where lower(name) = lower(nm) and user_id = seller;
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'Could not move name');
+  end if;
+  if nm ~ '^[0-9]+$' then
+    num := nm::int;
+    update public.vanity_numbers vn
+      set owner_id = p_buyer, status = 'sold', updated_at = now()
+      where vn.n = num;
+  else
+    update public.vanity_letters
+      set owner_id = p_buyer, status = 'sold', updated_at = now()
+      where lower(name) = lower(nm);
+  end if;
+  select o.name into fallback
+  from public.owned_names o
+  where o.user_id = seller
+  order by case when o.kind = 'signup' then 0 else 1 end, o.created_at
+  limit 1;
+  update public.profiles
+    set display_name = coalesce(fallback, ('u' || substr(replace(seller::text, '-', ''), 1, 8))),
+        updated_at = now()
+    where id = seller and lower(coalesce(display_name, '')) = lower(nm);
+  insert into public.name_sales (
+    name, seller_id, buyer_id, list_cents, stripe_fee_cents, platform_cents, seller_net_cents, stripe_session_id, status
+  ) values (
+    nm, seller, p_buyer, p_amount, fee, platform, net, p_session, 'pending_payout'
+  )
+  on conflict (stripe_session_id) do nothing;
+  return jsonb_build_object('ok', true, 'name', nm, 'seller_net_cents', net, 'platform_cents', platform, 'stripe_fee_cents', fee);
+end;
+$$;
+revoke all on function public.moose_apply_resale(uuid, uuid, text, text, int, int) from public, anon, authenticated;
+grant execute on function public.moose_apply_resale(uuid, uuid, text, text, int, int) to service_role;
+notify pgrst, 'reload schema';

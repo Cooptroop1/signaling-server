@@ -28,6 +28,7 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIs
 const claimedLoginCache = new Map();
 const pingRate = new Map();
 const checkoutRate = new Map();
+const deskRate = new Map();
 function rateOk(map, key, max, windowMs) {
   const now = Date.now();
   const rec = map.get(key) || { n: 0, t: now };
@@ -362,6 +363,20 @@ function hasAdminDeskCookie(req) {
     return acc;
   }, {}) : {};
   return cookies['moose_desk'] === want;
+}
+function deskUnlockOk(req, fullUrl) {
+  const tok = adminDeskToken();
+  if (!tok || !fullUrl) return false;
+  if (String(fullUrl.searchParams.get('k') || '') === tok) return true;
+  if (fullUrl.pathname === '/moose-desk/' + tok) return true;
+  return false;
+}
+function isDeskPath(fullUrl) {
+  const tok = adminDeskToken();
+  return fullUrl.pathname === '/moose-desk' || !!(tok && fullUrl.pathname === '/moose-desk/' + tok);
+}
+function deskClientKey(req) {
+  return String((req.headers['x-forwarded-for'] || '')).split(',')[0].trim() || 'desk';
 }
 function mooseDeskGateHtml() {
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Desk</title><style>body{font-family:sans-serif;background:#111;color:#eee;display:flex;min-height:100vh;align-items:center;justify-content:center}form{background:#1f2937;padding:1.25rem;border-radius:10px;width:min(320px,90vw)}input,button{width:100%;box-sizing:border-box;margin-top:.5rem;padding:.6rem;border-radius:6px;border:0}button{background:#2563eb;color:#fff;cursor:pointer}</style></head><body><form method="POST" action="/moose-desk"><input type="password" name="secret" placeholder="Password" autofocus><button type="submit">Open</button></form></body></html>';
@@ -711,7 +726,7 @@ server.on('request', (req, res) => {
     sendNotFound(res);
     return;
   }
-  if (fullUrl.pathname === '/moose-desk') {
+  if (isDeskPath(fullUrl)) {
     const finishDesk = (secretOk) => {
       if (secretOk) {
         const tok = adminDeskToken();
@@ -727,16 +742,32 @@ server.on('request', (req, res) => {
         });
         return;
       }
+      if (!deskUnlockOk(req, fullUrl)) {
+        sendNotFound(res);
+        return;
+      }
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
       res.setHeader('Cache-Control', 'no-store');
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(mooseDeskGateHtml());
     };
     if (req.method === 'GET' || req.method === 'HEAD') {
-      finishDesk(hasAdminDeskCookie(req));
+      if (hasAdminDeskCookie(req)) {
+        finishDesk(true);
+        return;
+      }
+      if (deskUnlockOk(req, fullUrl) && req.method === 'GET') {
+        finishDesk(false);
+        return;
+      }
+      sendNotFound(res);
       return;
     }
     if (req.method === 'POST') {
+      if (!rateOk(deskRate, deskClientKey(req), 8, 15 * 60 * 1000)) {
+        sendNotFound(res);
+        return;
+      }
       let raw = '';
       req.on('data', (c) => { raw += c; if (raw.length > 4000) req.destroy(); });
       req.on('end', () => {
@@ -753,9 +784,7 @@ server.on('request', (req, res) => {
         const want = process.env.ADMIN_SECRET || '';
         const ok = !!(want && secret && secret === want);
         if (!ok) {
-          res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('Not Found');
+          sendNotFound(res);
           return;
         }
         finishDesk(true);
@@ -842,6 +871,7 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 if (!ADMIN_SECRET) {
   throw new Error('ADMIN_SECRET environment variable is not set. Please configure it for security.');
 }
+logger.info('desk gate /moose-desk?k=%s', adminDeskToken());
 const ALLOWED_ORIGINS = ['https://anonomoose.com', 'https://www.anonomoose.com', 'http://localhost:3000', 'https://signaling-server-zc6m.onrender.com', 'https://signaling-server-1.onrender.com', 'https://signal.anonomoose.com'];
 let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {

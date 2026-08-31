@@ -48,7 +48,6 @@ function setAuthUi(session) {
   const authLinks = document.getElementById('authLinks');
   const nameEl = document.getElementById('userDisplayName');
   if (!userInfo || !authLinks) return;
-  const note = document.getElementById('signupAgainNote');
   if (session && session.user) {
     const label = session.user.user_metadata && session.user.user_metadata.display_name
       ? session.user.user_metadata.display_name
@@ -56,7 +55,6 @@ function setAuthUi(session) {
     if (nameEl) nameEl.textContent = label;
     userInfo.classList.remove('hidden');
     authLinks.style.display = 'none';
-    if (note) note.classList.add('hidden');
     if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
     markPasskeyButton();
     renderMyNames(window.__myNames || []);
@@ -70,7 +68,6 @@ function setAuthUi(session) {
     window.__myNames = [];
     userInfo.classList.add('hidden');
     authLinks.style.display = 'block';
-    if (note) note.classList.remove('hidden');
     if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
     const inbox = document.getElementById('mooseInbox');
     const book = document.getElementById('mooseBook');

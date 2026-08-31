@@ -674,4 +674,7 @@ select chr(i), 'listed', 300000, 300000, true
 from generate_series(65, 90) i
 on conflict (name) do nothing;
 
-
+-- Hide shop owner ids. Does not change who owns sold numbers (including 1 and 2).
+revoke select (owner_id) on public.vanity_numbers from anon, authenticated, public;
+revoke select (owner_id) on public.vanity_letters from anon, authenticated, public;
+revoke select (user_id) on public.vanity_bids from anon, authenticated, public;

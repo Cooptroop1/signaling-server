@@ -952,9 +952,15 @@ function renderMyNames(list) {
       acts += '<button type="button" class="sell-name-btn" data-my-name="' + esc + '">Use</button>';
     }
     if (canSellName(n)) {
-      acts += n.listed
-        ? '<button type="button" class="sell-name-btn" data-unlist="' + esc + '">Listed ' + pounds(n.price) + ' · Unlist</button>'
-        : '<button type="button" class="sell-name-btn" data-list="' + esc + '">Sell</button>';
+      if (n.busy === 'list') {
+        acts += '<button type="button" class="sell-name-btn" disabled>Listing…</button>';
+      } else if (n.busy === 'unlist') {
+        acts += '<button type="button" class="sell-name-btn" disabled>Taking off…</button>';
+      } else {
+        acts += n.listed
+          ? '<button type="button" class="sell-name-btn" data-unlist="' + esc + '">Listed ' + pounds(n.price) + ' · Unlist</button>'
+          : '<button type="button" class="sell-name-btn" data-list="' + esc + '">Sell</button>';
+      }
     }
     return '<div class="my-name-row"><div><button type="button" class="' + on.trim() + '" data-my-name="' + esc + '">' +
       esc + '</button><div class="text-xs text-gray-500">' + kind + tag + '</div></div><div class="my-name-actions">' + acts + '</div></div>';
@@ -981,8 +987,16 @@ async function postVanityList(name, price) {
   });
   return r.json();
 }
+function markNameBusy(name, busy, extra) {
+  window.__myNames = (window.__myNames || []).map((n) => {
+    if (String(n.name) !== String(name)) return n;
+    return Object.assign({}, n, extra || {}, { busy: busy || '' });
+  });
+  renderMyNames(window.__myNames);
+}
 async function listOwnedName(name, presetPrice) {
   if (!isLoggedIn() || !name) return;
+  if (window.__nameBusy && window.__nameBusy[name]) return;
   let price = presetPrice;
   if (!price) {
     const raw = window.prompt('List ' + name + ' for how many £? Min 2. Buyer pays that. Stripe fee + 5% comes out. Stripe pays your bank after it sells.');
@@ -997,6 +1011,10 @@ async function listOwnedName(name, presetPrice) {
     const abroad = pounds(sellerNetGuess(price, true));
     if (!window.confirm('UK card you get about ' + uk + '. Overseas card (up to 5.5% + 2% conversion) about ' + abroad + '. List ' + name + ' at ' + pounds(price) + '?')) return;
   }
+  window.__nameBusy = window.__nameBusy || {};
+  window.__nameBusy[name] = 'list';
+  markNameBusy(name, 'list', { listed: true, price: price });
+  if (typeof showStatusMessage === 'function') showStatusMessage('Listing ' + name + '…');
   try {
     const row = await postVanityList(name, price);
     if (row && row.onboard && row.url) {
@@ -1009,9 +1027,12 @@ async function listOwnedName(name, presetPrice) {
     if (!row || row.ok === false) throw new Error((row && row.error) || 'Could not list');
     try { localStorage.removeItem('pendingList'); } catch (e) {}
     if (typeof showStatusMessage === 'function') showStatusMessage(name + ' listed in Used at ' + pounds(price) + '.');
-    await loadMyNames();
   } catch (e) {
+    markNameBusy(name, '', { listed: false, price: 0 });
     if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not list');
+  } finally {
+    if (window.__nameBusy) delete window.__nameBusy[name];
+    await loadMyNames();
   }
 }
 async function finishConnectReturn() {
@@ -1055,7 +1076,11 @@ async function finishConnectReturn() {
 }
 async function unlistOwnedName(name) {
   if (!isLoggedIn() || !name) return;
+  if (window.__nameBusy && window.__nameBusy[name]) return;
   if (!window.confirm('Take ' + name + ' off sale? You can list it again later.')) return;
+  window.__nameBusy = window.__nameBusy || {};
+  window.__nameBusy[name] = 'unlist';
+  markNameBusy(name, 'unlist');
   try {
     const r = await fetch('https://signal.anonomoose.com/vanity-unlist', {
       method: 'POST',
@@ -1065,9 +1090,11 @@ async function unlistOwnedName(name) {
     const row = await r.json();
     if (!row || row.ok === false) throw new Error((row && row.error) || 'Could not unlist');
     if (typeof showStatusMessage === 'function') showStatusMessage(name + ' taken off Used.');
-    await loadMyNames();
   } catch (e) {
     if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not unlist');
+  } finally {
+    if (window.__nameBusy) delete window.__nameBusy[name];
+    await loadMyNames();
   }
 }
 
@@ -1260,6 +1287,13 @@ async function startVanityCheckout(row) {
     openLoginForShop();
     return;
   }
+  if (window.__buyBusy) return;
+  window.__buyBusy = true;
+  const buyBtn = document.getElementById('vanityBuyBtn');
+  if (buyBtn) {
+    buyBtn.disabled = true;
+    buyBtn.textContent = 'Opening payment…';
+  }
   shopNote('Opening payment…');
   const body = {
     kind: row.kind === 'resale' || row.resale ? 'resale' : (row.kind || (window.__vanityTab === 'letter' ? 'letter' : 'number')),
@@ -1286,6 +1320,13 @@ async function startVanityCheckout(row) {
     shopNote((data && data.error) || 'Could not start payment. Try again.');
   } catch (e) {
     shopNote('Could not start payment. Try again.');
+  } finally {
+    window.__buyBusy = false;
+    const b = document.getElementById('vanityBuyBtn');
+    if (b) {
+      b.disabled = false;
+      b.textContent = 'Buy now';
+    }
   }
 }
 
@@ -1369,6 +1410,7 @@ function bindVanityShop() {
       openLoginForShop();
       return;
     }
+    if (window.__bidBusy) return;
     const row = window.__vanityLast;
     const poundsIn = Number(bidInput && bidInput.value);
     if (!row) {
@@ -1384,6 +1426,11 @@ function bindVanityShop() {
     if (amount <= min) {
       shopNote('Bid more than ' + pounds(min));
       return;
+    }
+    window.__bidBusy = true;
+    if (bidBtn) {
+      bidBtn.disabled = true;
+      bidBtn.textContent = 'Saving…';
     }
     shopNote('Saving bid…');
     try {
@@ -1412,6 +1459,12 @@ function bindVanityShop() {
         shopNote('Bid in at ' + pounds(amount) + '. Saved on your email account.');
       } catch (e2) {
         shopNote('Could not bid. Run the shop SQL in Supabase, then try again.');
+      }
+    } finally {
+      window.__bidBusy = false;
+      if (bidBtn) {
+        bidBtn.disabled = false;
+        bidBtn.textContent = 'Place bid';
       }
     }
   };

@@ -494,6 +494,9 @@ async function ensureSellerPayouts(shopUser, opts) {
   if (!shopUser || !shopUser.id) return { ok: false, error: 'Log in first' };
   if (!stripeKey) return { ok: false, error: 'Payments are not available right now' };
   let row = await loadSellerPayout(shopUser.id);
+  if (row && row.payouts_enabled && row.stripe_account_id) {
+    return { ok: true, ready: true };
+  }
   let accountId = row && row.stripe_account_id;
   let account = null;
   try {
@@ -1139,14 +1142,6 @@ server.on('request', (req, res) => {
         }
         const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
         const price = fullUrl.pathname === '/vanity-list' ? Math.round(Number(body.price_cents || body.price || 0)) : null;
-        if (fullUrl.pathname === '/vanity-list') {
-          const pay = await ensureSellerPayouts(shopUser, { forceLink: true });
-          if (!pay.ready) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(pay.ok === false ? pay : { ok: false, onboard: true, url: pay.url, error: pay.error || 'Add your bank to get paid' }));
-            return;
-          }
-        }
         const result = await setNameListing(shopUser.id, name, price);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));

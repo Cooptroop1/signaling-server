@@ -877,6 +877,7 @@ async function loadMyNames() {
   }
   renderMyNames(window.__myNames);
   registerPushAlerts();
+  await revertSoldChatName(window.__myNames, active);
   return window.__myNames;
 }
 
@@ -1118,6 +1119,27 @@ async function unlistOwnedName(name) {
   }
 }
 
+
+async function revertSoldChatName(list, activeFromProfile) {
+  if (!isLoggedIn() || window.__revertingName) return;
+  const owned = (list || []).map((n) => String(n.name || '').toLowerCase()).filter(Boolean);
+  const current = String(activeFromProfile || (typeof username !== 'undefined' ? username : '') || '').trim();
+  if (!current) return;
+  if (owned.includes(current.toLowerCase())) return;
+  const signup = (list || []).find((n) => n.kind === 'signup');
+  const fallback = (signup && signup.name) || (list[0] && list[0].name);
+  if (!fallback) return;
+  window.__revertingName = true;
+  try {
+    if (typeof showStatusMessage === 'function') {
+      showStatusMessage(current + ' was sold. You are back as ' + fallback + '.');
+    }
+    await setActiveOwnedName(fallback);
+  } catch (e) {
+  } finally {
+    window.__revertingName = false;
+  }
+}
 async function setActiveOwnedName(name) {
   if (!isLoggedIn() || !name) return;
   try {

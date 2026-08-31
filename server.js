@@ -626,6 +626,33 @@ async function stripeFeeFromSession(session) {
   return info.fee;
 }
 
+async function revertSellerChatName(seller, soldName, headers) {
+  if (!seller) return;
+  const sold = String(soldName || '').toLowerCase();
+  const rest = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(seller) + '&select=name,kind,created_at&order=created_at.asc',
+    { headers }
+  );
+  let leftover = await rest.json();
+  leftover = Array.isArray(leftover) ? leftover.filter((x) => String(x.name || '').toLowerCase() !== sold) : [];
+  const signup = leftover.find((x) => String(x.kind) === 'signup') || leftover.find((x) => x.kind !== 'number' && x.kind !== 'letter');
+  const fallback = (signup && signup.name) || (leftover[0] && leftover[0].name) || ('u' + String(seller).replace(/-/g, '').slice(0, 8));
+  const prof = await fetch(
+    SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller) + '&select=display_name',
+    { headers }
+  );
+  const profRows = await prof.json();
+  const current = Array.isArray(profRows) && profRows[0] ? String(profRows[0].display_name || '') : '';
+  const stillOwns = leftover.some((x) => String(x.name || '').toLowerCase() === current.toLowerCase());
+  if (current && stillOwns) return;
+  const r = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller), {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ display_name: fallback, updated_at: new Date().toISOString() })
+  });
+  logger.info('seller revert %s %s -> %s %s', current || '(none)', fallback, r.status, soldName);
+}
+
 async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stripeFee) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
   if (!buyerId || !nm) throw new Error('Missing name');
@@ -680,26 +707,7 @@ async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stri
     });
   }
   try {
-    const rest = await fetch(
-      SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(seller) + '&select=name,kind,created_at&order=created_at.asc',
-      { headers }
-    );
-    const leftover = await rest.json();
-    const signup = Array.isArray(leftover) ? leftover.find((x) => x.kind === 'signup') : null;
-    const fallback = (signup && signup.name) || (Array.isArray(leftover) && leftover[0] && leftover[0].name) || ('u' + String(seller).replace(/-/g, '').slice(0, 8));
-    const prof = await fetch(
-      SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller) + '&select=display_name',
-      { headers }
-    );
-    const profRows = await prof.json();
-    const current = Array.isArray(profRows) && profRows[0] ? String(profRows[0].display_name || '') : '';
-    if (current.toLowerCase() === nm.toLowerCase()) {
-      await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller), {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ display_name: fallback, updated_at: new Date().toISOString() })
-      });
-    }
+    await revertSellerChatName(seller, nm, headers);
   } catch (e) {
     logger.warn('resale seller name %s', e && e.message);
   }

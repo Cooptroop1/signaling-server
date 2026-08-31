@@ -285,8 +285,12 @@ create table if not exists public.moose_shop (
   id int primary key default 1,
   numbers_on boolean default false,
   letters_on boolean default false,
-  stripe_ready boolean default false
+  stripe_ready boolean default false,
+  video_notes_on boolean default true,
+  video_calls_on boolean default true
 );
+alter table public.moose_shop add column if not exists video_notes_on boolean default true;
+alter table public.moose_shop add column if not exists video_calls_on boolean default true;
 insert into public.moose_shop (id, numbers_on, letters_on, stripe_ready)
 values (1, false, false, false)
 on conflict (id) do nothing;

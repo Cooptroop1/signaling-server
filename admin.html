@@ -105,6 +105,14 @@
  <button id="toggleVoiceCalls" aria-label="Toggle voice calls">Loading...</button>
  </div>
  <div class="feature-toggle">
+ <span>Video Notes</span>
+ <button id="toggleVideoNotes" aria-label="Toggle video notes">Loading...</button>
+ </div>
+ <div class="feature-toggle">
+ <span>Video Calls</span>
+ <button id="toggleVideoCalls" aria-label="Toggle video calls">Loading...</button>
+ </div>
+ <div class="feature-toggle">
  <span>Audio Toggle</span>
  <button id="toggleAudioToggle" aria-label="Toggle audio toggle">Loading...</button>
  </div>
@@ -275,6 +283,14 @@
  document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
  document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
  document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
+ if (document.getElementById('toggleVideoNotes')) {
+ document.getElementById('toggleVideoNotes').textContent = data.enableVideoNotes !== false ? 'On' : 'Off';
+ document.getElementById('toggleVideoNotes').classList.toggle('off', data.enableVideoNotes === false);
+ }
+ if (document.getElementById('toggleVideoCalls')) {
+ document.getElementById('toggleVideoCalls').textContent = data.enableVideoCalls !== false ? 'On' : 'Off';
+ document.getElementById('toggleVideoCalls').classList.toggle('off', data.enableVideoCalls === false);
+ }
  document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
  document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
  document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
@@ -302,6 +318,14 @@
  document.getElementById('toggleVoice').classList.toggle('off', !data.enableVoice);
  document.getElementById('toggleVoiceCalls').textContent = data.enableVoiceCalls ? 'On' : 'Off';
  document.getElementById('toggleVoiceCalls').classList.toggle('off', !data.enableVoiceCalls);
+ if (document.getElementById('toggleVideoNotes')) {
+ document.getElementById('toggleVideoNotes').textContent = data.enableVideoNotes !== false ? 'On' : 'Off';
+ document.getElementById('toggleVideoNotes').classList.toggle('off', data.enableVideoNotes === false);
+ }
+ if (document.getElementById('toggleVideoCalls')) {
+ document.getElementById('toggleVideoCalls').textContent = data.enableVideoCalls !== false ? 'On' : 'Off';
+ document.getElementById('toggleVideoCalls').classList.toggle('off', data.enableVideoCalls === false);
+ }
  document.getElementById('toggleAudioToggle').textContent = data.enableAudioToggle ? 'On' : 'Off';
  document.getElementById('toggleAudioToggle').classList.toggle('off', !data.enableAudioToggle);
  document.getElementById('toggleGrokBot').textContent = data.enableGrokBot ? 'On' : 'Off';
@@ -398,6 +422,8 @@
  document.getElementById('toggleImages').onclick = () => toggleFeature('images');
  document.getElementById('toggleVoice').onclick = () => toggleFeature('voice');
  document.getElementById('toggleVoiceCalls').onclick = () => toggleFeature('voiceCalls');
+ document.getElementById('toggleVideoNotes').onclick = () => toggleFeature('videoNotes');
+ document.getElementById('toggleVideoCalls').onclick = () => toggleFeature('videoCalls');
  document.getElementById('toggleAudioToggle').onclick = () => toggleFeature('audioToggle');
  document.getElementById('toggleGrokBot').onclick = () => toggleFeature('grokBot');
  document.getElementById('toggleP2P').onclick = () => toggleFeature('p2P');

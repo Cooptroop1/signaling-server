@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901s">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901s">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901s">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901s">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901s">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901s">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901t">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901t">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901t">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901t">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901t">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901t">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -438,6 +438,9 @@
     .attach-icon.file { background: #5c6bc0; }
     .attach-icon.voice { background: #ff6f00; }
     .attach-icon.call { background: #25d366; }
+    .attach-icon.video { background: #c026d3; }
+    .attach-icon.vcall { background: #0ea5e9; }
+    .attach-tile.active .attach-icon.vcall { background: #ef4444; }
     .attach-tile.active .attach-icon.call { background: #ef4444; }
     .attach-icon.speaker { background: #546e7a; }
     .attach-icon.grok { background: #111827; }
@@ -445,6 +448,26 @@
       font-size: 0.72rem;
       color: #444;
       font-weight: 600;
+    }
+    .video-call-stage {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 0 0 8px;
+    }
+    .video-call-stage.hidden { display: none !important; }
+    .video-call-stage video {
+      width: 100%;
+      max-height: 160px;
+      object-fit: cover;
+      border-radius: 8px;
+      background: #111;
+    }
+    .chat-video-note {
+      width: 100%;
+      max-height: 240px;
+      border-radius: 8px;
+      background: #111;
     }
     .record-bar {
       display: flex;
@@ -1356,6 +1379,10 @@
           <button id="addUserText" class="hidden" aria-label="Add another person">Add User</button>
           <button id="roomQrButton" aria-label="Show room QR">Room QR</button>
         </div>
+        <div id="videoCallStage" class="video-call-stage hidden">
+          <video id="localVideo" muted autoplay playsinline></video>
+          <div id="remoteVideos"></div>
+        </div>
         <div class="messages-wrapper">
           <div id="messages" role="log" aria-live="polite"></div>
           <div id="userDots" class="user-dots"></div>
@@ -1379,9 +1406,17 @@
                 <span class="attach-icon voice">🎤</span>
                 <span class="attach-label">Voice</span>
               </button>
+              <button type="button" class="attach-tile" id="attachVideo" data-action="video">
+                <span class="attach-icon video">🎬</span>
+                <span class="attach-label">Video 10s</span>
+              </button>
               <button type="button" class="attach-tile" id="voiceCallButton" data-action="call">
                 <span class="attach-icon call">📞</span>
                 <span class="attach-label">Call</span>
+              </button>
+              <button type="button" class="attach-tile" id="videoCallButton" data-action="videocall">
+                <span class="attach-icon vcall">📹</span>
+                <span class="attach-label">Video call</span>
               </button>
               <button type="button" class="attach-tile hidden" id="grokButton" data-action="grok">
                 <span class="attach-icon grok">🤖</span>
@@ -1780,15 +1815,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901s"></script>
-  <script src="ratchet.js?v=260901s"></script>
-  <script src="utils.js?v=260901s"></script>
-  <script src="main.js?v=260901s"></script>
-  <script src="init.js?v=260901s"></script>
-  <script src="events.js?v=260901s"></script>
+    <script src="crypto.js?v=260901t"></script>
+  <script src="ratchet.js?v=260901t"></script>
+  <script src="utils.js?v=260901t"></script>
+  <script src="main.js?v=260901t"></script>
+  <script src="init.js?v=260901t"></script>
+  <script src="events.js?v=260901t"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901s"></script>
-  <script src="account-ui.js?v=260901s"></script>
-  <script src="logged-features.js?v=260901s"></script>
+  <script src="supabase-auth.js?v=260901t"></script>
+  <script src="account-ui.js?v=260901t"></script>
+  <script src="logged-features.js?v=260901t"></script>
 </body>
 </html>

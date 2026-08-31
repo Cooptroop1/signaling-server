@@ -1217,14 +1217,21 @@ function openLoginForShop() {
 
 async function loadMooseShop() {
   const wrap = document.getElementById('vanityShopWrap');
-  if (!wrap) return;
-  wrap.classList.add('hidden');
+  if (wrap) wrap.classList.add('hidden');
   if (!sb) return;
   try {
-    const { data, error } = await sb.from('moose_shop').select('numbers_on, letters_on').eq('id', 1).maybeSingle();
-    if (error || !data) return;
-    window.__mooseShop = data;
-    if (data.numbers_on === true || data.letters_on === true) wrap.classList.remove('hidden');
+    let got = await sb.from('moose_shop').select('numbers_on, letters_on, video_notes_on, video_calls_on').eq('id', 1).maybeSingle();
+    if (got.error) got = await sb.from('moose_shop').select('numbers_on, letters_on').eq('id', 1).maybeSingle();
+    if (got.error || !got.data) return;
+    window.__mooseShop = got.data;
+    if (wrap && (got.data.numbers_on === true || got.data.letters_on === true)) wrap.classList.remove('hidden');
+    if (typeof features !== 'undefined' && features) {
+      if (got.data.video_notes_on === false) features.enableVideoNotes = false;
+      else if (got.data.video_notes_on === true) features.enableVideoNotes = true;
+      if (got.data.video_calls_on === false) features.enableVideoCalls = false;
+      else if (got.data.video_calls_on === true) features.enableVideoCalls = true;
+    }
+    if (typeof updateFeaturesUI === 'function') updateFeaturesUI();
   } catch (e) {}
 }
 

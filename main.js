@@ -2,6 +2,8 @@ let turnUsername = '';
 let turnCredential = '';
 let localStream = null;
 let voiceCallActive = false;
+let videoCallActive = false;
+let recordingVideo = false;
 let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map();
@@ -37,7 +39,7 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
   const nameSpan = document.createElement('span');
   fillClaimedName(nameSpan, username, claimed);
   messageDiv.appendChild(nameSpan);
-  if (type === 'image' || type === 'voice' || type === 'file') {
+  if (type === 'image' || type === 'voice' || type === 'video' || type === 'file') {
     let element;
     if (type === 'image') {
       element = document.createElement('img');
@@ -50,6 +52,13 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
       lazyObserver.observe(element);
     } else if (type === 'voice') {
       element = makeVoiceNotePlayer(content);
+    } else if (type === 'video') {
+      element = document.createElement('video');
+      element.src = content;
+      element.controls = true;
+      element.playsInline = true;
+      element.setAttribute('playsinline', '');
+      element.className = 'chat-video-note';
     } else {
       element = document.createElement('a');
       element.href = content;
@@ -124,12 +133,17 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
       showStatusMessage('Error: Voice messages are disabled by admin.');
       return;
     }
+  } else if (type === 'video') {
+    if (features.enableVideoNotes === false) {
+      showStatusMessage('Video notes are off.');
+      return;
+    }
   }
   if (file && file.size > 5 * 1024 * 1024) {
     showStatusMessage(`Error: ${type.charAt(0).toUpperCase() + type.slice(1)} size exceeds 5MB limit.`);
     return;
   }
-  const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' ? voiceRateLimits : messageRateLimits);
+  const rateLimitsMap = type === 'image' || type === 'file' ? imageRateLimits : (type === 'voice' || type === 'video' ? voiceRateLimits : messageRateLimits);
   const rateLimit = rateLimitsMap.get(clientId) || { count: 0, startTime: now };
   if (!checkAndUpdateRateLimit(rateLimit, 5)) {
     showStatusMessage(`${type.charAt(0).toUpperCase() + type.slice(1)} rate limit reached (5/min). Please wait.`);
@@ -394,6 +408,10 @@ async function startPeerConnection(targetId, isOfferer) {
   peerConnection.ontrack = (event) => {
     console.log(`Received remote track from ${targetId}`);
     const stream = event.streams[0] || new MediaStream([event.track]);
+    if (event.track && event.track.kind === 'video') {
+      attachRemoteVideo(targetId, stream, event.track);
+      return;
+    }
     let audio = remoteAudios.get(targetId);
     if (!audio) {
       audio = document.createElement('audio');
@@ -408,7 +426,7 @@ async function startPeerConnection(targetId, isOfferer) {
     audio.volume = audioOutputMode === 'earpiece' ? 0.55 : 1;
     audio.play().catch(error => console.error('Error playing remote audio:', error));
     setAudioOutput(audio, targetId);
-    if (voiceCallActive) {
+    if (voiceCallActive || videoCallActive) {
       document.getElementById('audioOutputButton')?.classList.remove('hidden');
     }
   };
@@ -788,6 +806,62 @@ async function processCandidateQueue(peerConnection, queue) {
     }
   }
 }
+function videoNotesOn() {
+  if (window.__mooseShop && window.__mooseShop.video_notes_on === false) return false;
+  return features.enableVideoNotes !== false;
+}
+function videoCallsOn() {
+  if (window.__mooseShop && window.__mooseShop.video_calls_on === false) return false;
+  return features.enableVideoCalls !== false;
+}
+function showVideoStage(on) {
+  const stage = document.getElementById('videoCallStage');
+  if (stage) stage.classList.toggle('hidden', !on);
+}
+function attachRemoteVideo(targetId, stream, track) {
+  const box = document.getElementById('remoteVideos');
+  const stage = document.getElementById('videoCallStage');
+  if (!box || !stage) return;
+  stage.classList.remove('hidden');
+  let el = document.getElementById('remoteVideo-' + targetId);
+  if (!el) {
+    el = document.createElement('video');
+    el.id = 'remoteVideo-' + targetId;
+    el.autoplay = true;
+    el.playsInline = true;
+    el.setAttribute('playsinline', '');
+    box.appendChild(el);
+  }
+  const ms = stream || new MediaStream([track]);
+  el.srcObject = ms;
+  el.play().catch(() => {});
+}
+function updateVideoTracks(action) {
+  peerConnections.forEach((peerConnection, targetId) => {
+    if (action === 'add' && localStream) {
+      localStream.getVideoTracks().forEach(track => {
+        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) {
+          sender.replaceTrack(track).catch(() => {
+            try { peerConnection.addTrack(track, localStream); } catch (e) {}
+          });
+        } else {
+          try { peerConnection.addTrack(track, localStream); } catch (e) {}
+        }
+      });
+    } else if (action === 'remove') {
+      peerConnection.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'video') {
+          try { sender.replaceTrack(null); } catch (e) {}
+          try { peerConnection.removeTrack(sender); } catch (e) {}
+        }
+      });
+    }
+    if (peerConnection.signalingState === 'stable') {
+      renegotiate(targetId);
+    }
+  });
+}
 async function toggleVoiceCall() {
   if (!features.enableVoiceCalls) {
     showStatusMessage('Voice calls are disabled by admin.');
@@ -867,6 +941,15 @@ function stopVoiceCall() {
     localStream = null;
   }
   updateAudioTracks('remove');
+  updateVideoTracks('remove');
+  videoCallActive = false;
+  const localVid = document.getElementById('localVideo');
+  if (localVid) localVid.srcObject = null;
+  const rem = document.getElementById('remoteVideos');
+  if (rem) rem.innerHTML = '';
+  showVideoStage(false);
+  const vcallBtn = document.getElementById('videoCallButton');
+  if (vcallBtn) vcallBtn.classList.remove('active');
   voiceCallActive = false;
   const callBtn = document.getElementById('voiceCallButton');
   if (callBtn) {
@@ -1054,9 +1137,16 @@ function updateFeaturesUI() {
   if (attachCamera) attachCamera.classList.toggle('hidden', !features.enableImages);
   if (attachFile) attachFile.classList.toggle('hidden', !features.enableImages);
   if (attachVoice) attachVoice.classList.toggle('hidden', !features.enableVoice);
+  const attachVideo = document.getElementById('attachVideo');
+  const videoCallButton = document.getElementById('videoCallButton');
+  if (attachVideo) attachVideo.classList.toggle('hidden', !videoNotesOn());
+  if (videoCallButton) {
+    videoCallButton.classList.toggle('hidden', !videoCallsOn());
+    if (!videoCallsOn() && videoCallActive) stopVoiceCall();
+  }
   if (voiceCallButton) {
     voiceCallButton.classList.toggle('hidden', !features.enableVoiceCalls);
-    if (!features.enableVoiceCalls && voiceCallActive) stopVoiceCall();
+    if (!features.enableVoiceCalls && voiceCallActive && !videoCallActive) stopVoiceCall();
   }
   if (audioOutputButton) {
     const shouldHide = !voiceCallActive;
@@ -1164,6 +1254,9 @@ function toggleAudioOutput() {
   showStatusMessage(audioOutputMode === 'speaker' ? 'Speaker on' : 'Quieter output');
 }
 function resetVoiceRecordingUi() {
+  const hint = document.querySelector('.record-hint');
+  if (hint) hint.textContent = 'Recording';
+
   if (typeof setComposerRecording === 'function') setComposerRecording(false);
   const timer = document.getElementById('voiceTimer');
   if (timer) {
@@ -1325,6 +1418,166 @@ function stopVoiceRecording() {
   setTimeout(() => {
     if (voiceStopping) cleanupVoiceRecorder();
   }, 2500);
+}
+async function toggleVideoCall() {
+  if (!videoCallsOn()) {
+    showStatusMessage('Video calls are off.');
+    return;
+  }
+  if (videoCallActive) {
+    stopVoiceCall();
+    broadcastVoiceCallEvent('voice-call-end');
+    return;
+  }
+  if (typeof mediaRecorder !== 'undefined' && mediaRecorder && mediaRecorder.state === 'recording') {
+    showStatusMessage('Stop the note first.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showStatusMessage('Camera not supported.');
+    return;
+  }
+  try {
+    if (localStream) {
+      localStream.getTracks().forEach((tr) => tr.stop());
+      localStream = null;
+    }
+    localStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 15 } }
+    });
+    updateAudioTracks('add');
+    updateVideoTracks('add');
+    voiceCallActive = true;
+    videoCallActive = true;
+    const localVid = document.getElementById('localVideo');
+    if (localVid) {
+      localVid.srcObject = localStream;
+      localVid.play().catch(() => {});
+    }
+    showVideoStage(true);
+    document.getElementById('videoCallButton')?.classList.add('active');
+    document.getElementById('audioOutputButton')?.classList.remove('hidden');
+    if (typeof updateAttachButton === 'function') updateAttachButton();
+    broadcastVoiceCallEvent('voice-call-start');
+    showStatusMessage('Video call started.');
+  } catch (error) {
+    console.error('video call', error);
+    if (error && error.name === 'NotAllowedError') showStatusMessage('Allow camera and mic, then tap video call again.');
+    else if (error && error.name === 'NotFoundError') showStatusMessage('No camera on this device.');
+    else showStatusMessage('Could not start video call.');
+  }
+}
+function startVideoRecording() {
+  if (!videoNotesOn()) {
+    showStatusMessage('Video notes are off.');
+    return;
+  }
+  if (voiceCallActive || videoCallActive) {
+    showStatusMessage('End the call before sending a video note.');
+    return;
+  }
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    stopVoiceRecording();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+    showStatusMessage('Video notes not supported in this browser.');
+    return;
+  }
+  recordingVideo = true;
+  navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true },
+    video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 15 } }
+  }).then(stream => {
+    voiceRecordStream = stream;
+    const mimeTypes = [
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp9,opus',
+      'video/mp4',
+      'video/webm'
+    ];
+    const mimeType = (MediaRecorder.isTypeSupported && mimeTypes.find(tp => MediaRecorder.isTypeSupported(tp))) || '';
+    try {
+      mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 400000 }) : new MediaRecorder(stream);
+    } catch (e) {
+      stream.getTracks().forEach(tr => tr.stop());
+      recordingVideo = false;
+      showStatusMessage('Could not start video recorder.');
+      return;
+    }
+    voiceChunks = [];
+    voiceStopping = false;
+    voiceRecordStartedAt = Date.now();
+    mediaRecorder.addEventListener('dataavailable', (event) => {
+      if (event.data && event.data.size > 0) voiceChunks.push(event.data);
+    });
+    mediaRecorder.addEventListener('error', () => {
+      showStatusMessage('Video recording failed.');
+      recordingVideo = false;
+      cleanupVoiceRecorder();
+    });
+    mediaRecorder.addEventListener('stop', async () => {
+      const chunks = voiceChunks.slice();
+      const type = mediaRecorder && mediaRecorder.mimeType ? mediaRecorder.mimeType : (mimeType || 'video/webm');
+      if (voiceRecordStream) {
+        voiceRecordStream.getTracks().forEach(tr => tr.stop());
+        voiceRecordStream = null;
+      }
+      mediaRecorder = null;
+      voiceChunks = [];
+      resetVoiceRecordingUi();
+      const wasVideo = recordingVideo;
+      recordingVideo = false;
+      if (typeof voiceCancelled !== 'undefined' && voiceCancelled) {
+        voiceCancelled = false;
+        voiceStopping = false;
+        return;
+      }
+      const blob = new Blob(chunks, { type: type.split(';')[0] });
+      if (blob.size < 400) {
+        showStatusMessage('Video note was empty.');
+        voiceStopping = false;
+        return;
+      }
+      try {
+        await prepareAndSendMessage({ type: 'video', file: blob });
+      } catch (e) {
+        console.error('Video send failed', e);
+        showStatusMessage('Could not send video note.');
+      }
+      voiceStopping = false;
+    });
+    try { mediaRecorder.start(250); } catch (e) {
+      try { mediaRecorder.start(); } catch (e2) {
+        recordingVideo = false;
+        showStatusMessage('Could not start video.');
+        cleanupVoiceRecorder();
+        return;
+      }
+    }
+    if (typeof setComposerRecording === 'function') setComposerRecording(true);
+    const hint = document.querySelector('.record-hint');
+    if (hint) hint.textContent = 'Video 10s';
+    const timer = document.getElementById('voiceTimer');
+    if (timer) {
+      timer.style.display = 'flex';
+      timer.classList.add('active');
+      timer.textContent = '0:00';
+    }
+    let time = 0;
+    voiceTimerInterval = setInterval(() => {
+      time++;
+      if (timer) timer.textContent = formatVoiceTime(time);
+      if (time >= 10) stopVoiceRecording();
+    }, 1000);
+  }).catch(error => {
+    recordingVideo = false;
+    cleanupVoiceRecorder();
+    if (error && error.name === 'NotAllowedError') showStatusMessage('Allow camera and mic, then tap Video 10s again.');
+    else if (error && error.name === 'NotFoundError') showStatusMessage('No camera on this device.');
+    else showStatusMessage('Could not start video note.');
+  });
 }
 async function startTotpRoom(serverGenerated) {
   const usernameInput = document.getElementById('totpUsernameInput').value.trim();

@@ -1544,6 +1544,8 @@ let features = {
   enableImages: true,
   enableVoice: true,
   enableVoiceCalls: true,
+  enableVideoNotes: true,
+  enableVideoCalls: true,
   enableAudioToggle: true,
   enableGrokBot: false,
   enableP2P: true,
@@ -1552,6 +1554,10 @@ let features = {
 let aggregatedStats = { daily: {} };
 async function loadFeatures() {
   try {
+    try {
+      await dbPool.query('ALTER TABLE features ADD COLUMN IF NOT EXISTS "enableVideoNotes" boolean DEFAULT true');
+      await dbPool.query('ALTER TABLE features ADD COLUMN IF NOT EXISTS "enableVideoCalls" boolean DEFAULT true');
+    } catch (e) {}
     const res = await dbPool.query('SELECT * FROM features LIMIT 1');
     if (res.rows.length > 0) {
       features = res.rows[0];
@@ -1559,19 +1565,23 @@ async function loadFeatures() {
       features.enableImages = features.enableimages !== undefined ? features.enableimages : features.enableImages;
       features.enableVoice = features.enablevoice !== undefined ? features.enablevoice : features.enableVoice;
       features.enableVoiceCalls = features.enablevoicecalls !== undefined ? features.enablevoicecalls : features.enableVoiceCalls;
+      features.enableVideoNotes = features.enablevideonotes !== undefined ? features.enablevideonotes : (features.enableVideoNotes !== undefined ? features.enableVideoNotes : true);
+      features.enableVideoCalls = features.enablevideocalls !== undefined ? features.enablevideocalls : (features.enableVideoCalls !== undefined ? features.enableVideoCalls : true);
       features.enableAudioToggle = features.enableaudiotoggle !== undefined ? features.enableaudiotoggle : features.enableAudioToggle;
       features.enableGrokBot = features.enablegrokbot !== undefined ? features.enablegrokbot : features.enableGrokBot;
       features.enableP2P = features.enablep2p !== undefined ? features.enablep2p : features.enableP2P;
       features.enableRelay = features.enablerelay !== undefined ? features.enablerelay : features.enableRelay;
     } else {
       await dbPool.query(
-        'INSERT INTO features ("enableService", "enableImages", "enableVoice", "enableVoiceCalls", "enableAudioToggle", "enableGrokBot", "enableP2P", "enableRelay") VALUES (true, true, true, true, true, true, true, true)'
+        'INSERT INTO features ("enableService", "enableImages", "enableVoice", "enableVoiceCalls", "enableVideoNotes", "enableVideoCalls", "enableAudioToggle", "enableGrokBot", "enableP2P", "enableRelay") VALUES (true, true, true, true, true, true, true, true, true, true)'
       );
       features = {
         enableService: true,
         enableImages: true,
         enableVoice: true,
         enableVoiceCalls: true,
+        enableVideoNotes: true,
+        enableVideoCalls: true,
         enableAudioToggle: true,
         enableGrokBot: true,
         enableP2P: true,
@@ -1595,12 +1605,14 @@ async function loadFeatures() {
 async function saveFeatures() {
   try {
     await dbPool.query(
-      'UPDATE features SET "enableService"=$1, "enableImages"=$2, "enableVoice"=$3, "enableVoiceCalls"=$4, "enableAudioToggle"=$5, "enableGrokBot"=$6, "enableP2P"=$7, "enableRelay"=$8',
+      'UPDATE features SET "enableService"=$1, "enableImages"=$2, "enableVoice"=$3, "enableVoiceCalls"=$4, "enableVideoNotes"=$5, "enableVideoCalls"=$6, "enableAudioToggle"=$7, "enableGrokBot"=$8, "enableP2P"=$9, "enableRelay"=$10',
       [
         features.enableService,
         features.enableImages,
         features.enableVoice,
         features.enableVoiceCalls,
+        features.enableVideoNotes !== false,
+        features.enableVideoCalls !== false,
         features.enableAudioToggle,
         features.enableGrokBot,
         features.enableP2P,
@@ -1832,6 +1844,7 @@ function validateMessage(data) {
       break;
     case 'relay-image':
     case 'relay-voice':
+    case 'relay-video':
     case 'relay-file':
       if ((!data.data && !data.encryptedData) || !isValidBase64(data.data || data.encryptedData)) {
         return { valid: false, error: data.type + ': invalid data or encryptedData (base64)' };
@@ -2139,14 +2152,14 @@ wss.on('connection', (ws, req) => {
         data.type === 'new-room-key' && 'iv',
         data.type === 'new-room-key' && 'publicKey',
         data.type === 'join' && 'identityPublic',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'identityPublic',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'identitySig',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'content',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'data',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
-        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'identityPublic',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'identitySig',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'content',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'data',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedContent',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'encryptedData',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'iv',
+        (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file' || data.type === 'relay-message') && 'signature',
         (data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') && 'mime',
         data.type === 'send-offline-message' && 'encrypted',
         data.type === 'send-offline-message' && 'iv',
@@ -2580,13 +2593,17 @@ wss.on('connection', (ws, req) => {
         ws.send(JSON.stringify({ type: 'random-codes-cleared' }));
         return;
       }
-      if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-file') {
+      if (data.type === 'relay-message' || data.type === 'relay-image' || data.type === 'relay-voice' || data.type === 'relay-video' || data.type === 'relay-file') {
         if (data.type === 'relay-image' && !features.enableImages) {
           ws.send(JSON.stringify({ type: 'error', message: 'Image messages are disabled.', code: data.code }));
           return;
         }
         if (data.type === 'relay-voice' && !features.enableVoice) {
           ws.send(JSON.stringify({ type: 'error', message: 'Voice messages are disabled.', code: data.code }));
+          return;
+        }
+        if (data.type === 'relay-video' && features.enableVideoNotes === false) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Video notes are disabled.', code: data.code }));
           return;
         }
         const payloadKey = data.content || data.encryptedContent || data.data || data.encryptedData;

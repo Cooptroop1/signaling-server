@@ -129,7 +129,7 @@ let codeSentToRandom = false;
 let useRelay = false;
 let token = '';
 let refreshToken = '';
-let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableAudioToggle: true, enableGrokBot: true, enableP2P: true, enableRelay: true };
+let features = { enableService: true, enableImages: true, enableVoice: true, enableVoiceCalls: true, enableVideoNotes: true, enableVideoCalls: true, enableAudioToggle: true, enableGrokBot: true, enableP2P: true, enableRelay: true };
 let keyPair;
 let roomMaster;
 let signingKey;
@@ -169,7 +169,7 @@ function updateAttachButton() {
     btn.textContent = '📞';
     btn.title = 'End call';
   } else {
-    const icons = { photos: '📷', camera: '📸', file: '📄', voice: '🎤', call: '📞', grok: '🤖' };
+    const icons = { photos: '📷', camera: '📸', file: '📄', voice: '🎤', video: '🎬', call: '📞', videocall: '📹', grok: '🤖' };
     btn.textContent = icons[lastAttachAction] || '📷';
     btn.title = 'Attach photo, file, voice or call';
   }
@@ -1092,7 +1092,7 @@ async function handleSocketMessage(event) {
       }
       return;
     }
-    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'file') && (message.encryptedContent || message.encryptedData)) {
+    if ((message.type === 'message' || message.type === 'image' || message.type === 'voice' || message.type === 'video' || message.type === 'file') && (message.encryptedContent || message.encryptedData)) {
       if (processedMessageIds.has(message.messageId)) return;
       processedMessageIds.add(message.messageId);
       console.log('Received relay message:', message);
@@ -1120,9 +1120,9 @@ async function handleSocketMessage(event) {
       } else if (message.type === 'image') {
         rateMap = imageRateLimits;
         maxCount = 5;
-      } else if (message.type === 'voice') {
+      } else if (message.type === 'voice' || message.type === 'video') {
         rateMap = voiceRateLimits;
-        maxCount = 200; // Further increased limit for voice
+        maxCount = 200;
       } else if (message.type === 'file') {
         rateMap = imageRateLimits;
         maxCount = 5;

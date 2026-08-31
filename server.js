@@ -537,7 +537,7 @@ async function markSalePaid(sessionId, transferId) {
     }
   );
 }
-async function paySellerConnect(sellerId, netCents, sessionId, name) {
+async function paySellerConnect(sellerId, netCents, sessionId, name, chargeId) {
   const net = Math.round(Number(netCents) || 0);
   if (!sellerId || net < 1 || !stripe) return;
   const row = await loadSellerPayout(sellerId);
@@ -545,13 +545,24 @@ async function paySellerConnect(sellerId, netCents, sessionId, name) {
     logger.info('connect hold %s net %s', sellerId, net);
     return;
   }
-  const transfer = await stripe.transfers.create({
+  const opts = {
     amount: net,
     currency: 'gbp',
     destination: row.stripe_account_id,
     metadata: { sellerId: String(sellerId), sessionId: String(sessionId || ''), name: String(name || '') }
-  });
-  await markSalePaid(sessionId, transfer && transfer.id);
+  };
+  if (chargeId) opts.source_transaction = chargeId;
+  try {
+    const transfer = await stripe.transfers.create(opts);
+    await markSalePaid(sessionId, transfer && transfer.id);
+  } catch (e) {
+    const msg = String(e && e.message || '');
+    if (/insufficient available funds/i.test(msg)) {
+      logger.info('connect payout waiting on balance %s', sessionId);
+      return;
+    }
+    logger.warn('connect transfer %s', msg);
+  }
 }
 
 async function setNameListing(userId, name, priceCents) {
@@ -593,20 +604,26 @@ async function setNameListing(userId, name, priceCents) {
   return { ok: true, name: row.name, price_cents: listed ? price : 0 };
 }
 
-async function stripeFeeFromSession(session) {
+async function chargeInfoFromSession(session) {
   const amount = Number(session && session.amount_total) || 0;
-  const abroadGuess = Math.round(amount * 0.075) + 20;
-  if (!stripe || !session || !session.id) return abroadGuess;
+  const info = { fee: Math.round(amount * 0.075) + 20, chargeId: '' };
+  if (!stripe || !session || !session.id) return info;
   try {
     const full = await stripe.checkout.sessions.retrieve(session.id, {
       expand: ['payment_intent.latest_charge.balance_transaction']
     });
     const pi = full && full.payment_intent;
     const charge = pi && pi.latest_charge;
+    const chargeId = typeof charge === 'string' ? charge : (charge && charge.id) || '';
     const bt = charge && charge.balance_transaction;
-    if (bt && typeof bt.fee === 'number') return bt.fee;
+    if (bt && typeof bt.fee === 'number') info.fee = bt.fee;
+    info.chargeId = chargeId;
   } catch (e) {}
-  return abroadGuess;
+  return info;
+}
+async function stripeFeeFromSession(session) {
+  const info = await chargeInfoFromSession(session);
+  return info.fee;
 }
 
 async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stripeFee) {
@@ -747,10 +764,10 @@ async function fulfillPaidSession(session, userAccess) {
   const doneKey = 'vanity:done:' + session.id;
   try {
     if (metaKind === 'resale') {
-      const fee = await stripeFeeFromSession(session);
-      const moved = await attachResaleName(userId, sellerId, name, session.id, paidAmount || locked, fee);
+      const info = await chargeInfoFromSession(session);
+      const moved = await attachResaleName(userId, sellerId, name, session.id, paidAmount || locked, info.fee);
       try {
-        await paySellerConnect(sellerId, moved && moved.seller_net_cents, session.id, name);
+        await paySellerConnect(sellerId, moved && moved.seller_net_cents, session.id, name, info.chargeId);
       } catch (e) {
         logger.warn('connect transfer %s', e && e.message);
       }

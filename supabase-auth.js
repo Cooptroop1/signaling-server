@@ -1127,7 +1127,7 @@ async function revertSoldChatName(list, activeFromProfile) {
   if (!current) return;
   if (owned.includes(current.toLowerCase())) return;
   const signup = (list || []).find((n) => n.kind === 'signup');
-  const fallback = (signup && signup.name) || (list[0] && list[0].name);
+  const fallback = signup && signup.name;
   if (!fallback) return;
   window.__revertingName = true;
   try {

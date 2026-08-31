@@ -626,6 +626,25 @@ async function stripeFeeFromSession(session) {
   return info.fee;
 }
 
+async function sellerFreeName(seller, leftover, soldName) {
+  const sold = String(soldName || '').toLowerCase();
+  const signup = leftover.find((x) => String(x.kind) === 'signup') || leftover.find((x) => x.kind !== 'number' && x.kind !== 'letter');
+  if (signup && signup.name && String(signup.name).toLowerCase() !== sold) return String(signup.name);
+  try {
+    const ur = await fetch(SUPABASE_URL + '/auth/v1/admin/users/' + encodeURIComponent(seller), {
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY
+      }
+    });
+    const u = await ur.json();
+    const meta = String((u && u.user_metadata && u.user_metadata.display_name) || '').replace(/[^A-Za-z0-9]/g, '');
+    if (meta && meta.toLowerCase() !== sold && !/^\d+$/.test(meta)) return meta;
+    const local = String((u && u.email) || '').split('@')[0].replace(/[^A-Za-z0-9]/g, '');
+    if (local && local.toLowerCase() !== sold && !/^\d+$/.test(local)) return local.slice(0, 16);
+  } catch (e) {}
+  return '';
+}
 async function revertSellerChatName(seller, soldName, headers) {
   if (!seller) return;
   const sold = String(soldName || '').toLowerCase();
@@ -635,8 +654,20 @@ async function revertSellerChatName(seller, soldName, headers) {
   );
   let leftover = await rest.json();
   leftover = Array.isArray(leftover) ? leftover.filter((x) => String(x.name || '').toLowerCase() !== sold) : [];
-  const signup = leftover.find((x) => String(x.kind) === 'signup') || leftover.find((x) => x.kind !== 'number' && x.kind !== 'letter');
-  const fallback = (signup && signup.name) || (leftover[0] && leftover[0].name) || ('u' + String(seller).replace(/-/g, '').slice(0, 8));
+  let fallback = await sellerFreeName(seller, leftover, soldName);
+  if (!fallback) fallback = leftover[0] && leftover[0].name;
+  if (!fallback) return;
+  const haveFree = leftover.some((x) => String(x.name || '').toLowerCase() === fallback.toLowerCase());
+  if (!haveFree) {
+    const ins = await fetch(SUPABASE_URL + '/rest/v1/owned_names', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: fallback, user_id: seller, kind: 'signup' })
+    });
+    if (!ins.ok && ins.status !== 409) {
+      logger.warn('restore signup %s', await ins.text());
+    }
+  }
   const prof = await fetch(
     SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller) + '&select=display_name',
     { headers }
@@ -644,13 +675,13 @@ async function revertSellerChatName(seller, soldName, headers) {
   const profRows = await prof.json();
   const current = Array.isArray(profRows) && profRows[0] ? String(profRows[0].display_name || '') : '';
   const stillOwns = leftover.some((x) => String(x.name || '').toLowerCase() === current.toLowerCase());
-  if (current && stillOwns) return;
+  if (current && stillOwns && current.toLowerCase() !== sold) return;
   const r = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller), {
     method: 'PATCH',
     headers,
     body: JSON.stringify({ display_name: fallback, updated_at: new Date().toISOString() })
   });
-  logger.info('seller revert %s %s -> %s %s', current || '(none)', fallback, r.status, soldName);
+  logger.info('seller revert %s -> %s %s', current || '(none)', fallback, r.status);
 }
 
 async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stripeFee) {

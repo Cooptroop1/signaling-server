@@ -1260,6 +1260,9 @@ function tabClass(on) {
 async function loadUsedListings() {
   const box = document.getElementById('vanityUsedList');
   if (!box) return [];
+  if (isLoggedIn()) {
+    try { await loadMyNames(); } catch (e) {}
+  }
   let rows = [];
   try {
     const r = await fetch('https://signal.anonomoose.com/vanity-used', { headers: { Accept: 'application/json' } });
@@ -1275,21 +1278,33 @@ async function loadUsedListings() {
   }
   box.innerHTML = rows.map((r) => {
     const nm = String(r.name || '').replace(/</g, '').replace(/"/g, '');
-    return '<button type="button" class="used-name-btn" data-used-name="' + nm + '" data-used-price="' + Number(r.price_cents || 0) + '">' +
-      nm + ' — ' + pounds(r.price_cents) + '</button>';
+    const mine = isMyUsedListing(nm);
+    return '<button type="button" class="used-name-btn' + (mine ? ' mine' : '') + '" data-used-name="' + nm + '" data-used-price="' + Number(r.price_cents || 0) + '" data-mine="' + (mine ? '1' : '0') + '">' +
+      nm + ' — ' + pounds(r.price_cents) + (mine ? ' · your listing' : '') + '</button>';
   }).join('');
   box.querySelectorAll('[data-used-name]').forEach((btn) => {
-    btn.onclick = () => pickUsedListing(btn.getAttribute('data-used-name'), Number(btn.getAttribute('data-used-price') || 0));
+    btn.onclick = () => pickUsedListing(btn.getAttribute('data-used-name'), Number(btn.getAttribute('data-used-price') || 0), btn.getAttribute('data-mine') === '1');
   });
   return rows;
 }
-function pickUsedListing(name, price) {
-  window.__vanityLast = { ok: true, kind: 'resale', resale: true, name, price_cents: price, available: true };
+function isMyUsedListing(name) {
+  const mine = window.__myNames || [];
+  const want = String(name || '').toLowerCase();
+  return mine.some((n) => String(n.name || '').toLowerCase() === want);
+}
+function pickUsedListing(name, price, mine) {
+  const own = mine || isMyUsedListing(name);
+  window.__vanityLast = { ok: true, kind: 'resale', resale: true, name, price_cents: price, available: !own, mine: own };
   const buyBtn = document.getElementById('vanityBuyBtn');
   const bidBtn = document.getElementById('vanityBidBtn');
   const bidInput = document.getElementById('vanityBidInput');
   if (bidBtn) bidBtn.classList.add('hidden');
   if (bidInput) bidInput.classList.add('hidden');
+  if (own) {
+    if (buyBtn) buyBtn.classList.add('hidden');
+    shopNote(name + ' is your listing — ' + pounds(price) + '. Other people can buy it. Unlist from My names to take it off.');
+    return;
+  }
   if (buyBtn) buyBtn.classList.remove('hidden');
   shopNote(name + ' used — ' + pounds(price) + '. Buyer pays that. Seller gets the rest after Stripe + 5%.');
 }
@@ -1327,6 +1342,10 @@ function setVanityTab(tab) {
 async function startVanityCheckout(row) {
   if (!isLoggedIn()) {
     openLoginForShop();
+    return;
+  }
+  if (row && (row.mine || isMyUsedListing(row.name))) {
+    shopNote((row.name || 'That') + ' is your listing.');
     return;
   }
   if (window.__buyBusy) return;

@@ -958,7 +958,7 @@ function renderMyNames(list) {
     return;
   }
   const q = String(window.__myNamesFilter || '').trim().toLowerCase();
-  const shown = q ? extras.filter((n) => String(n.name).toLowerCase().indexOf(q) !== -1) : extras;
+  const shown = q ? rows.filter((n) => String(n.name).toLowerCase().indexOf(q) !== -1) : rows;
   if (!shown.length) {
     locker.innerHTML = '<p class="text-sm text-gray-500">No name matches.</p>';
     return;

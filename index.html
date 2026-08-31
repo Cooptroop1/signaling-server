@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901a">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901a">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901a">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901a">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901a">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901a">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901b">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901b">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901b">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901b">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901b">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901b">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1056,7 +1056,8 @@
     }
     #sealedNotesWrap,
     #mooseBookWrap,
-    #vanityShopWrap {
+    #vanityShopWrap,
+    #myNamesWrap {
       overflow: hidden;
       height: 44px;
       margin: 0 0 8px;
@@ -1067,6 +1068,9 @@
     }
     #mooseBookBtn {
       background: #3730a3;
+    }
+    #myNamesBtn {
+      background: #92400e;
     }
     .my-name-chip {
       display: inline-block;
@@ -1084,10 +1088,33 @@
       font-weight: 700;
     }
     .my-name-row {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      gap: 0.35rem;
-      margin: 0 0.35rem 0.35rem 0;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin: 0 0 0.45rem;
+      padding: 0.45rem 0.5rem;
+      background: #f3f4f6;
+      border-radius: 8px;
+      text-align: left;
+    }
+    .my-name-row .my-name-chip { margin: 0; }
+    .my-name-actions { display: flex; gap: 0.3rem; flex-shrink: 0; }
+    #myNamesList { max-height: 55vh; overflow: auto; }
+    #myNamesFilter {
+      width: 100%;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 0.45rem 0.6rem;
+      margin: 0 0 0.7rem;
+    }
+    #myNamesSummary {
+      font-size: 0.85rem;
+      color: #374151;
+      background: none;
+      border: 0;
+      text-decoration: underline;
+      cursor: pointer;
     }
     .sell-name-btn {
       font-size: 0.72rem;
@@ -1167,6 +1194,7 @@
     #photoCodeModal .totp-modal-content,
     #sealedNotesModal .totp-modal-content,
     #mooseBookModal .totp-modal-content,
+    #myNamesModal .totp-modal-content,
     #safetySettingsModal .totp-modal-content,
     #pinUnlockModal .totp-modal-content,
     #roomQrModal .totp-modal-content {
@@ -1283,6 +1311,9 @@
           </div>
           <div class="start-btn-wrap logged-only-opt hidden" id="mooseBookWrap">
             <button type="button" id="mooseBookBtn">Moose Book</button>
+          </div>
+          <div class="start-btn-wrap logged-only-opt hidden" id="myNamesWrap">
+            <button type="button" id="myNamesBtn">My names</button>
           </div>
         </div>
         <div id="loggedLinkOpts" class="logged-link-box logged-only-opt hidden">
@@ -1497,6 +1528,15 @@
       <h2 class="text-xl font-bold mb-3">Sealed notes <span id="inboxCount"></span></h2>
       <div id="inboxList"></div>
       <button id="closeSealedNotes" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-3">Close</button>
+    </div>
+  </div>
+  <div id="myNamesModal" class="totp-modal hidden" role="dialog" aria-label="My names">
+    <div class="totp-modal-content safety-scroll">
+      <h2 class="text-xl font-bold mb-2">My names</h2>
+      <p class="text-sm text-gray-600 mb-2">Tap a name to use it in chat. Mail to any of them still reaches you. Bought names can go in Used.</p>
+      <input id="myNamesFilter" type="search" placeholder="Find a name" maxlength="16" autocomplete="off">
+      <div id="myNamesList"></div>
+      <button id="closeMyNames" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-3">Close</button>
     </div>
   </div>
   <div id="mooseBookModal" class="totp-modal hidden" role="dialog" aria-label="Moose Book">
@@ -1725,15 +1765,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901a"></script>
-  <script src="ratchet.js?v=260901a"></script>
-  <script src="utils.js?v=260901a"></script>
-  <script src="main.js?v=260901a"></script>
-  <script src="init.js?v=260901a"></script>
-  <script src="events.js?v=260901a"></script>
+    <script src="crypto.js?v=260901b"></script>
+  <script src="ratchet.js?v=260901b"></script>
+  <script src="utils.js?v=260901b"></script>
+  <script src="main.js?v=260901b"></script>
+  <script src="init.js?v=260901b"></script>
+  <script src="events.js?v=260901b"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901a"></script>
-  <script src="account-ui.js?v=260901a"></script>
-  <script src="logged-features.js?v=260901a"></script>
+  <script src="supabase-auth.js?v=260901b"></script>
+  <script src="account-ui.js?v=260901b"></script>
+  <script src="logged-features.js?v=260901b"></script>
 </body>
 </html>

@@ -92,6 +92,11 @@ function setAuthUi(session) {
       bookModal.classList.add('hidden');
       bookModal.classList.remove('active');
     }
+    const namesModal = document.getElementById('myNamesModal');
+    if (namesModal) {
+      namesModal.classList.add('hidden');
+      namesModal.classList.remove('active');
+    }
     const safety = document.getElementById('safetySettingsModal');
     if (safety) {
       safety.classList.add('hidden');
@@ -874,36 +879,101 @@ function sellerNetGuess(price, abroad) {
   const cut = Math.max(1, Math.round(price * 0.05));
   return Math.max(0, price - stripe - cut);
 }
+function sortOwnedNames(list) {
+  return (list || []).slice().sort((a, b) => {
+    if (a.active && !b.active) return -1;
+    if (!a.active && b.active) return 1;
+    const an = /^\d+$/.test(String(a.name));
+    const bn = /^\d+$/.test(String(b.name));
+    if (an && bn) return parseInt(a.name, 10) - parseInt(b.name, 10);
+    if (an !== bn) return an ? -1 : 1;
+    if ((a.kind === 'signup') !== (b.kind === 'signup')) return a.kind === 'signup' ? 1 : -1;
+    return String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+  });
+}
+function openMyNames() {
+  const m = document.getElementById('myNamesModal');
+  if (!m) return;
+  m.classList.remove('hidden');
+  m.classList.add('active');
+  const f = document.getElementById('myNamesFilter');
+  if (f) f.value = window.__myNamesFilter || '';
+  renderMyNames(window.__myNames || []);
+  loadMyNames().catch(() => {});
+}
+function closeMyNames() {
+  const m = document.getElementById('myNamesModal');
+  if (!m) return;
+  m.classList.add('hidden');
+  m.classList.remove('active');
+}
+function bindMyNames() {
+  const openBtn = document.getElementById('myNamesBtn');
+  const closeBtn = document.getElementById('closeMyNames');
+  const filter = document.getElementById('myNamesFilter');
+  if (openBtn) openBtn.onclick = openMyNames;
+  if (closeBtn) closeBtn.onclick = closeMyNames;
+  if (filter) {
+    filter.oninput = () => {
+      window.__myNamesFilter = filter.value || '';
+      renderMyNames(window.__myNames || []);
+    };
+  }
+}
 function renderMyNames(list) {
   const box = document.getElementById('myNamesBox');
-  if (!box) return;
-  if (!isLoggedIn() || !list || !list.length) {
-    box.innerHTML = '';
-    box.classList.add('hidden');
+  const locker = document.getElementById('myNamesList');
+  const openBtn = document.getElementById('myNamesBtn');
+  const rows = sortOwnedNames(list || []);
+  if (openBtn) openBtn.textContent = rows.length ? ('My names (' + rows.length + ')') : 'My names';
+  const active = rows.find((n) => n.active);
+  if (box) {
+    if (!isLoggedIn() || !rows.length) {
+      box.innerHTML = '';
+      box.classList.add('hidden');
+    } else {
+      box.classList.remove('hidden');
+      const using = active ? String(active.name) : String(rows[0].name);
+      box.innerHTML = '<button type="button" id="myNamesSummary">Using ' + using + ' in chat · ' + rows.length + ' name' + (rows.length === 1 ? '' : 's') + '</button>';
+      const sum = document.getElementById('myNamesSummary');
+      if (sum) sum.onclick = openMyNames;
+    }
+  }
+  if (!locker) return;
+  if (!isLoggedIn() || !rows.length) {
+    locker.innerHTML = '<p class="text-sm text-gray-500">No names on this account.</p>';
     return;
   }
-  box.classList.remove('hidden');
-  box.innerHTML = '<p class="text-xs text-gray-500 mb-1">Your names — tap one to use in chat. Mail to any of them still reaches you. Bought names can be listed in Used.</p>' +
-    list.map((n) => {
-      const on = n.active ? ' my-name-chip on' : ' my-name-chip';
-      const tag = n.active ? ' <span class="text-xs">(in chat)</span>' : '';
-      const esc = String(n.name).replace(/"/g, '').replace(/</g, '');
-      let sell = '';
-      if (canSellName(n)) {
-        sell = n.listed
-          ? '<button type="button" class="sell-name-btn" data-unlist="' + esc + '">Listed ' + pounds(n.price) + ' · Unlist</button>'
-          : '<button type="button" class="sell-name-btn" data-list="' + esc + '">Sell</button>';
-      }
-      return '<span class="my-name-row"><button type="button" class="' + on.trim() + '" data-my-name="' + esc + '">' +
-        esc + tag + '</button>' + sell + '</span>';
-    }).join(' ');
-  box.querySelectorAll('[data-my-name]').forEach((btn) => {
+  const q = String(window.__myNamesFilter || '').trim().toLowerCase();
+  const shown = q ? rows.filter((n) => String(n.name).toLowerCase().indexOf(q) !== -1) : rows;
+  if (!shown.length) {
+    locker.innerHTML = '<p class="text-sm text-gray-500">No name matches.</p>';
+    return;
+  }
+  locker.innerHTML = shown.map((n) => {
+    const esc = String(n.name).replace(/"/g, '').replace(/</g, '');
+    const on = n.active ? ' my-name-chip on' : ' my-name-chip';
+    const tag = n.active ? ' in chat' : '';
+    const kind = n.kind === 'signup' ? 'free' : (n.kind || '');
+    let acts = '';
+    if (!n.active) {
+      acts += '<button type="button" class="sell-name-btn" data-my-name="' + esc + '">Use</button>';
+    }
+    if (canSellName(n)) {
+      acts += n.listed
+        ? '<button type="button" class="sell-name-btn" data-unlist="' + esc + '">Listed ' + pounds(n.price) + ' · Unlist</button>'
+        : '<button type="button" class="sell-name-btn" data-list="' + esc + '">Sell</button>';
+    }
+    return '<div class="my-name-row"><div><button type="button" class="' + on.trim() + '" data-my-name="' + esc + '">' +
+      esc + '</button><div class="text-xs text-gray-500">' + kind + tag + '</div></div><div class="my-name-actions">' + acts + '</div></div>';
+  }).join('');
+  locker.querySelectorAll('[data-my-name]').forEach((btn) => {
     btn.onclick = () => setActiveOwnedName(btn.getAttribute('data-my-name'));
   });
-  box.querySelectorAll('[data-list]').forEach((btn) => {
+  locker.querySelectorAll('[data-list]').forEach((btn) => {
     btn.onclick = () => listOwnedName(btn.getAttribute('data-list'));
   });
-  box.querySelectorAll('[data-unlist]').forEach((btn) => {
+  locker.querySelectorAll('[data-unlist]').forEach((btn) => {
     btn.onclick = () => unlistOwnedName(btn.getAttribute('data-unlist'));
   });
 }
@@ -1319,11 +1389,13 @@ window.sbAuth = {
   signOut,
   findByQr,
   loadMyNames,
+  openMyNames,
   setActiveOwnedName
 };
 
 document.addEventListener('DOMContentLoaded', () => {
   bindVanityShop();
+  bindMyNames();
   if (!sb) {
     console.warn('Supabase client missing');
     return;

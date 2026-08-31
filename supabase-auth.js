@@ -1014,9 +1014,9 @@ async function startVanityCheckout(row) {
       window.location.href = data.url;
       return;
     }
-    shopNote((data && data.error) || 'Stripe is not live yet. On Render add STRIPE_SECRET_KEY, then Buy now takes you to card payment. The name is saved on this email account.');
+    shopNote((data && data.error) || 'Could not start payment. Try again.');
   } catch (e) {
-    shopNote('Could not start checkout. Try again, or add STRIPE_SECRET_KEY on Render.');
+    shopNote('Could not start payment. Try again.');
   }
 }
 

@@ -175,9 +175,11 @@ if (webpush) {
   try { webpush.setVapidDetails('mailto:hello@anonomoose.com', VAPID_PUBLIC, VAPID_PRIVATE); } catch (e) { logger.warn('vapid setup %s', e.message); }
 }
 let stripe = null;
+const stripeKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
 try {
-  if (process.env.STRIPE_SECRET_KEY) stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+  if (stripeKey) stripe = require('stripe')(stripeKey);
 } catch (e) { logger.warn('stripe %s', e.message); }
+if (stripe) logger.info('Stripe mode %s', stripeKey.startsWith('sk_live_') ? 'LIVE' : (stripeKey.startsWith('sk_test_') ? 'TEST (swap to sk_live_ on Render)' : 'set'));
 const SUPABASE_SERVICE_ROLE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim().replace(/^["']|["']$/g, '');
 logger.info('Vanity service role %s', SUPABASE_SERVICE_ROLE_KEY ? 'present' : 'MISSING');
 
@@ -306,20 +308,27 @@ async function fulfillPaidSession(session, userAccess) {
     return { ok: false, error: e.message || 'Could not attach name', name, userId, applied: false };
   }
 }
-function readJsonBody(req, limit) {
+function readRawBody(req, limit) {
   return new Promise((resolve, reject) => {
-    let raw = '';
+    const chunks = [];
+    let n = 0;
     req.on('data', (c) => {
-      raw += c;
-      if (raw.length > (limit || 8000)) {
+      n += c.length;
+      if (n > (limit || 8000)) {
         reject(new Error('too large'));
         req.destroy();
+        return;
       }
+      chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
     });
-    req.on('end', () => {
-      try { resolve(raw ? JSON.parse(raw) : {}); } catch (e) { reject(e); }
-    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
+  });
+}
+function readJsonBody(req, limit) {
+  return readRawBody(req, limit).then((buf) => {
+    const raw = buf.toString('utf8');
+    return raw ? JSON.parse(raw) : {};
   });
 }
 function pingCors(res) {
@@ -490,16 +499,36 @@ server.on('request', (req, res) => {
       return;
     }
     if (fullUrl.pathname === '/stripe-webhook') {
-      readJsonBody(req, 20000).then(async (body) => {
+      readRawBody(req, 20000).then(async (raw) => {
+        let session = null;
+        const sig = req.headers['stripe-signature'];
+        const whsec = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim();
+        if (stripe && whsec) {
+          try {
+            const event = stripe.webhooks.constructEvent(raw, sig, whsec);
+            if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+              session = event.data && event.data.object;
+            }
+          } catch (e) {
+            logger.warn('stripe webhook sig %s', e && e.message);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'invalid signature' }));
+            return;
+          }
+        } else if (stripe) {
+          let body = {};
+          try { body = JSON.parse(raw.toString('utf8') || '{}'); } catch (e) {}
+          const eventType = body.type || '';
+          const eventId = (body.data && body.data.object && body.data.object.id) || '';
+          if (eventId && (eventType === 'checkout.session.completed' || eventType === 'checkout.session.async_payment_succeeded' || !eventType)) {
+            session = await stripe.checkout.sessions.retrieve(eventId);
+          }
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ received: true }));
-        try {
-          const eventId = (body.data && body.data.object && body.data.object.id) || '';
-          if (eventId && stripe) {
-            const session = await stripe.checkout.sessions.retrieve(eventId);
-            await fulfillPaidSession(session);
-          }
-        } catch (e) {}
+        if (session) {
+          try { await fulfillPaidSession(session); } catch (e) { logger.warn('stripe webhook fulfill %s', e && e.message); }
+        }
       }).catch(() => { if (!res.headersSent) { res.writeHead(400); res.end(); } });
       return;
     }
@@ -518,7 +547,7 @@ server.on('request', (req, res) => {
         }
         if (!stripe) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'Stripe is not live yet. Add STRIPE_SECRET_KEY on Render to take payment.' }));
+          res.end(JSON.stringify({ ok: false, error: 'Payments are not available right now. Try again later.' }));
           return;
         }
         const kind = body.kind === 'letter' ? 'letter' : 'number';
@@ -537,8 +566,9 @@ server.on('request', (req, res) => {
         }
         const amount = priced.amount;
         try {
-          const session = await stripe.checkout.sessions.create({
+          const sessionOpts = {
             mode: 'payment',
+            payment_method_types: ['card'],
             client_reference_id: userId,
             success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
             cancel_url: 'https://www.anonomoose.com/',
@@ -551,7 +581,9 @@ server.on('request', (req, res) => {
                 product_data: { name: 'Anonomoose name ' + name }
               }
             }]
-          });
+          };
+          if (shopUser.email) sessionOpts.customer_email = shopUser.email;
+          const session = await stripe.checkout.sessions.create(sessionOpts);
           try {
             await redisClient.set('vanity:sess:' + session.id, JSON.stringify({
               name, userId, amount, kind
@@ -560,8 +592,7 @@ server.on('request', (req, res) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             ok: true,
-            url: session.url,
-            test: String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_')
+            url: session.url
           }));
         } catch (e) {
           logger.warn('stripe checkout %s', e && e.message);

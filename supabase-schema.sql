@@ -739,8 +739,8 @@ begin
   if char_length(nm) < 1 then
     return jsonb_build_object('ok', false, 'error', 'Missing name');
   end if;
-  if p_price_cents is null or p_price_cents < 200 or p_price_cents > 2000000 then
-    return jsonb_build_object('ok', false, 'error', 'Price must be £2 to £20,000');
+  if p_price_cents is null or p_price_cents < 200 or p_price_cents > 100000000 then
+    return jsonb_build_object('ok', false, 'error', 'Price must be £2 to £1,000,000');
   end if;
   select o.kind into kind
   from public.owned_names o
@@ -895,8 +895,8 @@ begin
     return jsonb_build_object('ok', false, 'error', 'Missing name');
   end if;
   price := round(coalesce(p_price_cents, 0))::int;
-  if price < 200 or price > 2000000 then
-    return jsonb_build_object('ok', false, 'error', 'Price must be £2 to £20,000');
+  if price < 200 or price > 100000000 then
+    return jsonb_build_object('ok', false, 'error', 'Price must be £2 to £1,000,000');
   end if;
   select o.kind into kind
   from public.owned_names o

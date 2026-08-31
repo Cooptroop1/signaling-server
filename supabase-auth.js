@@ -1020,12 +1020,16 @@ async function listOwnedName(name, presetPrice) {
   if (window.__nameBusy && window.__nameBusy[name]) return;
   let price = presetPrice;
   if (!price) {
-    const raw = window.prompt('List ' + name + ' for how many £? Min 2. Buyer pays that. Stripe fee + 5% comes out. Stripe pays your bank after it sells.');
+    const raw = window.prompt('List ' + name + ' for how many £? Min 2, max 1,000,000. Buyer pays that. Stripe fee + 5% comes out. Stripe pays your bank after it sells.');
     if (raw == null || String(raw).trim() === '') return;
     const poundsIn = Number(raw);
     price = Math.round(poundsIn * 100);
     if (!poundsIn || price < 200) {
       if (typeof showStatusMessage === 'function') showStatusMessage('Min £2.');
+      return;
+    }
+    if (price > 100000000) {
+      if (typeof showStatusMessage === 'function') showStatusMessage('Max £1,000,000.');
       return;
     }
     const uk = pounds(sellerNetGuess(price, false));

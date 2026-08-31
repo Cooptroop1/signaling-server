@@ -571,7 +571,7 @@ async function setNameListing(userId, name, priceCents) {
   if (!SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Listing is not available right now' };
   const listed = priceCents != null;
   const price = listed ? Math.round(Number(priceCents) || 0) : 0;
-  if (listed && (price < 200 || price > 2000000)) return { ok: false, error: 'Price must be £2 to £20,000' };
+  if (listed && (price < 200 || price > 100000000)) return { ok: false, error: 'Price must be £2 to £1,000,000' };
   const found = await fetch(
     SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&name=ilike.' + encodeURIComponent(nm) + '&select=name,kind',
     { headers: svcHeaders() }

@@ -97,6 +97,8 @@ function setAuthUi(session) {
       namesModal.classList.add('hidden');
       namesModal.classList.remove('active');
     }
+    const namesWrap = document.getElementById('myNamesWrap');
+    if (namesWrap) namesWrap.classList.add('hidden');
     const safety = document.getElementById('safetySettingsModal');
     if (safety) {
       safety.classList.add('hidden');
@@ -234,6 +236,9 @@ function startHeartbeat() {
     }).catch(() => {});
     if (typeof window.loggedFeatures !== 'undefined' && window.loggedFeatures.checkDeviceLock) {
       window.loggedFeatures.checkDeviceLock().catch(() => {});
+    }
+    if (!window.__nameBusy || !Object.keys(window.__nameBusy).length) {
+      loadMyNames().catch(() => {});
     }
   };
   beat();
@@ -892,15 +897,22 @@ function sortOwnedNames(list) {
     return String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
   });
 }
-function openMyNames() {
+function extraBoughtNames(list) {
+  return (list || []).filter((n) => n && (n.kind === 'number' || n.kind === 'letter'));
+}
+function showMyNamesWrap(list) {
+  const wrap = document.getElementById('myNamesWrap');
+  if (!wrap) return;
+  wrap.classList.toggle('hidden', !(isLoggedIn() && extraBoughtNames(list).length));
+}
+async function openMyNames() {
   const m = document.getElementById('myNamesModal');
   if (!m) return;
   m.classList.remove('hidden');
   m.classList.add('active');
   const f = document.getElementById('myNamesFilter');
   if (f) f.value = window.__myNamesFilter || '';
-  renderMyNames(window.__myNames || []);
-  loadMyNames().catch(() => {});
+  await loadMyNames();
 }
 function closeMyNames() {
   const m = document.getElementById('myNamesModal');
@@ -926,7 +938,9 @@ function renderMyNames(list) {
   const locker = document.getElementById('myNamesList');
   const openBtn = document.getElementById('myNamesBtn');
   const rows = sortOwnedNames(list || []);
-  if (openBtn) openBtn.textContent = rows.length ? ('My names (' + rows.length + ')') : 'My names';
+  showMyNamesWrap(rows);
+  const extra = extraBoughtNames(rows).length;
+  if (openBtn) openBtn.textContent = extra ? ('My names (' + extra + ')') : 'My names';
   if (box) {
     box.innerHTML = '';
     box.classList.add('hidden');

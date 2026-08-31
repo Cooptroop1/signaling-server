@@ -860,13 +860,18 @@ async function loadMyNames() {
     active = (prof && prof.display_name) || '';
   } catch (e) {}
   if (!rows.length && active) rows = [{ name: active, kind: 'signup' }];
-  window.__myNames = rows.map((r) => ({
-    name: r.name,
-    kind: r.kind,
-    listed: !!r.listed_for_sale,
-    price: Number(r.sale_price_cents) || 0,
-    active: String(r.name).toLowerCase() === String(active || username || '').toLowerCase()
-  }));
+  window.__myNames = rows.map((r) => {
+    const kind = (r.kind === 'number' || r.kind === 'letter' || r.kind === 'signup')
+      ? r.kind
+      : 'signup';
+    return {
+      name: r.name,
+      kind,
+      listed: !!r.listed_for_sale,
+      price: Number(r.sale_price_cents) || 0,
+      active: String(r.name).toLowerCase() === String(active || username || '').toLowerCase()
+    };
+  });
   if (active && !window.__myNames.some((n) => n.active) && window.__myNames[0]) {
     window.__myNames[0].active = true;
   }
@@ -946,12 +951,13 @@ function renderMyNames(list) {
     box.classList.add('hidden');
   }
   if (!locker) return;
-  if (!isLoggedIn() || !rows.length) {
-    locker.innerHTML = '<p class="text-sm text-gray-500">No names on this account.</p>';
+  const extras = extraBoughtNames(rows);
+  if (!isLoggedIn() || !extras.length) {
+    locker.innerHTML = '<p class="text-sm text-gray-500">No bought names on this account.</p>';
     return;
   }
   const q = String(window.__myNamesFilter || '').trim().toLowerCase();
-  const shown = q ? rows.filter((n) => String(n.name).toLowerCase().indexOf(q) !== -1) : rows;
+  const shown = q ? extras.filter((n) => String(n.name).toLowerCase().indexOf(q) !== -1) : extras;
   if (!shown.length) {
     locker.innerHTML = '<p class="text-sm text-gray-500">No name matches.</p>';
     return;

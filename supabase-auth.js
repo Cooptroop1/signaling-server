@@ -741,6 +741,9 @@ function offerPasskeyOnce() {
 function pounds(cents) {
   return '£' + (Number(cents || 0) / 100).toFixed(2);
 }
+function isBankTransferListing(price) {
+  return Number(price || 0) >= 1000000;
+}
 
 async function applyBoughtName(name, alreadyApplied) {
   if (!name) return false;
@@ -1283,8 +1286,10 @@ async function loadUsedListings() {
   box.innerHTML = rows.map((r) => {
     const nm = String(r.name || '').replace(/</g, '').replace(/"/g, '');
     const mine = isMyUsedListing(nm);
-    return '<button type="button" class="used-name-btn' + (mine ? ' mine' : '') + '" data-used-name="' + nm + '" data-used-price="' + Number(r.price_cents || 0) + '" data-mine="' + (mine ? '1' : '0') + '">' +
-      nm + ' — ' + pounds(r.price_cents) + (mine ? ' · your listing' : '') + '</button>';
+    const bank = isBankTransferListing(r.price_cents);
+    const tag = mine ? ' · your listing' : (bank ? ' · bank / message' : '');
+    return '<button type="button" class="used-name-btn' + (mine ? ' mine' : '') + (bank && !mine ? ' bank' : '') + '" data-used-name="' + nm + '" data-used-price="' + Number(r.price_cents || 0) + '" data-mine="' + (mine ? '1' : '0') + '">' +
+      nm + ' — ' + pounds(r.price_cents) + tag + '</button>';
   }).join('');
   box.querySelectorAll('[data-used-name]').forEach((btn) => {
     btn.onclick = () => pickUsedListing(btn.getAttribute('data-used-name'), Number(btn.getAttribute('data-used-price') || 0), btn.getAttribute('data-mine') === '1');
@@ -1309,8 +1314,14 @@ function pickUsedListing(name, price, mine) {
     shopNote(name + ' is your listing — ' + pounds(price) + '. Other people can buy it. Unlist from My names to take it off.');
     return;
   }
-  if (buyBtn) buyBtn.classList.remove('hidden');
-  shopNote(name + ' used — ' + pounds(price) + '. Buyer pays that. Seller gets the rest after Stripe + 5%.');
+  const bank = isBankTransferListing(price);
+  if (buyBtn) {
+    buyBtn.classList.remove('hidden');
+    buyBtn.textContent = bank ? 'Message owner' : 'Buy now';
+  }
+  shopNote(bank
+    ? (name + ' is ' + pounds(price) + '. Card will not take this. Message the owner and arrange a bank transfer.')
+    : (name + ' used — ' + pounds(price) + '. Buyer pays that. Seller gets the rest after Stripe + 5%.'));
 }
 function setVanityTab(tab) {
   window.__vanityTab = tab;
@@ -1343,6 +1354,31 @@ function setVanityTab(tab) {
   if (tab === 'used') loadUsedListings();
 }
 
+async function messageListingOwner(row) {
+  if (!isLoggedIn()) {
+    openLoginForShop();
+    return;
+  }
+  const name = String((row && row.name) || '');
+  const price = Number((row && row.price_cents) || 0);
+  if (!name) return;
+  if (isMyUsedListing(name)) {
+    shopNote(name + ' is your listing.');
+    return;
+  }
+  const from = (typeof username !== 'undefined' && username) || (currentUser() && currentUser().user_metadata && currentUser().user_metadata.display_name) || 'a buyer';
+  const note = window.prompt('Card will not take ' + pounds(price) + '. Write a short note to the owner of ' + name + ' to arrange a bank transfer. They get a Sealed Note.');
+  if (note == null || !String(note).trim()) return;
+  shopNote('Sending note…');
+  const body = 'Offer on ' + name + ' listed at ' + pounds(price) + '.\nFrom: ' + from + '\n\n' + String(note).trim() + '\n\nArrange a bank transfer off-site. Anonomoose does not hold this money.';
+  try {
+    if (typeof sendOfflineMessage !== 'function') throw new Error('Notes are not ready');
+    await sendOfflineMessage(name, body, { ttlMs: 7 * 24 * 3600 * 1000 });
+    shopNote('Note sent to the owner of ' + name + '. They will see it in Sealed Notes.');
+  } catch (e) {
+    shopNote((e && e.message) || 'Could not message the owner. They may have mail turned off.');
+  }
+}
 async function startVanityCheckout(row) {
   if (!isLoggedIn()) {
     openLoginForShop();
@@ -1350,6 +1386,10 @@ async function startVanityCheckout(row) {
   }
   if (row && (row.mine || isMyUsedListing(row.name))) {
     shopNote((row.name || 'That') + ' is your listing.');
+    return;
+  }
+  if (row && (row.kind === 'resale' || row.resale) && isBankTransferListing(row.price_cents)) {
+    await messageListingOwner(row);
     return;
   }
   if (window.__buyBusy) return;

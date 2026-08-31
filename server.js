@@ -1117,6 +1117,11 @@ server.on('request', (req, res) => {
         }
         const amount = priced.amount;
         const sellerId = priced.sellerId || '';
+        if (isResale && amount >= 1000000) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'This listing is too large for card. Message the owner to arrange a bank transfer.' }));
+          return;
+        }
         try {
           const sessionOpts = {
             mode: 'payment',

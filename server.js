@@ -291,6 +291,75 @@ async function lookupResaleAmount(name) {
   return { amount, sellerId: row.user_id, name: row.name, kind: 'resale' };
 }
 
+function svcHeaders() {
+  return {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation'
+  };
+}
+async function loadUsedNameRows() {
+  if (!SUPABASE_SERVICE_ROLE_KEY) return [];
+  const r = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents&order=sale_price_cents.desc',
+    { headers: svcHeaders() }
+  );
+  const rows = await r.json();
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((row) => {
+    const nm = String(row && row.name || '');
+    const price = Number(row && row.sale_price_cents) || 0;
+    if (price < 200) return false;
+    if (nm === '1' || nm === '2') return false;
+    if (String(row.kind) === 'signup') return false;
+    return true;
+  }).map((row) => ({
+    name: row.name,
+    kind: row.kind,
+    price_cents: Number(row.sale_price_cents) || 0
+  }));
+}
+async function setNameListing(userId, name, priceCents) {
+  const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!userId || !nm) return { ok: false, error: 'Missing name' };
+  if (nm === '1' || nm === '2') return { ok: false, error: 'That name stays with Anonomoose' };
+  if (!SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Listing is not available right now' };
+  const listed = priceCents != null;
+  const price = listed ? Math.round(Number(priceCents) || 0) : 0;
+  if (listed && (price < 200 || price > 2000000)) return { ok: false, error: 'Price must be £2 to £20,000' };
+  const found = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&name=ilike.' + encodeURIComponent(nm) + '&select=name,kind',
+    { headers: svcHeaders() }
+  );
+  const rows = await found.json();
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) return { ok: false, error: 'You do not own that name' };
+  if (String(row.kind) === 'signup') return { ok: false, error: 'Free signup names cannot be sold' };
+  if (listed && /^\d+$/.test(nm)) {
+    const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10) + '&select=held_forever', { headers: svcHeaders() });
+    const vrows = await vr.json();
+    if (Array.isArray(vrows) && vrows[0] && vrows[0].held_forever) {
+      return { ok: false, error: 'That number is not for sale' };
+    }
+  }
+  const patch = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&name=ilike.' + encodeURIComponent(nm),
+    {
+      method: 'PATCH',
+      headers: svcHeaders(),
+      body: JSON.stringify(listed
+        ? { listed_for_sale: true, sale_price_cents: price }
+        : { listed_for_sale: false, sale_price_cents: null })
+    }
+  );
+  const text = await patch.text();
+  if (!patch.ok) {
+    return { ok: false, error: text && text.slice(0, 180) || 'Could not update listing' };
+  }
+  return { ok: true, name: row.name, price_cents: listed ? price : 0 };
+}
+
 async function stripeFeeFromSession(session) {
   const amount = Number(session && session.amount_total) || 0;
   const abroadGuess = Math.round(amount * 0.075) + 20;
@@ -563,16 +632,26 @@ server.on('request', (req, res) => {
   const origin = req.headers.origin || '';
   const allowOrigin = (origin === 'https://www.anonomoose.com' || origin === 'https://anonomoose.com') ? origin : 'https://www.anonomoose.com';
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
-  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping' || fullUrl.pathname === '/vanity-checkout' || fullUrl.pathname === '/vanity-claim' || fullUrl.pathname === '/stripe-webhook') {
+  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping' || fullUrl.pathname === '/vanity-checkout' || fullUrl.pathname === '/vanity-claim' || fullUrl.pathname === '/vanity-list' || fullUrl.pathname === '/vanity-unlist' || fullUrl.pathname === '/vanity-used' || fullUrl.pathname === '/stripe-webhook') {
     const vanityCors = fullUrl.pathname !== '/stripe-webhook';
     if (vanityCors) {
       res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     }
     if (req.method === 'OPTIONS' && vanityCors) {
       res.writeHead(204);
       res.end();
+      return;
+    }
+    if (fullUrl.pathname === '/vanity-used' && (req.method === 'GET' || req.method === 'HEAD')) {
+      loadUsedNameRows().then((rows) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, rows: rows || [] }));
+      }).catch(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, rows: [] }));
+      });
       return;
     }
     if (req.method !== 'POST') {
@@ -712,6 +791,26 @@ server.on('request', (req, res) => {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
+        return;
+      }
+      if (fullUrl.pathname === '/vanity-list' || fullUrl.pathname === '/vanity-unlist') {
+        const shopUser = await verifySbUser(bearerFrom(req, body));
+        if (!shopUser) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Log in first' }));
+          return;
+        }
+        const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
+        const price = fullUrl.pathname === '/vanity-list' ? Math.round(Number(body.price_cents || body.price || 0)) : null;
+        const result = await setNameListing(shopUser.id, name, price);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        return;
+      }
+      if (fullUrl.pathname === '/vanity-used') {
+        const rows = await loadUsedNameRows();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, rows }));
         return;
       }
       if (fullUrl.pathname === '/push-sub') {

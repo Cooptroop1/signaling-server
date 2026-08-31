@@ -910,28 +910,33 @@ async function listOwnedName(name) {
   const abroad = pounds(sellerNetGuess(price, true));
   if (!window.confirm('UK card you get about ' + uk + '. Overseas card (up to 5.5% + 2% conversion) about ' + abroad + '. List ' + name + ' at ' + pounds(price) + '?')) return;
   try {
-    const { data, error } = await sb.rpc('moose_list_name', {
-      p_name: String(name),
-      p_price_cents: parseInt(price, 10)
+    const r = await fetch('https://signal.anonomoose.com/vanity-list', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        name: String(name),
+        price_cents: parseInt(price, 10),
+        access: sbBearer()
+      })
     });
-    if (error) {
-      throw new Error([error.message, error.details, error.hint].filter(Boolean).join(' — ') || 'Could not list');
-    }
-    const row = typeof data === 'string' ? JSON.parse(data) : data;
-    if (row && row.ok === false) throw new Error(row.error || 'Could not list');
+    const row = await r.json();
+    if (!row || row.ok === false) throw new Error((row && row.error) || 'Could not list');
     if (typeof showStatusMessage === 'function') showStatusMessage(name + ' listed in Used at ' + pounds(price) + '.');
     await loadMyNames();
   } catch (e) {
-    if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not list. Paste the used-name SQL in Supabase first.');
+    if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not list');
   }
 }
 async function unlistOwnedName(name) {
   if (!isLoggedIn() || !name) return;
   try {
-    const { data, error } = await sb.rpc('moose_unlist_name', { p_name: name });
-    if (error) throw error;
-    const row = typeof data === 'string' ? JSON.parse(data) : data;
-    if (row && row.ok === false) throw new Error(row.error || 'Could not unlist');
+    const r = await fetch('https://signal.anonomoose.com/vanity-unlist', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name: String(name), access: sbBearer() })
+    });
+    const row = await r.json();
+    if (!row || row.ok === false) throw new Error((row && row.error) || 'Could not unlist');
     if (typeof showStatusMessage === 'function') showStatusMessage(name + ' taken off Used.');
     await loadMyNames();
   } catch (e) {
@@ -1061,10 +1066,9 @@ async function loadUsedListings() {
   if (!box) return [];
   let rows = [];
   try {
-    const { data, error } = await sb.rpc('moose_used_listings');
-    if (error) throw error;
-    const raw = typeof data === 'string' ? JSON.parse(data) : data;
-    rows = Array.isArray(raw) ? raw : [];
+    const r = await fetch('https://signal.anonomoose.com/vanity-used', { headers: { Accept: 'application/json' } });
+    const data = await r.json();
+    rows = (data && data.rows) || [];
   } catch (e) {
     rows = [];
   }

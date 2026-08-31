@@ -423,7 +423,11 @@ function subscribeInbox(uid) {
     .subscribe();
 }
 
-async function findUser(name) {
+function isAdminMailbox(name) {
+  return String(name || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase() === 'admin';
+}
+async function findUser(name, opts) {
+  if (isAdminMailbox(name) && !(opts && opts.allowAdmin)) return null;
   if (window.__duress) return null;
   if (!sb) return null;
   try { await ensureSbSession(); } catch (e) {}
@@ -470,8 +474,9 @@ async function sendOffline(toUsername, sealed, meta) {
   if (!isLoggedIn()) throw new Error('Log in to send offline mail');
   await ensureSbSession();
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
+  if (isAdminMailbox(toUsername) && !(meta && meta.kind === 'admin')) throw new Error('Recipient not found');
   let dest = null;
-  const found = await findUser(toUsername);
+  const found = await findUser(toUsername, { allowAdmin: !!(meta && meta.kind === 'admin') });
   if (found && found.id) dest = { id: found.id };
   if (!dest) throw new Error('Recipient not found');
   const blob = {
@@ -1421,7 +1426,7 @@ async function messageListingOwner(row) {
     if (gate && gate.ok === false) throw new Error(gate.error || 'Could not send');
     gated = true;
     if (typeof sendOfflineMessage !== 'function') throw new Error('Notes are not ready');
-    const dest = typeof findUser === 'function' ? await findUser('admin') : null;
+    const dest = typeof findUser === 'function' ? await findUser('admin', { allowAdmin: true }) : null;
     if (!dest || !dest.public_key) throw new Error('Admin needs to open Anonomoose logged in once so keys exist.');
     userPublicKey = dest.public_key;
     if (dest.identity_public_key) userPublicKeyIdentity = dest.identity_public_key;
@@ -1650,6 +1655,7 @@ window.sbAuth = {
   isLoggedIn,
   getSession,
   findUser,
+  isAdminMailbox,
   sendOffline,
   confirmOffline,
   burnAllOffline,

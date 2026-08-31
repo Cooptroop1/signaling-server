@@ -2907,6 +2907,10 @@ wss.on('connection', (ws, req) => {
       }
       if (data.type === 'find-user') {
         const { username } = data;
+        if (String(username || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase() === 'admin') {
+          ws.send(JSON.stringify({ type: 'user-not-found' }));
+          return;
+        }
         const from_res = await safeQuery('SELECT id, username FROM users WHERE client_id = $1', [data.clientId], ws, 'Must be logged in to search users.');
         if (from_res.rows.length === 0) {
           logger.warn(`Find-user failed: No user found for clientId ${data.clientId}`);

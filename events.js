@@ -1684,6 +1684,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('searchSubmitButton').onclick = async () => {
     const name = document.getElementById('searchUsernameInput').value.trim();
     if (!name) return;
+    if (String(name).replace(/[^A-Za-z0-9]/g, '').toLowerCase() === 'admin') {
+      document.getElementById('searchError').textContent = 'User not found.';
+      setTimeout(() => { document.getElementById('searchError').textContent = ''; }, 5000);
+      return;
+    }
     if (window.sbAuth && window.sbAuth.isLoggedIn()) {
       try {
         const found = await window.sbAuth.findUser(name);
@@ -2595,10 +2600,13 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   offlineSendLock.add(lockKey);
   try {
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
+  if (String(toUsername).replace(/[^A-Za-z0-9]/g, '').toLowerCase() === 'admin' && extra.kind !== 'admin') {
+    throw new Error('Recipient not found');
+  }
   let theirPub = userPublicKey;
   if (window.sbAuth && typeof window.sbAuth.findUser === 'function') {
     try {
-      const found = await window.sbAuth.findUser(toUsername);
+      const found = await window.sbAuth.findUser(toUsername, extra.kind === 'admin' ? { allowAdmin: true } : null);
       if (found && found.public_key) {
         theirPub = found.public_key;
         userPublicKey = found.public_key;

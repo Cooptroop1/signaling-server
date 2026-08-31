@@ -929,6 +929,7 @@ async function listOwnedName(name) {
 }
 async function unlistOwnedName(name) {
   if (!isLoggedIn() || !name) return;
+  if (!window.confirm('Take ' + name + ' off sale? You can list it again later.')) return;
   try {
     const r = await fetch('https://signal.anonomoose.com/vanity-unlist', {
       method: 'POST',

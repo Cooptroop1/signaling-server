@@ -1008,7 +1008,7 @@ server.on('request', (req, res) => {
   const origin = req.headers.origin || '';
   const allowOrigin = (origin === 'https://www.anonomoose.com' || origin === 'https://anonomoose.com') ? origin : 'https://www.anonomoose.com';
   const fullUrl = new URL(req.url, `http://${req.headers.host}`);
-  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping' || fullUrl.pathname === '/vanity-checkout' || fullUrl.pathname === '/vanity-claim' || fullUrl.pathname === '/vanity-list' || fullUrl.pathname === '/vanity-unlist' || fullUrl.pathname === '/vanity-used' || fullUrl.pathname === '/connect-onboard' || fullUrl.pathname === '/stripe-webhook') {
+  if (fullUrl.pathname === '/push-sub' || fullUrl.pathname === '/inbox-ping' || fullUrl.pathname === '/vanity-checkout' || fullUrl.pathname === '/vanity-claim' || fullUrl.pathname === '/vanity-list' || fullUrl.pathname === '/vanity-unlist' || fullUrl.pathname === '/vanity-used' || fullUrl.pathname === '/connect-onboard' || fullUrl.pathname === '/stripe-webhook' || fullUrl.pathname === '/admin-deal-gate') {
     const vanityCors = fullUrl.pathname !== '/stripe-webhook';
     if (vanityCors) {
       res.setHeader('Access-Control-Allow-Origin', allowOrigin);
@@ -1212,6 +1212,44 @@ server.on('request', (req, res) => {
         const rows = await loadUsedNameRows();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, rows }));
+        return;
+      }
+      if (fullUrl.pathname === '/admin-deal-gate') {
+        const dealUser = await verifySbUser(bearerFrom(req, body));
+        if (!dealUser) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Log in first' }));
+          return;
+        }
+        const dealName = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+        if (!dealName) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Missing name' }));
+          return;
+        }
+        const dealKey = 'admin-deal:' + dealUser.id + ':' + dealName;
+        if (body.undo) {
+          try { await redisClient.del(dealKey); } catch (e) {}
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+        if (body.check) {
+          let hit = null;
+          try { hit = await redisClient.get(dealKey); } catch (e) {}
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, already: !!hit }));
+          return;
+        }
+        let nx = null;
+        try { nx = await redisClient.set(dealKey, '1', { NX: true, EX: 90 * 24 * 3600 }); } catch (e) {}
+        if (!nx) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, already: true, error: 'You already messaged admin about this name.' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
         return;
       }
       if (fullUrl.pathname === '/push-sub') {

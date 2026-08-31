@@ -744,6 +744,24 @@ function pounds(cents) {
 function isBankTransferListing(price) {
   return Number(price || 0) >= 1000000;
 }
+function adminDealKey(name) {
+  const uid = (currentUser() && currentUser().id) || '';
+  return 'mooseAdminDeal:' + uid + ':' + String(name || '').toLowerCase();
+}
+function alreadyAdminDeal(name) {
+  try { return localStorage.getItem(adminDealKey(name)) === '1'; } catch (e) { return false; }
+}
+function markAdminDeal(name) {
+  try { localStorage.setItem(adminDealKey(name), '1'); } catch (e) {}
+}
+function hideAdminDealBtn() {
+  const buyBtn = document.getElementById('vanityBuyBtn');
+  if (buyBtn) {
+    buyBtn.disabled = true;
+    buyBtn.textContent = 'Sent to admin';
+  }
+}
+
 
 async function applyBoughtName(name, alreadyApplied) {
   if (!name) return false;
@@ -1315,7 +1333,17 @@ function pickUsedListing(name, price, mine) {
     return;
   }
   const bank = isBankTransferListing(price);
+  if (bank && alreadyAdminDeal(name)) {
+    if (buyBtn) {
+      buyBtn.classList.remove('hidden');
+      buyBtn.disabled = true;
+      buyBtn.textContent = 'Sent to admin';
+    }
+    shopNote('You already messaged admin about ' + name + '. They will contact you.');
+    return;
+  }
   if (buyBtn) {
+    buyBtn.disabled = false;
     buyBtn.classList.remove('hidden');
     buyBtn.textContent = bank ? 'Message admin' : 'Buy now';
   }
@@ -1367,19 +1395,57 @@ async function messageListingOwner(row) {
     return;
   }
   const from = (typeof username !== 'undefined' && username) || (currentUser() && currentUser().user_metadata && currentUser().user_metadata.display_name) || 'a buyer';
+  if (alreadyAdminDeal(name) || window.__adminNoteBusy) {
+    hideAdminDealBtn();
+    shopNote('You already messaged admin about ' + name + '.');
+    return;
+  }
   const body = "I'm " + from + " and I want to buy " + name + " listed at " + pounds(price) + ".";
   if (!window.confirm('Send this to admin?\n\n' + body)) return;
+  window.__adminNoteBusy = true;
+  hideAdminDealBtn();
   shopNote('Sending note to admin…');
+  let gated = false;
   try {
+    const g = await fetch('https://signal.anonomoose.com/admin-deal-gate', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name: name, access: sbBearer() })
+    });
+    const gate = await g.json();
+    if (gate && gate.already) {
+      markAdminDeal(name);
+      shopNote('You already messaged admin about ' + name + '. They will contact you.');
+      return;
+    }
+    if (gate && gate.ok === false) throw new Error(gate.error || 'Could not send');
+    gated = true;
     if (typeof sendOfflineMessage !== 'function') throw new Error('Notes are not ready');
     const dest = typeof findUser === 'function' ? await findUser('admin') : null;
     if (!dest || !dest.public_key) throw new Error('Admin needs to open Anonomoose logged in once so keys exist.');
     userPublicKey = dest.public_key;
     if (dest.identity_public_key) userPublicKeyIdentity = dest.identity_public_key;
     await sendOfflineMessage('admin', body, { kind: 'admin', keep: true });
+    markAdminDeal(name);
     shopNote('Sent to admin. They will contact you to take payment and move ' + name + '.');
   } catch (e) {
+    if (gated) {
+      try {
+        await fetch('https://signal.anonomoose.com/admin-deal-gate', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ name: name, undo: true, access: sbBearer() })
+        });
+      } catch (e2) {}
+    }
+    const buyBtn = document.getElementById('vanityBuyBtn');
+    if (buyBtn) {
+      buyBtn.disabled = false;
+      buyBtn.textContent = 'Message admin';
+    }
     shopNote((e && e.message) || 'Could not reach admin. Try Sealed Notes to admin.');
+  } finally {
+    window.__adminNoteBusy = false;
   }
 }
 async function startVanityCheckout(row) {

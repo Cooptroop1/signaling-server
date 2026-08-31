@@ -739,18 +739,41 @@ async function compressVoiceBlob(blob) {
 async function dropToFamily(text, extra) {
   extra = extra || {};
   const book = (typeof getBook === 'function') ? getBook() : [];
-  const targets = book.filter((b) => (b.circle === 'family' || (typeof isTrustedName === 'function' && isTrustedName(b.name))) && b.public_key && !isBlocked(b.name));
-  const family = book.filter((b) => b.circle === 'family' && b.public_key && !isBlocked(b.name));
-  const list = family.length ? family : targets.filter((b) => isTrustedName(b.name));
-  if (!list.length) throw new Error('No family names with keys. Trust them and tag Family first.');
+  const byName = {};
+  book.forEach((b) => {
+    if (b && b.name) byName[String(b.name).toLowerCase()] = b;
+  });
+  const seen = {};
+  const list = [];
+  function addName(name, row) {
+    const key = String(name || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    if (!key || seen[key]) return;
+    if (typeof isBlocked === 'function' && isBlocked(name)) return;
+    seen[key] = true;
+    list.push({ name: name, public_key: (row && row.public_key) || '' });
+  }
+  book.forEach((b) => {
+    if (b && b.circle === 'family') addName(b.name, b);
+  });
+  (typeof getTrusted === 'function' ? getTrusted() : []).forEach((n) => {
+    addName(n, byName[String(n).toLowerCase()]);
+  });
+  if (!list.length) throw new Error('No family names. Trust them and tag Family first.');
   let n = 0;
   for (const row of list) {
     try {
-      userPublicKey = row.public_key;
+      let pub = row.public_key;
+      if (window.sbAuth && typeof window.sbAuth.findUser === 'function') {
+        const found = await window.sbAuth.findUser(row.name);
+        if (found && found.public_key) pub = found.public_key;
+      }
+      if (!pub) continue;
+      userPublicKey = pub;
       await sendOfflineMessage(row.name, text, extra);
       n++;
     } catch (e) { console.warn('family drop', row.name, e); }
   }
+  if (!n) throw new Error('Could not reach family. They need keys on file.');
   return n;
 }
 

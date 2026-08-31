@@ -608,30 +608,112 @@ async function stripeFeeFromSession(session) {
 
 async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stripeFee) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
-  if (!SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('Add SUPABASE_SERVICE_ROLE_KEY on Render so used names can move');
+  if (!buyerId || !nm) throw new Error('Missing name');
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error('Could not move used name');
+  const headers = {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation'
+  };
+  const found = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&select=name,user_id,kind,sale_price_cents,listed_for_sale',
+    { headers }
+  );
+  const rows = await found.json();
+  const row = Array.isArray(rows)
+    ? rows.find((x) => String(x.name || '').toLowerCase() === nm.toLowerCase())
+    : null;
+  if (!row || !row.user_id) throw new Error('Name is not for resale');
+  if (String(row.kind) === 'signup') throw new Error('Not for sale');
+  if (row.user_id === buyerId) return { ok: true, name: nm, already: true, seller_net_cents: 0 };
+  if (sellerId && row.user_id !== sellerId) throw new Error('Listing changed');
+  const seller = row.user_id;
+  const list = Math.max(0, Number(amount) || Number(row.sale_price_cents) || 0);
+  const fee = Math.max(0, Number(stripeFee) || 0);
+  const platform = Math.max(1, Math.round(list * 0.05));
+  const net = Math.max(0, list - fee - platform);
+  const moved = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(seller) + '&name=ilike.' + encodeURIComponent(nm),
+    {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ user_id: buyerId, listed_for_sale: false, sale_price_cents: null })
+    }
+  );
+  if (!moved.ok) {
+    const t = await moved.text();
+    logger.warn('resale move %s', t && t.slice(0, 180));
+    throw new Error('Could not move used name');
   }
-  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_resale', {
-    method: 'POST',
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      p_buyer: buyerId,
-      p_seller: sellerId || null,
-      p_name: nm,
-      p_session: sessionId || ('sess-' + Date.now()),
-      p_amount: amount || 0,
-      p_stripe_fee: stripeFee || 0
-    })
-  });
-  const text = await r.text();
-  let row = null;
-  try { row = text ? JSON.parse(text) : null; } catch (e) {}
-  if (r.ok && row && row.ok !== false) return row;
-  throw new Error((row && row.error) || text || 'Could not move used name');
+  if (/^\d+$/.test(nm)) {
+    await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10), {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ status: 'sold', owner_id: buyerId, updated_at: new Date().toISOString() })
+    });
+  } else {
+    await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm), {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ status: 'sold', owner_id: buyerId })
+    });
+  }
+  try {
+    const rest = await fetch(
+      SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(seller) + '&select=name,kind,created_at&order=created_at.asc',
+      { headers }
+    );
+    const leftover = await rest.json();
+    const signup = Array.isArray(leftover) ? leftover.find((x) => x.kind === 'signup') : null;
+    const fallback = (signup && signup.name) || (Array.isArray(leftover) && leftover[0] && leftover[0].name) || ('u' + String(seller).replace(/-/g, '').slice(0, 8));
+    const prof = await fetch(
+      SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller) + '&select=display_name',
+      { headers }
+    );
+    const profRows = await prof.json();
+    const current = Array.isArray(profRows) && profRows[0] ? String(profRows[0].display_name || '') : '';
+    if (current.toLowerCase() === nm.toLowerCase()) {
+      await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + encodeURIComponent(seller), {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ display_name: fallback, updated_at: new Date().toISOString() })
+      });
+    }
+  } catch (e) {
+    logger.warn('resale seller name %s', e && e.message);
+  }
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/name_sales', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: nm,
+        seller_id: seller,
+        buyer_id: buyerId,
+        list_cents: list,
+        stripe_fee_cents: fee,
+        platform_cents: platform,
+        seller_net_cents: net,
+        stripe_session_id: sessionId || null,
+        status: 'pending_payout'
+      })
+    });
+  } catch (e) {}
+  return { ok: true, name: nm, seller_net_cents: net, platform_cents: platform, stripe_fee_cents: fee };
+}
+
+function cleanPayError(err) {
+  const s = String(err || '');
+  if (/42702|ambiguous/i.test(s)) return 'Could not save the name. Refresh in a minute.';
+  if (s.trim().charAt(0) === '{') {
+    try {
+      const j = JSON.parse(s);
+      return String(j.error || j.message || 'Could not save the name').slice(0, 160);
+    } catch (e) {}
+    return 'Could not save the name';
+  }
+  return s.slice(0, 160) || 'Could not save the name';
 }
 
 async function fulfillPaidSession(session, userAccess) {
@@ -677,7 +759,7 @@ async function fulfillPaidSession(session, userAccess) {
     return { ok: true, name, userId, applied: true };
   } catch (e) {
     logger.warn('vanity fulfill %s', e && e.message);
-    return { ok: false, error: e.message || 'Could not attach name', name, userId, applied: false };
+    return { ok: false, error: cleanPayError(e && e.message), name, userId, applied: false };
   }
 }
 function readRawBody(req, limit) {

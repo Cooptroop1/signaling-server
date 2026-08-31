@@ -275,6 +275,66 @@ async function lookupVanityAmount(kind, name) {
   return { amount: Math.max(100, Number(row && row.price_cents) || 10000) };
 }
 
+async function lookupResaleAmount(name) {
+  const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!nm || nm === '1' || nm === '2') return { error: 'Not for sale' };
+  if (!SUPABASE_SERVICE_ROLE_KEY) return { error: 'Used names are not available right now' };
+  const r = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&listed_for_sale=eq.true&select=name,kind,user_id,sale_price_cents',
+    { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY } }
+  );
+  const rows = await r.json();
+  const row = Array.isArray(rows) ? rows[0] : null;
+  const amount = Number(row && row.sale_price_cents) || 0;
+  if (!row || amount < 200) return { error: 'Not listed' };
+  if (String(row.kind) === 'signup') return { error: 'Not for sale' };
+  return { amount, sellerId: row.user_id, name: row.name, kind: 'resale' };
+}
+
+async function stripeFeeFromSession(session) {
+  const amount = Number(session && session.amount_total) || 0;
+  const abroadGuess = Math.round(amount * 0.075) + 20;
+  if (!stripe || !session || !session.id) return abroadGuess;
+  try {
+    const full = await stripe.checkout.sessions.retrieve(session.id, {
+      expand: ['payment_intent.latest_charge.balance_transaction']
+    });
+    const pi = full && full.payment_intent;
+    const charge = pi && pi.latest_charge;
+    const bt = charge && charge.balance_transaction;
+    if (bt && typeof bt.fee === 'number') return bt.fee;
+  } catch (e) {}
+  return abroadGuess;
+}
+
+async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stripeFee) {
+  const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Add SUPABASE_SERVICE_ROLE_KEY on Render so used names can move');
+  }
+  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_apply_resale', {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      p_buyer: buyerId,
+      p_seller: sellerId || null,
+      p_name: nm,
+      p_session: sessionId || ('sess-' + Date.now()),
+      p_amount: amount || 0,
+      p_stripe_fee: stripeFee || 0
+    })
+  });
+  const text = await r.text();
+  let row = null;
+  try { row = text ? JSON.parse(text) : null; } catch (e) {}
+  if (r.ok && row && row.ok !== false) return row;
+  throw new Error((row && row.error) || text || 'Could not move used name');
+}
+
 async function fulfillPaidSession(session, userAccess) {
   let paid = session && (session.payment_status === 'paid' || session.status === 'complete');
   if (!paid && session && session.id && stripe) {
@@ -298,9 +358,16 @@ async function fulfillPaidSession(session, userAccess) {
   if (locked && paidAmount && paidAmount < locked) {
     return { ok: false, error: 'Paid amount does not match the shop price' };
   }
+  const metaKind = (session.metadata && session.metadata.kind) || stored.kind;
+  const sellerId = (session.metadata && session.metadata.sellerId) || stored.sellerId || '';
   const doneKey = 'vanity:done:' + session.id;
   try {
-    await attachPaidName(userId, name, session.id, paidAmount || locked);
+    if (metaKind === 'resale') {
+      const fee = await stripeFeeFromSession(session);
+      await attachResaleName(userId, sellerId, name, session.id, paidAmount || locked, fee);
+    } else {
+      await attachPaidName(userId, name, session.id, paidAmount || locked);
+    }
     await redisClient.set(doneKey, name, { EX: 30 * 24 * 3600 });
     await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
     return { ok: true, name, userId, applied: true };
@@ -565,7 +632,8 @@ server.on('request', (req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'Payments are not available right now. Try again later.' }));
           return;
         }
-        const kind = body.kind === 'letter' ? 'letter' : 'number';
+        const isResale = body.kind === 'resale' || body.resale === true;
+        const kind = isResale ? 'resale' : (body.kind === 'letter' ? 'letter' : 'number');
         const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
         const userId = shopUser.id;
         if (!name || !userId) {
@@ -573,13 +641,19 @@ server.on('request', (req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'Missing name' }));
           return;
         }
-        const priced = await lookupVanityAmount(kind, name);
+        const priced = isResale ? await lookupResaleAmount(name) : await lookupVanityAmount(kind, name);
         if (priced.error) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: priced.error }));
           return;
         }
+        if (isResale && priced.sellerId && priced.sellerId === userId) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'That is your listing' }));
+          return;
+        }
         const amount = priced.amount;
+        const sellerId = priced.sellerId || '';
         try {
           const sessionOpts = {
             mode: 'payment',
@@ -587,13 +661,13 @@ server.on('request', (req, res) => {
             client_reference_id: userId,
             success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
             cancel_url: 'https://www.anonomoose.com/?vanity=cancel',
-            metadata: { kind, name, userId, amount: String(amount) },
+            metadata: { kind, name, userId, amount: String(amount), sellerId: String(sellerId || '') },
             line_items: [{
               quantity: 1,
               price_data: {
                 currency: 'gbp',
                 unit_amount: amount,
-                product_data: { name: 'Anonomoose name ' + name }
+                product_data: { name: (isResale ? 'Anonomoose used name ' : 'Anonomoose name ') + name }
               }
             }]
           };
@@ -601,7 +675,7 @@ server.on('request', (req, res) => {
           const session = await stripe.checkout.sessions.create(sessionOpts);
           try {
             await redisClient.set('vanity:sess:' + session.id, JSON.stringify({
-              name, userId, amount, kind
+              name, userId, amount, kind, sellerId
             }), { EX: 7 * 24 * 3600 });
           } catch (e) {}
           res.writeHead(200, { 'Content-Type': 'application/json' });

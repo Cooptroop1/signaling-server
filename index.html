@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260831u">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260831u">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260831u">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260831u">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260831u">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260831u">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260831v">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260831v">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260831v">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260831v">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260831v">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260831v">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1083,6 +1083,31 @@
       color: #fff;
       font-weight: 700;
     }
+    .my-name-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin: 0 0.35rem 0.35rem 0;
+    }
+    .sell-name-btn {
+      font-size: 0.72rem;
+      background: #0f766e;
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      padding: 0.2rem 0.45rem;
+    }
+    .used-name-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: #f3f4f6;
+      color: #111;
+      border: 0;
+      border-radius: 8px;
+      padding: 0.55rem 0.7rem;
+      margin: 0 0 0.4rem;
+    }
     #myNamesBox.hidden { display: none !important; }
     #sealedNotesWrap.has-mail #sealedNotesBtn {
       box-shadow: 0 0 0 2px #fff, 0 0 0 5px #dc2626;
@@ -1424,7 +1449,7 @@
       <p><strong>Typing:</strong> Nobody ever sees that you are typing.</p>
       <p><strong>Claim Username:</strong> Claim a persistent username for discoverability. Keys stored locally—new device may lose old offline messages.</p>
       <p><strong>Fingerprint / Face ID:</strong> After Sign Up, tap Save fingerprint. Next time tap Login then Fingerprint / Face ID — no password. First time only: in Supabase go Authentication → Passkeys, turn it on, RP ID <code>anonomoose.com</code>, origins <code>https://www.anonomoose.com</code> and <code>https://anonomoose.com</code>.</p>
-      <p><strong>Names:</strong> Logged-in names are 4–16 letters or numbers. Capitals do not make a new name. Numbers and short names are in the Moose shop. Sold names stay sold. Gold singles can be bid on.</p>
+      <p><strong>Names:</strong> Logged-in names are 4–16 letters or numbers. Capitals do not make a new name. Numbers and short names are in the Moose shop. Sold names stay sold. Gold singles can be bid on. Bought names can be listed in Used. Buyer pays the list; Stripe’s fee + 5% comes from the seller.</p>
       <p><strong>Call:</strong> Logged-in Search or Moose Book → Call. If they have the app open they get a ring (Answer / Decline). If not, it sits in Sealed Notes as a missed call for 30 minutes. Answering joins a phone-to-phone room and starts the voice call. On iPhone: Add to Home Screen and Allow notifications so calls and sealed notes can ping when the app is in the background.</p>
       <p><strong>Safety:</strong> Logged-in only. Trust names, hide last seen, panic PIN, one-phone lock, disappearing notes, read-once photos, timed meet codes. Wipe other devices burns their inbox and signs them out. iPhone cannot fully block screenshots — the note hides if you leave the app.</p>
     </div>
@@ -1438,13 +1463,15 @@
   <div id="vanityShopModal" class="totp-modal" role="dialog" aria-label="Moose shop">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-3">Moose shop</h2>
-      <p class="text-sm text-gray-600 mb-3">Log in, check a name, pay with card. Sold names stay sold.</p>
+      <p class="text-sm text-gray-600 mb-3">Log in, check a name, pay with card. Used names: buyer pays the list. Stripe fee + 5% comes from the seller.</p>
       <div class="flex gap-2 mb-3">
         <button type="button" id="vanityTabNum" class="bg-gray-800 text-white px-3 py-1 rounded text-sm">Numbers</button>
         <button type="button" id="vanityTabLet" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Short names</button>
+        <button type="button" id="vanityTabUsed" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Used</button>
       </div>
       <input id="vanityNumberInput" type="text" inputmode="numeric" placeholder="1 to 999" class="border border-gray-300 p-3 w-full mb-3 rounded" maxlength="3">
       <button id="vanityCheckBtn" type="button" class="bg-gray-800 text-white px-4 py-2 rounded w-full">Check</button>
+      <div id="vanityUsedList" class="hidden mt-3"></div>
       <p id="vanityShopResult" class="text-sm text-gray-700 mt-3 mb-2"></p>
       <input id="vanityBidInput" type="number" min="1" placeholder="Your bid (£)" class="border border-gray-300 p-3 w-full mb-2 rounded hidden">
       <button id="vanityBidBtn" type="button" class="bg-yellow-600 text-white px-4 py-2 rounded w-full mb-2 hidden">Place bid</button>
@@ -1698,15 +1725,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260831u"></script>
-  <script src="ratchet.js?v=260831u"></script>
-  <script src="utils.js?v=260831u"></script>
-  <script src="main.js?v=260831u"></script>
-  <script src="init.js?v=260831u"></script>
-  <script src="events.js?v=260831u"></script>
+    <script src="crypto.js?v=260831v"></script>
+  <script src="ratchet.js?v=260831v"></script>
+  <script src="utils.js?v=260831v"></script>
+  <script src="main.js?v=260831v"></script>
+  <script src="init.js?v=260831v"></script>
+  <script src="events.js?v=260831v"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260831u"></script>
-  <script src="account-ui.js?v=260831u"></script>
-  <script src="logged-features.js?v=260831u"></script>
+  <script src="supabase-auth.js?v=260831v"></script>
+  <script src="account-ui.js?v=260831v"></script>
+  <script src="logged-features.js?v=260831v"></script>
 </body>
 </html>

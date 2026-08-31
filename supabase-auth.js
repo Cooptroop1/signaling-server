@@ -826,8 +826,9 @@ async function loadMyNames() {
   const uid = currentUser().id;
   let rows = [];
   try {
-    const { data } = await sb.from('owned_names').select('name, kind, listed_for_sale').eq('user_id', uid);
-    rows = data || [];
+    let got = await sb.from('owned_names').select('name, kind, listed_for_sale, sale_price_cents').eq('user_id', uid);
+    if (got.error) got = await sb.from('owned_names').select('name, kind, listed_for_sale').eq('user_id', uid);
+    rows = got.data || [];
   } catch (e) {}
   let active = '';
   try {
@@ -839,6 +840,7 @@ async function loadMyNames() {
     name: r.name,
     kind: r.kind,
     listed: !!r.listed_for_sale,
+    price: Number(r.sale_price_cents) || 0,
     active: String(r.name).toLowerCase() === String(active || username || '').toLowerCase()
   }));
   if (active && !window.__myNames.some((n) => n.active) && window.__myNames[0]) {
@@ -849,6 +851,18 @@ async function loadMyNames() {
   return window.__myNames;
 }
 
+function canSellName(n) {
+  if (!n || !n.name) return false;
+  const nm = String(n.name);
+  if (nm === '1' || nm === '2') return false;
+  return n.kind === 'number' || n.kind === 'letter';
+}
+function sellerNetGuess(price, abroad) {
+  const rate = abroad ? 0.075 : 0.015;
+  const stripe = Math.round(price * rate) + 20;
+  const cut = Math.max(1, Math.round(price * 0.05));
+  return Math.max(0, price - stripe - cut);
+}
 function renderMyNames(list) {
   const box = document.getElementById('myNamesBox');
   if (!box) return;
@@ -858,16 +872,66 @@ function renderMyNames(list) {
     return;
   }
   box.classList.remove('hidden');
-  box.innerHTML = '<p class="text-xs text-gray-500 mb-1">Your names — tap one to use in chat. Mail to any of them still reaches you.</p>' +
+  box.innerHTML = '<p class="text-xs text-gray-500 mb-1">Your names — tap one to use in chat. Mail to any of them still reaches you. Bought names can be listed in Used.</p>' +
     list.map((n) => {
       const on = n.active ? ' my-name-chip on' : ' my-name-chip';
       const tag = n.active ? ' <span class="text-xs">(in chat)</span>' : '';
-      return '<button type="button" class="' + on.trim() + '" data-my-name="' + String(n.name).replace(/"/g, '') + '">' +
-        String(n.name).replace(/</g, '') + tag + '</button>';
+      const esc = String(n.name).replace(/"/g, '').replace(/</g, '');
+      let sell = '';
+      if (canSellName(n)) {
+        sell = n.listed
+          ? '<button type="button" class="sell-name-btn" data-unlist="' + esc + '">Listed ' + pounds(n.price) + ' · Unlist</button>'
+          : '<button type="button" class="sell-name-btn" data-list="' + esc + '">Sell</button>';
+      }
+      return '<span class="my-name-row"><button type="button" class="' + on.trim() + '" data-my-name="' + esc + '">' +
+        esc + tag + '</button>' + sell + '</span>';
     }).join(' ');
   box.querySelectorAll('[data-my-name]').forEach((btn) => {
     btn.onclick = () => setActiveOwnedName(btn.getAttribute('data-my-name'));
   });
+  box.querySelectorAll('[data-list]').forEach((btn) => {
+    btn.onclick = () => listOwnedName(btn.getAttribute('data-list'));
+  });
+  box.querySelectorAll('[data-unlist]').forEach((btn) => {
+    btn.onclick = () => unlistOwnedName(btn.getAttribute('data-unlist'));
+  });
+}
+async function listOwnedName(name) {
+  if (!isLoggedIn() || !name) return;
+  const raw = window.prompt('List ' + name + ' for how many £? Min 2. Buyer pays that. Stripe fee + 5% comes out of it.');
+  if (raw == null || String(raw).trim() === '') return;
+  const poundsIn = Number(raw);
+  const price = Math.round(poundsIn * 100);
+  if (!poundsIn || price < 200) {
+    if (typeof showStatusMessage === 'function') showStatusMessage('Min £2.');
+    return;
+  }
+  const uk = pounds(sellerNetGuess(price, false));
+  const abroad = pounds(sellerNetGuess(price, true));
+  if (!window.confirm('UK card you get about ' + uk + '. Overseas card (up to 5.5% + 2% conversion) about ' + abroad + '. List ' + name + ' at ' + pounds(price) + '?')) return;
+  try {
+    const { data, error } = await sb.rpc('moose_list_name', { p_name: name, p_price_cents: price });
+    if (error) throw error;
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    if (row && row.ok === false) throw new Error(row.error || 'Could not list');
+    if (typeof showStatusMessage === 'function') showStatusMessage(name + ' listed in Used at ' + pounds(price) + '.');
+    await loadMyNames();
+  } catch (e) {
+    if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not list. Paste the used-name SQL in Supabase first.');
+  }
+}
+async function unlistOwnedName(name) {
+  if (!isLoggedIn() || !name) return;
+  try {
+    const { data, error } = await sb.rpc('moose_unlist_name', { p_name: name });
+    if (error) throw error;
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    if (row && row.ok === false) throw new Error(row.error || 'Could not unlist');
+    if (typeof showStatusMessage === 'function') showStatusMessage(name + ' taken off Used.');
+    await loadMyNames();
+  } catch (e) {
+    if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not unlist');
+  }
 }
 
 async function setActiveOwnedName(name) {
@@ -981,21 +1045,78 @@ function openVanityShop() {
   m.classList.add('active');
   const out = document.getElementById('vanityShopResult');
   if (out) out.textContent = '';
+  if (window.__vanityTab === 'used') loadUsedListings();
 }
 
+function tabClass(on) {
+  return on ? 'bg-gray-800 text-white px-3 py-1 rounded text-sm' : 'bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm';
+}
+async function loadUsedListings() {
+  const box = document.getElementById('vanityUsedList');
+  if (!box) return [];
+  let rows = [];
+  try {
+    const { data, error } = await sb.rpc('moose_used_listings');
+    if (error) throw error;
+    const raw = typeof data === 'string' ? JSON.parse(data) : data;
+    rows = Array.isArray(raw) ? raw : [];
+  } catch (e) {
+    rows = [];
+  }
+  window.__usedListings = rows;
+  if (!rows.length) {
+    box.innerHTML = '<p class="text-sm text-gray-500">No used names listed yet.</p>';
+    return rows;
+  }
+  box.innerHTML = rows.map((r) => {
+    const nm = String(r.name || '').replace(/</g, '').replace(/"/g, '');
+    return '<button type="button" class="used-name-btn" data-used-name="' + nm + '" data-used-price="' + Number(r.price_cents || 0) + '">' +
+      nm + ' — ' + pounds(r.price_cents) + '</button>';
+  }).join('');
+  box.querySelectorAll('[data-used-name]').forEach((btn) => {
+    btn.onclick = () => pickUsedListing(btn.getAttribute('data-used-name'), Number(btn.getAttribute('data-used-price') || 0));
+  });
+  return rows;
+}
+function pickUsedListing(name, price) {
+  window.__vanityLast = { ok: true, kind: 'resale', resale: true, name, price_cents: price, available: true };
+  const buyBtn = document.getElementById('vanityBuyBtn');
+  const bidBtn = document.getElementById('vanityBidBtn');
+  const bidInput = document.getElementById('vanityBidInput');
+  if (bidBtn) bidBtn.classList.add('hidden');
+  if (bidInput) bidInput.classList.add('hidden');
+  if (buyBtn) buyBtn.classList.remove('hidden');
+  shopNote(name + ' used — ' + pounds(price) + '. Buyer pays that. Seller gets the rest after Stripe + 5%.');
+}
 function setVanityTab(tab) {
   window.__vanityTab = tab;
   const input = document.getElementById('vanityNumberInput');
+  const used = document.getElementById('vanityUsedList');
   const tn = document.getElementById('vanityTabNum');
   const tl = document.getElementById('vanityTabLet');
+  const tu = document.getElementById('vanityTabUsed');
+  const check = document.getElementById('vanityCheckBtn');
   if (input) {
     input.value = '';
-    input.maxLength = 3;
-    input.placeholder = tab === 'letter' ? 'Ace, AA1, 12A' : '1 to 999';
-    input.inputMode = tab === 'letter' ? 'text' : 'numeric';
+    input.maxLength = tab === 'used' ? 16 : 3;
+    input.placeholder = tab === 'letter' ? 'Ace, AA1, 12A' : (tab === 'used' ? 'listed name' : '1 to 999');
+    input.inputMode = tab === 'number' ? 'numeric' : 'text';
+    input.classList.toggle('hidden', tab === 'used');
   }
-  if (tn) tn.className = tab === 'number' ? 'bg-gray-800 text-white px-3 py-1 rounded text-sm' : 'bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm';
-  if (tl) tl.className = tab === 'letter' ? 'bg-gray-800 text-white px-3 py-1 rounded text-sm' : 'bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm';
+  if (check) check.classList.toggle('hidden', tab === 'used');
+  if (used) used.classList.toggle('hidden', tab !== 'used');
+  if (tn) tn.className = tabClass(tab === 'number');
+  if (tl) tl.className = tabClass(tab === 'letter');
+  if (tu) tu.className = tabClass(tab === 'used');
+  const buyBtn = document.getElementById('vanityBuyBtn');
+  const bidBtn = document.getElementById('vanityBidBtn');
+  const bidInput = document.getElementById('vanityBidInput');
+  if (buyBtn) buyBtn.classList.add('hidden');
+  if (bidBtn) bidBtn.classList.add('hidden');
+  if (bidInput) bidInput.classList.add('hidden');
+  const out = document.getElementById('vanityShopResult');
+  if (out) out.textContent = tab === 'used' ? 'Used names. Buyer pays the list. Stripe fee + 5% comes from the seller.' : '';
+  if (tab === 'used') loadUsedListings();
 }
 
 async function startVanityCheckout(row) {
@@ -1005,7 +1126,8 @@ async function startVanityCheckout(row) {
   }
   shopNote('Opening payment…');
   const body = {
-    kind: row.kind || (window.__vanityTab === 'letter' ? 'letter' : 'number'),
+    kind: row.kind === 'resale' || row.resale ? 'resale' : (row.kind || (window.__vanityTab === 'letter' ? 'letter' : 'number')),
+    resale: !!(row.kind === 'resale' || row.resale),
     n: row.n || null,
     name: row.name || (row.n != null ? String(row.n) : ''),
     userId: currentUser().id,
@@ -1044,8 +1166,10 @@ function bindVanityShop() {
   if (openBtn) openBtn.onclick = openVanityShop;
   const tn = document.getElementById('vanityTabNum');
   const tl = document.getElementById('vanityTabLet');
+  const tu = document.getElementById('vanityTabUsed');
   if (tn) tn.onclick = () => setVanityTab('number');
   if (tl) tl.onclick = () => setVanityTab('letter');
+  if (tu) tu.onclick = () => setVanityTab('used');
   if (closeBtn) closeBtn.onclick = () => {
     const m = document.getElementById('vanityShopModal');
     if (!m) return;

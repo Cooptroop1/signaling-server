@@ -586,7 +586,7 @@ server.on('request', (req, res) => {
             payment_method_types: ['card'],
             client_reference_id: userId,
             success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
-            cancel_url: 'https://www.anonomoose.com/',
+            cancel_url: 'https://www.anonomoose.com/?vanity=cancel',
             metadata: { kind, name, userId, amount: String(amount) },
             line_items: [{
               quantity: 1,

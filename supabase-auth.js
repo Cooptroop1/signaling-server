@@ -746,57 +746,71 @@ async function applyBoughtName(name, alreadyApplied) {
   return true;
 }
 
+function clearVanityPending() {
+  window.__pendingBoughtName = '';
+  try { localStorage.removeItem('vanityPendingName'); } catch (e) {}
+}
 async function finishVanityReturn() {
+  if (window.__vanityReturnDone) return;
   try {
     const q = new URLSearchParams(location.search);
+    const flag = q.get('vanity') || '';
+    if (flag === 'cancel') {
+      window.__vanityReturnDone = true;
+      clearVanityPending();
+      const msg = 'Payment cancelled.';
+      shopNote(msg);
+      if (typeof showStatusMessage === 'function') showStatusMessage(msg);
+      try { history.replaceState({}, '', location.pathname); } catch (e) {}
+      return;
+    }
     let sessionId = q.get('session_id') || '';
-    if (q.get('vanity') === 'ok' && sessionId) {
+    if (flag === 'ok' && sessionId) {
       try { localStorage.setItem('vanitySession', sessionId); } catch (e) {}
     }
     if (!sessionId) {
       try { sessionId = localStorage.getItem('vanitySession') || ''; } catch (e) {}
     }
+    if (!sessionId) {
+      clearVanityPending();
+      return;
+    }
+    window.__vanityReturnDone = true;
     let pendingName = '';
     try { pendingName = localStorage.getItem('vanityPendingName') || ''; } catch (e) {}
-    if (!sessionId && !pendingName && !window.__pendingBoughtName) return;
     for (let i = 0; i < 25; i++) {
       if (isLoggedIn()) break;
       await new Promise((r) => setTimeout(r, 400));
     }
     if (!isLoggedIn()) {
+      window.__vanityReturnDone = false;
       if (typeof showStatusMessage === 'function') showStatusMessage('Log in to attach the name you just paid for.');
       return;
     }
     let paidName = window.__pendingBoughtName || pendingName;
-    if (sessionId) {
-      let data = null;
-      for (let i = 0; i < 8; i++) {
-        const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            sessionId,
-            userId: currentUser().id,
-            access: sbBearer()
-          })
-        });
-        data = await r.json();
-        if (data && data.applied) break;
-        await new Promise((x) => setTimeout(x, 500));
-      }
-      if (data && data.error && !data.applied) {
-        if (typeof showStatusMessage === 'function') showStatusMessage(data.error);
-        shopNote(data.error);
-      }
-      if (data && data.name) paidName = data.name;
-      const ok = await applyBoughtName(paidName, !!(data && data.applied));
-      if (ok) {
-        try { history.replaceState({}, '', location.pathname); } catch (e) {}
-      }
+    let data = null;
+    for (let i = 0; i < 8; i++) {
+      const r = await fetch('https://signal.anonomoose.com/vanity-claim', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          sessionId,
+          userId: currentUser().id,
+          access: sbBearer()
+        })
+      });
+      data = await r.json();
+      if (data && data.applied) break;
+      if (data && data.error === 'Payment not complete yet') break;
+      await new Promise((x) => setTimeout(x, 500));
+    }
+    if (data && data.error && !data.applied) {
+      if (typeof showStatusMessage === 'function') showStatusMessage(data.error);
+      shopNote(data.error);
       return;
     }
-    if (!paidName) return;
-    const ok = await applyBoughtName(paidName, false);
+    if (data && data.name) paidName = data.name;
+    const ok = await applyBoughtName(paidName, !!(data && data.applied));
     if (ok) {
       try { history.replaceState({}, '', location.pathname); } catch (e) {}
     }

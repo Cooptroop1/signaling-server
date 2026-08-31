@@ -1372,6 +1372,10 @@ async function messageListingOwner(row) {
   shopNote('Sending note to admin…');
   try {
     if (typeof sendOfflineMessage !== 'function') throw new Error('Notes are not ready');
+    const dest = typeof findUser === 'function' ? await findUser('admin') : null;
+    if (!dest || !dest.public_key) throw new Error('Admin needs to open Anonomoose logged in once so keys exist.');
+    userPublicKey = dest.public_key;
+    if (dest.identity_public_key) userPublicKeyIdentity = dest.identity_public_key;
     await sendOfflineMessage('admin', body, { ttlMs: 14 * 24 * 3600 * 1000 });
     shopNote('Sent to admin. They will contact you to take payment and move ' + name + '.');
   } catch (e) {

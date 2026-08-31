@@ -2595,7 +2595,18 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   offlineSendLock.add(lockKey);
   try {
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
-  if (!userPublicKey) throw new Error('No public key for recipient');
+  let theirPub = userPublicKey;
+  if (window.sbAuth && typeof window.sbAuth.findUser === 'function') {
+    try {
+      const found = await window.sbAuth.findUser(toUsername);
+      if (found && found.public_key) {
+        theirPub = found.public_key;
+        userPublicKey = found.public_key;
+      }
+      if (found && found.identity_public_key) userPublicKeyIdentity = found.identity_public_key;
+    } catch (e) {}
+  }
+  if (!theirPub) throw new Error('No public key for recipient. They need to open Anonomoose logged in once.');
   await ensurePersistentKeys();
   const messageId = generateMessageId();
   let kind = extra.photo ? 'photo' : (extra.voice ? 'voice' : (extra.poke ? 'poke' : 'note'));
@@ -2615,7 +2626,7 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
     payload.burn_at = extra.meetAt + 30 * 60 * 1000;
   }
   const plaintext = JSON.stringify(payload);
-  const sealed = await sealOfflinePayload(userPublicKey, toUsername, plaintext, messageId);
+  const sealed = await sealOfflinePayload(theirPub, toUsername, plaintext, messageId);
   sealed.messageId = messageId;
   const expiresAt = extra.ttlMs ? (Date.now() + extra.ttlMs) : (payload.burn_at || extra.meetAt ? extra.meetAt + 30 * 60 * 1000 : null);
   if (window.sbAuth && window.sbAuth.isLoggedIn()) {

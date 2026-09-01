@@ -326,6 +326,46 @@ async function burnInboxItem(msg) {
   renderMooseInbox();
 }
 
+
+function renderFriendInbox() {
+  const box = document.getElementById('friendReqList');
+  if (!box) return;
+  const pending = (window.__friendInbox && window.__friendInbox.pending) || [];
+  box.innerHTML = '';
+  if (!pending.length) return;
+  const head = document.createElement('p');
+  head.className = 'text-xs text-gray-500 mb-1';
+  head.textContent = 'Friend requests — confirm or burn (24 hour wait)';
+  box.appendChild(head);
+  pending.forEach((row) => {
+    const name = row.from_name || row.name;
+    if (!name) return;
+    const line = document.createElement('div');
+    line.className = 'book-row';
+    const label = document.createElement('strong');
+    label.textContent = name;
+    const ok = document.createElement('button');
+    ok.textContent = 'Confirm';
+    ok.onclick = async () => {
+      try {
+        await window.sbAuth.friendAccept(name);
+        if (typeof saveBookEntry === 'function') saveBookEntry({ name: name });
+      } catch (e) { alert(e.message); }
+    };
+    const burn = document.createElement('button');
+    burn.className = 'block';
+    burn.textContent = 'Burn';
+    burn.onclick = async () => {
+      if (!confirm('Burn ' + name + '? They wait 24 hours to ask again.')) return;
+      try { await window.sbAuth.friendBurn(name); } catch (e) { alert(e.message); }
+    };
+    line.appendChild(label);
+    line.appendChild(ok);
+    line.appendChild(burn);
+    box.appendChild(line);
+  });
+}
+
 function renderMooseBook() {
   const list = document.getElementById('bookList');
   if (!list) return;
@@ -453,6 +493,9 @@ async function openMooseBook() {
   if (window.sbAuth && typeof window.sbAuth.loadMyNames === 'function') {
     try { await window.sbAuth.loadMyNames(); } catch (e) {}
   }
+  if (window.sbAuth && typeof window.sbAuth.loadFriendInbox === 'function') {
+    try { await window.sbAuth.loadFriendInbox(); } catch (e) {}
+  }
   renderMooseBook();
   const m = document.getElementById('mooseBookModal');
   if (!m) return;
@@ -463,6 +506,7 @@ window.openMooseBook = openMooseBook;
 window.updateSealedNotesBadge = updateSealedNotesBadge;
 window.renderMooseInbox = renderMooseInbox;
 window.renderMooseBook = renderMooseBook;
+window.renderFriendInbox = renderFriendInbox;
 window.openSealedNotes = openSealedNotes;
 window.saveBookEntry = saveBookEntry;
 window.removeBookEntry = removeBookEntry;

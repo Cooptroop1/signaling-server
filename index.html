@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901ap">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901ap">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901ap">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901ap">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901ap">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901ap">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901aq">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901aq">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901aq">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901aq">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901aq">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901aq">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1422,6 +1422,7 @@
           </div>
           <div class="start-btn-wrap logged-only-opt hidden" id="mooseBookWrap">
             <button type="button" id="mooseBookBtn">Moose Book</button>
+            <p id="friendReqHint" class="text-xs text-red-600 hidden"></p>
           </div>
           <div class="start-btn-wrap hidden" id="myNamesWrap">
             <button type="button" id="myNamesBtn">My names</button>
@@ -1680,6 +1681,7 @@
       <h2 class="text-xl font-bold mb-3">Moose book</h2>
       <button id="familyDropBtn" type="button" class="mb-2">Note to family</button>
       <button id="pokeFamilyBtn" type="button" class="mb-2">Poke family</button>
+      <div id="friendReqList"></div>
       <div id="bookList"></div>
       <button id="closeMooseBook" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-3">Close</button>
     </div>
@@ -1901,15 +1903,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901ap"></script>
-  <script src="ratchet.js?v=260901ap"></script>
-  <script src="utils.js?v=260901ap"></script>
-  <script src="main.js?v=260901ap"></script>
-  <script src="init.js?v=260901ap"></script>
-  <script src="events.js?v=260901ap"></script>
+    <script src="crypto.js?v=260901aq"></script>
+  <script src="ratchet.js?v=260901aq"></script>
+  <script src="utils.js?v=260901aq"></script>
+  <script src="main.js?v=260901aq"></script>
+  <script src="init.js?v=260901aq"></script>
+  <script src="events.js?v=260901aq"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901ap"></script>
-  <script src="account-ui.js?v=260901ap"></script>
-  <script src="logged-features.js?v=260901ap"></script>
+  <script src="supabase-auth.js?v=260901aq"></script>
+  <script src="account-ui.js?v=260901aq"></script>
+  <script src="logged-features.js?v=260901aq"></script>
 </body>
 </html>

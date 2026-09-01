@@ -3001,6 +3001,8 @@ wss.on('connection', (ws, req) => {
         return;
       }
       if (data.type === 'send-offline-message') {
+        ws.send(JSON.stringify({ type: 'error', message: 'Friends only. Log in and send a friend request first.' }));
+        return;
         const { to_username, encrypted, iv, ephemeral_public, messageId } = data;
         const res = await safeQuery('SELECT id, client_id FROM users WHERE username = $1', [to_username], ws, 'Recipient not found.');
         if (res.rows.length === 0) {

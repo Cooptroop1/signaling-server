@@ -2493,7 +2493,83 @@ async function offerNameClaim(raw) {
   };
   searchResult.appendChild(btn);
 }
-function showUserSearchResult(searchedUsername, message) {
+
+function renderFriendGate(box, name, rel, message) {
+  const st = (rel && rel.status) || 'none';
+  const p = document.createElement('p');
+  p.className = 'text-sm text-gray-600 mt-2';
+  if (st === 'login') {
+    p.textContent = 'Log in, then send a friend request. They confirm or burn. Burn means you wait 24 hours.';
+    box.appendChild(p);
+    const login = document.createElement('button');
+    login.textContent = 'Log in';
+    login.onclick = () => {
+      if (window.sbAuth && typeof window.sbAuth.openLoginForShop === 'function') window.sbAuth.openLoginForShop();
+      else document.getElementById('openLoginBtn')?.click();
+    };
+    box.appendChild(login);
+    return;
+  }
+  if (st === 'pending' && rel.incoming) {
+    p.textContent = (rel.from_name || name) + ' wants to connect. Confirm or burn. Burn = they wait 24 hours.';
+    box.appendChild(p);
+    const ok = document.createElement('button');
+    ok.textContent = 'Confirm';
+    ok.onclick = async () => {
+      try {
+        await window.sbAuth.friendAccept(name);
+        if (message && typeof saveBookEntry === 'function') {
+          saveBookEntry({ name: name, public_key: message.public_key, identity_public_key: message.identity_public_key, id: message.id });
+        }
+        showUserSearchResult(name, message);
+      } catch (err) { alert(err.message); }
+    };
+    const burn = document.createElement('button');
+    burn.textContent = 'Burn';
+    burn.className = 'block';
+    burn.onclick = async () => {
+      if (!confirm('Burn this request? They cannot ask again for 24 hours.')) return;
+      try {
+        await window.sbAuth.friendBurn(name);
+        box.innerHTML = '<p>Burned. They can ask again in 24 hours.</p>';
+      } catch (err) { alert(err.message); }
+    };
+    box.appendChild(ok);
+    box.appendChild(burn);
+    return;
+  }
+  if (st === 'pending') {
+    p.textContent = 'Friend request sent. Waiting for them to confirm or burn.';
+    box.appendChild(p);
+    return;
+  }
+  if (st === 'burned') {
+    p.textContent = 'They burned the last request. You can ask again in ' + (rel.hours || 24) + ' hours.';
+    box.appendChild(p);
+    return;
+  }
+  p.textContent = 'Send a friend request. They confirm, then you can message, send photos, voice, or call. If they burn, you wait 24 hours.';
+  box.appendChild(p);
+  const ask = document.createElement('button');
+  ask.textContent = 'Add friend';
+  ask.onclick = async () => {
+    if (ask.disabled) return;
+    ask.disabled = true;
+    ask.textContent = 'Sending…';
+    try {
+      await window.sbAuth.friendAsk(name);
+      p.textContent = 'Friend request sent. Waiting for them to confirm or burn.';
+      ask.remove();
+    } catch (err) {
+      ask.disabled = false;
+      ask.textContent = 'Add friend';
+      alert(err.message);
+    }
+  };
+  box.appendChild(ask);
+}
+
+async function showUserSearchResult(searchedUsername, message) {
   const searchResult = document.getElementById('searchResult');
   searchResult.innerHTML = '';
   if (typeof isBlocked === 'function' && isBlocked(searchedUsername)) {
@@ -2511,6 +2587,15 @@ function showUserSearchResult(searchedUsername, message) {
     own.textContent = 'You own this name. It is not in Moose Book.';
     searchResult.appendChild(own);
     if (typeof removeBookEntry === 'function') removeBookEntry(searchedUsername);
+    return;
+  }
+  window.__lastSearchUser = { name: searchedUsername, message: message };
+  let rel = { status: 'login' };
+  if (window.sbAuth && window.sbAuth.isLoggedIn() && window.sbAuth.friendStatus) {
+    try { rel = await window.sbAuth.friendStatus(searchedUsername); } catch (err) { rel = { status: 'none' }; }
+  }
+  if (!rel || rel.status !== 'friends') {
+    renderFriendGate(searchResult, searchedUsername, rel || {}, message);
     return;
   }
   if (typeof bookHas === 'function' && bookHas(searchedUsername) && typeof saveBookEntry === 'function') {
@@ -2723,6 +2808,10 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   try {
   if (typeof isOwnName === 'function' && isOwnName(toUsername)) throw new Error('That is your name now.');
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
+  if (!(extra.kind === 'admin') && window.sbAuth && window.sbAuth.isLoggedIn() && window.sbAuth.friendStatus) {
+    const rel = await window.sbAuth.friendStatus(toUsername);
+    if (!rel || rel.status !== 'friends') throw new Error('Friends only. Send a friend request first.');
+  }
   if (String(toUsername).replace(/[^A-Za-z0-9]/g, '').toLowerCase() === 'admin' && extra.kind !== 'admin') {
     throw new Error('Recipient not found');
   }
@@ -2786,6 +2875,13 @@ async function inviteEncryptedChat(toUsername, theirPub, opts) {
   if (!theirPub) {
     showStatusMessage('That user has no encryption key.');
     return;
+  }
+  if (window.sbAuth && window.sbAuth.isLoggedIn() && window.sbAuth.friendStatus) {
+    const rel = await window.sbAuth.friendStatus(toUsername);
+    if (!rel || rel.status !== 'friends') {
+      showStatusMessage('Friends only. Send a friend request first.');
+      return;
+    }
   }
   const lockKey = (isCall ? 'call:' : 'invite:') + String(toUsername).toLowerCase();
   if (offlineSendLock.has(lockKey)) {

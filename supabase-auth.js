@@ -171,6 +171,7 @@ async function applyLoggedInSession(session) {
   ensureSbSession().then(() => {
     if (signedOut) return;
     loadMyNames().catch((e) => console.warn('names', e));
+    loadFriendInbox().catch(() => {});
     publishKeys().catch((e) => console.warn('publishKeys', e));
     loadInbox().catch((e) => console.warn('inbox', e));
     subscribeInbox(session.user.id);
@@ -280,6 +281,7 @@ function inboxPingLabel(kind) {
   if (kind === 'invite') return 'Room invite';
   if (kind === 'photo') return 'Sealed photo';
   if (kind === 'voice') return 'Sealed voice';
+  if (kind === 'friend') return 'Friend request';
   return 'Sealed note';
 }
 
@@ -475,6 +477,10 @@ async function sendOffline(toUsername, sealed, meta) {
   await ensureSbSession();
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
   if (isAdminMailbox(toUsername) && !(meta && meta.kind === 'admin')) throw new Error('Recipient not found');
+  if (!(meta && meta.kind === 'admin') && !isAdminMailbox(toUsername)) {
+    const rel = await friendStatus(toUsername);
+    if (!rel || rel.status !== 'friends') throw new Error('Friends only. Send a friend request first.');
+  }
   let dest = null;
   const found = await findUser(toUsername, { allowAdmin: !!(meta && meta.kind === 'admin') });
   if (found && found.id) dest = { id: found.id };
@@ -1666,6 +1672,65 @@ function bindVanityShop() {
   finishVanityReturn();
 }
 
+
+async function friendRpc(fn, args) {
+  if (!sb) throw new Error('Not ready');
+  await ensureSbSession();
+  const { data, error } = await sb.rpc(fn, args || {});
+  if (error) throw new Error(error.message || 'Friend request failed');
+  if (data == null) return {};
+  return typeof data === 'string' ? JSON.parse(data) : data;
+}
+async function friendStatus(name) {
+  if (!isLoggedIn()) return { status: 'login' };
+  try { return await friendRpc('moose_friend_status', { p_name: name }); }
+  catch (e) { return { status: 'none' }; }
+}
+async function friendAsk(name) {
+  const row = await friendRpc('moose_friend_ask', { p_name: name });
+  if (row && row.ok === false) throw new Error(row.error || 'Could not ask');
+  try { pingRemoteInbox(name, 'friend'); } catch (e) {}
+  loadFriendInbox().catch(() => {});
+  return row;
+}
+async function friendAccept(name) {
+  const row = await friendRpc('moose_friend_accept', { p_name: name });
+  if (row && row.ok === false) throw new Error(row.error || 'Could not confirm');
+  loadFriendInbox().catch(() => {});
+  return row;
+}
+async function friendBurn(name) {
+  const row = await friendRpc('moose_friend_burn', { p_name: name });
+  if (row && row.ok === false) throw new Error(row.error || 'Could not burn');
+  loadFriendInbox().catch(() => {});
+  return row;
+}
+async function loadFriendInbox() {
+  const hint = document.getElementById('friendReqHint');
+  if (!isLoggedIn()) {
+    window.__friendInbox = { pending: [], friends: [] };
+    if (hint) { hint.textContent = ''; hint.classList.add('hidden'); }
+    if (typeof renderFriendInbox === 'function') renderFriendInbox();
+    return window.__friendInbox;
+  }
+  try {
+    const row = await friendRpc('moose_friend_inbox');
+    window.__friendInbox = {
+      pending: (row && row.pending) || [],
+      friends: (row && row.friends) || []
+    };
+  } catch (e) {
+    window.__friendInbox = { pending: [], friends: [] };
+  }
+  const n = (window.__friendInbox.pending || []).length;
+  if (hint) {
+    hint.textContent = n ? (n + ' friend request' + (n === 1 ? '' : 's')) : '';
+    hint.classList.toggle('hidden', !n);
+  }
+  if (typeof renderFriendInbox === 'function') renderFriendInbox();
+  return window.__friendInbox;
+}
+
 window.sbAuth = {
   isLoggedIn,
   getSession,
@@ -1684,7 +1749,12 @@ window.sbAuth = {
   findByQr,
   loadMyNames,
   openMyNames,
-  setActiveOwnedName
+  setActiveOwnedName,
+  friendStatus,
+  friendAsk,
+  friendAccept,
+  friendBurn,
+  loadFriendInbox
 };
 
 document.addEventListener('DOMContentLoaded', () => {

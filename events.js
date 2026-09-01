@@ -2418,7 +2418,15 @@ function showUserSearchResult(searchedUsername, message) {
   const line = document.createElement('p');
   line.innerHTML = '<strong>' + searchedUsername + '</strong> · <span class="' + (on ? 'presence-on' : 'presence-off') + '">' + seen + '</span>';
   searchResult.appendChild(line);
-  if (typeof saveBookEntry === 'function') {
+  if (typeof isOwnName === 'function' && isOwnName(searchedUsername)) {
+    const own = document.createElement('p');
+    own.className = 'presence-on';
+    own.textContent = 'You own this name. It is not in Moose Book.';
+    searchResult.appendChild(own);
+    if (typeof removeBookEntry === 'function') removeBookEntry(searchedUsername);
+    return;
+  }
+  if (typeof bookHas === 'function' && bookHas(searchedUsername) && typeof saveBookEntry === 'function') {
     saveBookEntry({ name: searchedUsername, public_key: message.public_key, identity_public_key: message.identity_public_key, id: message.id });
   }
   if (message.identity_public_key && typeof rememberSafety === 'function') {
@@ -2485,12 +2493,26 @@ function showUserSearchResult(searchedUsername, message) {
       searchResult.textContent = searchedUsername + ' blocked.';
     };
     searchResult.appendChild(blockBtn);
+    const saveBtn = document.createElement('button');
+    const saved = typeof bookHas === 'function' && bookHas(searchedUsername);
+    saveBtn.textContent = saved ? 'Saved' : 'Save to Moose Book';
+    saveBtn.onclick = () => {
+      if (typeof saveBookEntry === 'function') {
+        saveBookEntry({ name: searchedUsername, public_key: message.public_key, identity_public_key: message.identity_public_key, id: message.id });
+      }
+      saveBtn.textContent = 'Saved';
+    };
+    searchResult.appendChild(saveBtn);
     const trustBtn = document.createElement('button');
     trustBtn.textContent = (typeof isTrustedName === 'function' && isTrustedName(searchedUsername)) ? 'Untrust' : 'Trust';
     trustBtn.onclick = () => {
       const on = !(typeof isTrustedName === 'function' && isTrustedName(searchedUsername));
       if (typeof setTrustedName === 'function') setTrustedName(searchedUsername, on);
       if (message.id && typeof trustOnServer === 'function') trustOnServer(message.id, on);
+      if (on && typeof saveBookEntry === 'function') {
+        saveBookEntry({ name: searchedUsername, public_key: message.public_key, identity_public_key: message.identity_public_key, id: message.id });
+        saveBtn.textContent = 'Saved';
+      }
       trustBtn.textContent = on ? 'Untrust' : 'Trust';
     };
     searchResult.appendChild(trustBtn);
@@ -2612,6 +2634,7 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   if (offlineSendLock.has(lockKey)) throw new Error('Already sending that note.');
   offlineSendLock.add(lockKey);
   try {
+  if (typeof isOwnName === 'function' && isOwnName(toUsername)) throw new Error('That is your name now.');
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
   if (String(toUsername).replace(/[^A-Za-z0-9]/g, '').toLowerCase() === 'admin' && extra.kind !== 'admin') {
     throw new Error('Recipient not found');

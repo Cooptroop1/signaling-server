@@ -902,6 +902,7 @@ async function loadMyNames() {
     window.__myNames[0].active = true;
   }
   renderMyNames(window.__myNames);
+  if (typeof dropOwnedFromBook === 'function') dropOwnedFromBook();
   registerPushAlerts();
   await revertSoldChatName(window.__myNames, active);
   return window.__myNames;

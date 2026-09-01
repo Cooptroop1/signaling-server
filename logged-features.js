@@ -748,6 +748,7 @@ async function dropToFamily(text, extra) {
   function addName(name, row) {
     const key = String(name || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
     if (!key || seen[key]) return;
+    if (typeof isOwnName === 'function' && isOwnName(name)) return;
     if (typeof isBlocked === 'function' && isBlocked(name)) return;
     seen[key] = true;
     list.push({ name: name, public_key: (row && row.public_key) || '' });

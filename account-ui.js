@@ -22,8 +22,43 @@ function blockName(name) {
   renderMooseInbox();
 }
 function getBook() { return accGet('book', []); }
+function isOwnName(name) {
+  const n = String(name || '').toLowerCase();
+  if (!n) return false;
+  const mine = window.__myNames || [];
+  if (mine.some((x) => String(x.name || '').toLowerCase() === n)) return true;
+  if (typeof username !== 'undefined' && String(username || '').toLowerCase() === n) return true;
+  return false;
+}
+function bookHas(name) {
+  const n = String(name || '').toLowerCase();
+  return getBook().some((b) => String(b.name || '').toLowerCase() === n);
+}
+function removeBookEntry(name) {
+  if (!name) return;
+  const n = String(name).toLowerCase();
+  accSet('book', getBook().filter((b) => String(b.name || '').toLowerCase() !== n));
+  if (typeof setTrustedName === 'function') setTrustedName(name, false);
+  if (typeof renderMooseBook === 'function') renderMooseBook();
+}
+function dropOwnedFromBook() {
+  const mine = (window.__myNames || []).map((x) => String(x.name || '').toLowerCase()).filter(Boolean);
+  if (typeof username !== 'undefined' && username) mine.push(String(username).toLowerCase());
+  if (!mine.length) return;
+  const book = getBook().filter((b) => !mine.includes(String(b.name || '').toLowerCase()));
+  accSet('book', book);
+  if (typeof getTrusted === 'function') {
+    const trusted = getTrusted().filter((n) => !mine.includes(String(n).toLowerCase()));
+    accSet('trusted', trusted);
+  }
+  if (typeof renderMooseBook === 'function') renderMooseBook();
+}
 function saveBookEntry(entry) {
   if (!entry || !entry.name) return;
+  if (isOwnName(entry.name)) {
+    removeBookEntry(entry.name);
+    return;
+  }
   const book = getBook().filter(b => b.name.toLowerCase() !== entry.name.toLowerCase());
   book.unshift({ name: entry.name, public_key: entry.public_key || '', identity_public_key: entry.identity_public_key || '', last: Date.now(), circle: entry.circle || 'other', id: entry.id || '' });
   accSet('book', book.slice(0, 40));
@@ -296,7 +331,7 @@ function renderMooseBook() {
   if (!list) return;
   const logged = window.sbAuth && window.sbAuth.isLoggedIn();
   const panic = !!(window.__moosePanic);
-  const book = panic ? [] : getBook();
+  const book = panic ? [] : getBook().filter((b) => !isOwnName(b.name));
   if (!logged) return;
   list.innerHTML = '';
   const mine = panic ? [] : (window.__myNames || []);
@@ -325,7 +360,7 @@ function renderMooseBook() {
   if (!book.length) {
     const p = document.createElement('p');
     p.className = 'text-sm text-gray-500';
-    p.textContent = mine.length ? 'People you search stay here on this device.' : 'Names you search stay here on this device.';
+    p.textContent = 'Search a name, then tap Save to keep it here. Buying a name removes it.';
     list.appendChild(p);
     return;
   }
@@ -391,6 +426,11 @@ function renderMooseBook() {
       row.appendChild(callBtn);
     }
     row.appendChild(blockBtn);
+    const delBtn = document.createElement('button');
+    delBtn.className = 'block';
+    delBtn.textContent = 'Remove';
+    delBtn.onclick = () => removeBookEntry(entry.name);
+    row.appendChild(delBtn);
     list.appendChild(row);
   });
 }
@@ -425,6 +465,11 @@ window.renderMooseInbox = renderMooseInbox;
 window.renderMooseBook = renderMooseBook;
 window.openSealedNotes = openSealedNotes;
 window.saveBookEntry = saveBookEntry;
+window.removeBookEntry = removeBookEntry;
+window.dropOwnedFromBook = dropOwnedFromBook;
+window.isOwnName = isOwnName;
+window.bookHas = bookHas;
+window.getBook = getBook;
 window.isBlocked = isBlocked;
 window.blockName = blockName;
 window.rememberSafety = rememberSafety;

@@ -1472,7 +1472,32 @@ function setLocalPreview(stream) {
     localVid.srcObject = null;
   }
 }
-async function toggleVideoCall() {
+function finishVideoCall(stream) {
+  if (localStream && localStream !== stream) {
+    localStream.getTracks().forEach((tr) => tr.stop());
+  }
+  localStream = stream || null;
+  videoCallActive = true;
+  voiceCallActive = true;
+  showVideoStage(true);
+  document.getElementById('videoCallButton')?.classList.add('active');
+  document.getElementById('audioOutputButton')?.classList.remove('hidden');
+  if (typeof updateAttachButton === 'function') updateAttachButton();
+  if (localStream) {
+    updateAudioTracks('add');
+    if (localStream.getVideoTracks().length) updateVideoTracks('add');
+    else ensureRecvVideo();
+    setLocalPreview(localStream);
+  } else {
+    ensureRecvVideo();
+  }
+  flushRenegotiate();
+  broadcastVoiceCallEvent('video-call-start');
+  broadcastVoiceCallEvent('voice-call-start');
+  if (localStream && localStream.getVideoTracks().length) showStatusMessage('Video call started.');
+  else showStatusMessage('No camera here — you can still see them if they turn theirs on.');
+}
+function toggleVideoCall() {
   if (!videoCallsOn()) {
     showStatusMessage('Video calls are off.');
     return;
@@ -1486,42 +1511,22 @@ async function toggleVideoCall() {
     showStatusMessage('Stop the note first.');
     return;
   }
-  showStatusMessage('Starting video call…');
-  showVideoStage(true);
-  videoCallActive = true;
-  voiceCallActive = true;
-  document.getElementById('videoCallButton')?.classList.add('active');
-  document.getElementById('audioOutputButton')?.classList.remove('hidden');
-  if (typeof updateAttachButton === 'function') updateAttachButton();
-  try {
-    if (localStream) {
-      localStream.getTracks().forEach((tr) => tr.stop());
-      localStream = null;
-    }
-    try {
-      localStream = await getCamMic(true, true);
-    } catch (e1) {
-      try { localStream = await getCamMic(false, true); } catch (e2) { localStream = null; }
-    }
-    if (localStream) {
-      updateAudioTracks('add');
-      if (localStream.getVideoTracks().length) updateVideoTracks('add');
-      else ensureRecvVideo();
-      setLocalPreview(localStream);
-      flushRenegotiate();
-    } else {
-      ensureRecvVideo();
-    }
-    broadcastVoiceCallEvent('video-call-start');
-    broadcastVoiceCallEvent('voice-call-start');
-    if (localStream && localStream.getVideoTracks().length) showStatusMessage('Video call started.');
-    else showStatusMessage('No camera here — you can still see them if they turn theirs on.');
-  } catch (error) {
-    console.error('video call', error);
-    ensureRecvVideo();
-    broadcastVoiceCallEvent('video-call-start');
-    showStatusMessage('No camera here — you can still see them if they turn theirs on.');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    finishVideoCall(null);
+    return;
   }
+  showStatusMessage('Starting video call…');
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+    finishVideoCall(stream);
+  }).catch(() => {
+    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+      finishVideoCall(stream);
+    }).catch(() => {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        finishVideoCall(stream);
+      }).catch(() => finishVideoCall(null));
+    });
+  });
 }
 function startVideoRecording() {
   if (!videoNotesOn()) {
@@ -1549,7 +1554,7 @@ function startVideoRecording() {
   if (typeof setComposerRecording === 'function') setComposerRecording(true);
   const hint0 = document.querySelector('.record-hint');
   if (hint0) hint0.textContent = 'Video 10s';
-  getCamMic(true, true).then(stream => {
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true }).catch(() => navigator.mediaDevices.getUserMedia({ video: true })).then(stream => {
     if (!stream.getVideoTracks().length) {
       stream.getTracks().forEach((tr) => tr.stop());
       recordingVideo = false;

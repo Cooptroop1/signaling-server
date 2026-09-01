@@ -224,11 +224,17 @@ function handleAttachAction(action) {
   else if (action === 'camera') pickAttachFile('cameraInput');
   else if (action === 'file') pickAttachFile('fileInput');
   else if (action === 'voice') {
-    closeAttachSheet();
     startVoiceRecording();
-  } else if (action === 'call') {
     closeAttachSheet();
+  } else if (action === 'video') {
+    startVideoRecording();
+    closeAttachSheet();
+  } else if (action === 'call') {
     toggleVoiceCall();
+    closeAttachSheet();
+  } else if (action === 'videocall') {
+    toggleVideoCall();
+    closeAttachSheet();
   } else if (action === 'grok') {
     closeAttachSheet();
     toggleGrokBot();

@@ -1508,6 +1508,7 @@ async function toggleVideoCall() {
       if (localStream.getVideoTracks().length) updateVideoTracks('add');
       else ensureRecvVideo();
       setLocalPreview(localStream);
+      flushRenegotiate();
     } else {
       ensureRecvVideo();
     }

@@ -356,8 +356,10 @@ async function startPeerConnection(targetId, isOfferer) {
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
   }
-  try { peerConnection.addTransceiver('audio', { direction: 'sendrecv' }); } catch (e) {}
-  try { peerConnection.addTransceiver('video', { direction: 'sendrecv' }); } catch (e) {}
+  if (isOfferer) {
+    try { peerConnection.addTransceiver('audio', { direction: 'sendrecv' }); } catch (e) {}
+    try { peerConnection.addTransceiver('video', { direction: 'sendrecv' }); } catch (e) {}
+  }
   peerConnection.onicecandidate = (event) => {
     if (!event.candidate) return;
     const line = String(event.candidate.candidate || '');
@@ -412,7 +414,17 @@ async function startPeerConnection(targetId, isOfferer) {
     console.log(`Received remote track from ${targetId}`);
     const stream = event.streams[0] || new MediaStream([event.track]);
     if (event.track && event.track.kind === 'video') {
-      attachRemoteVideo(targetId, stream, event.track);
+      const attach = () => {
+        if (event.track.readyState !== 'live') return;
+        const set = event.track.getSettings && event.track.getSettings();
+        if (set && !set.width && !set.height) return;
+        attachRemoteVideo(targetId, stream, event.track);
+      };
+      if (event.track.muted) {
+        event.track.addEventListener('unmute', attach, { once: true });
+        return;
+      }
+      attach();
       return;
     }
     let audio = remoteAudios.get(targetId);
@@ -922,13 +934,35 @@ async function startVoiceCall() {
     }
   }
 }
-function stopVoiceCall() {
+function stopAllMedia() {
+  try {
+    if (typeof voiceCancelled !== 'undefined') voiceCancelled = true;
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  } catch (e) {}
+  if (voiceRecordStream) {
+    voiceRecordStream.getTracks().forEach((tr) => { try { tr.stop(); } catch (e) {} });
+    voiceRecordStream = null;
+  }
   if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
+    localStream.getTracks().forEach((tr) => { try { tr.stop(); } catch (e) {} });
     localStream = null;
   }
+  document.querySelectorAll('#localVideo, #remoteVideo').forEach((el) => {
+    try {
+      if (el.srcObject && el.srcObject.getTracks) el.srcObject.getTracks().forEach((tr) => tr.stop());
+      el.srcObject = null;
+    } catch (e) {}
+  });
+  videoCallActive = false;
+  voiceCallActive = false;
+  recordingVideo = false;
+  showVideoStage(false);
+  if (typeof resetVoiceRecordingUi === 'function') resetVoiceRecordingUi();
+}
+function stopVoiceCall() {
   updateAudioTracks('remove');
   updateVideoTracks('remove');
+  stopAllMedia();
   videoCallActive = false;
   const localVid = document.getElementById('localVideo');
   if (localVid) localVid.srcObject = null;
@@ -1469,6 +1503,7 @@ function finishVideoCall(stream) {
     if (localStream.getVideoTracks().length) updateVideoTracks('add');
     setLocalPreview(localStream);
   }
+  flushRenegotiate();
   broadcastVoiceCallEvent('video-call-start');
   if (localStream && localStream.getVideoTracks().length) showStatusMessage('Video call started. You left, them right.');
   else showStatusMessage('No camera here — you should see them on the right.');
@@ -1538,8 +1573,6 @@ function startVideoRecording() {
       showStatusMessage('This device has no camera. The other person can still send a 10s video.');
       return;
     }
-    setLocalPreview(stream);
-    showVideoStage(true);
     voiceRecordStream = stream;
     const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
     const mimeTypes = isiOS ? [
@@ -1583,7 +1616,7 @@ function startVideoRecording() {
       resetVoiceRecordingUi();
       if (!videoCallActive) {
         setLocalPreview(null);
-        showVideoStage(!!document.querySelector('#remoteVideos video'));
+        showVideoStage(false);
       }
       recordingVideo = false;
       if (typeof voiceCancelled !== 'undefined' && voiceCancelled) {

@@ -499,6 +499,7 @@ function logout() {
   document.getElementById('startChatToggleButton')?.focus();
 }
 function endChat() {
+  if (typeof stopAllMedia === 'function') stopAllMedia();
   burnTranscript();
   if (socket && socket.readyState === WebSocket.OPEN && code && token) {
     socket.send(JSON.stringify({ type: 'leave', code, clientId, token }));

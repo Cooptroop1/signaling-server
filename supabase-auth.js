@@ -750,7 +750,8 @@ function offerPasskeyOnce() {
 }
 
 function pounds(cents) {
-  return '£' + (Number(cents || 0) / 100).toFixed(2);
+  const n = Math.round(Number(cents || 0) / 100);
+  return '£' + n.toLocaleString('en-GB');
 }
 function isBankTransferListing(price) {
   return Number(price || 0) >= 1000000;

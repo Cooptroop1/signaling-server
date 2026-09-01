@@ -1188,3 +1188,9 @@ $$;
 revoke all on function public.moose_apply_resale(uuid, uuid, text, text, int, int) from public, anon, authenticated;
 grant execute on function public.moose_apply_resale(uuid, uuid, text, text, int, int) to service_role;
 notify pgrst, 'reload schema';
+
+
+-- Name claims from search (£1.99). Toggle names_claim_on or change claim_cents.
+alter table public.moose_shop add column if not exists names_claim_on boolean default true;
+alter table public.moose_shop add column if not exists claim_cents int default 199;
+update public.moose_shop set names_claim_on = true, claim_cents = 199 where id = 1;

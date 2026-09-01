@@ -910,7 +910,7 @@ async function loadMyNames() {
 
 function canSellName(n) {
   if (!n || !n.name) return false;
-  return n.kind === 'number' || n.kind === 'letter';
+  return true;
 }
 function sellerNetGuess(price, abroad) {
   const rate = abroad ? 0.075 : 0.015;
@@ -931,7 +931,7 @@ function sortOwnedNames(list) {
   });
 }
 function extraBoughtNames(list) {
-  return (list || []).filter((n) => n && (n.kind === 'number' || n.kind === 'letter'));
+  return (list || []).filter((n) => n && n.name);
 }
 function showMyNamesWrap(list) {
   const wrap = document.getElementById('myNamesWrap');
@@ -979,9 +979,8 @@ function renderMyNames(list) {
     box.classList.add('hidden');
   }
   if (!locker) return;
-  const extras = extraBoughtNames(rows);
-  if (!isLoggedIn() || !extras.length) {
-    locker.innerHTML = '<p class="text-sm text-gray-500">No bought names on this account.</p>';
+  if (!isLoggedIn() || !rows.length) {
+    locker.innerHTML = '<p class="text-sm text-gray-500">No names on this account.</p>';
     return;
   }
   const q = String(window.__myNamesFilter || '').trim().toLowerCase();
@@ -1665,6 +1664,7 @@ window.sbAuth = {
   findUser,
   isAdminMailbox,
   sendOffline,
+  startVanityCheckout,
   confirmOffline,
   burnAllOffline,
   publishKeys,

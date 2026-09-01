@@ -255,7 +255,7 @@ async function attachPaidName(userId, name, sessionId, amount) {
       headers,
       body: JSON.stringify({ status: 'sold', owner_id: userId, updated_at: new Date().toISOString() })
     });
-  } else {
+  } else if (nm.length <= 3) {
     const lr = await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(nm) + '&select=name', { headers });
     const lrows = await lr.json();
     if (Array.isArray(lrows) && lrows.length) {
@@ -268,7 +268,7 @@ async function attachPaidName(userId, name, sessionId, amount) {
       await fetch(SUPABASE_URL + '/rest/v1/vanity_letters', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ name: nm, status: 'sold', owner_id: userId, price_cents: amount || 1000 })
+        body: JSON.stringify({ name: nm, status: 'sold', owner_id: userId, price_cents: amount || 199 })
       });
     }
   }
@@ -300,6 +300,39 @@ async function lookupVanityAmount(kind, name) {
   return { amount: Math.max(100, Number(row && row.price_cents) || 10000) };
 }
 
+function claimNameOk(name) {
+  const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!/^[A-Za-z0-9]{4,16}$/.test(nm)) return '';
+  if (/^[0-9]+$/.test(nm) && Number(nm) >= 1 && Number(nm) <= 999) return '';
+  if (['admin', 'anonomoose', 'moose', 'support', 'staff', 'help', 'root', 'system'].includes(nm.toLowerCase())) return '';
+  return nm;
+}
+async function lookupClaimAmount(name) {
+  const nm = claimNameOk(name);
+  if (!nm) return { error: 'Use 4-16 letters or numbers. Numbers 1-999 are Moose shop.' };
+  if (!SUPABASE_SERVICE_ROLE_KEY) return { error: 'Claims are not available right now' };
+  const headers = svcHeaders();
+  let amount = 199;
+  try {
+    const sr = await fetch(SUPABASE_URL + '/rest/v1/moose_shop?id=eq.1&select=names_claim_on,claim_cents', { headers });
+    const shop = await sr.json();
+    const row = Array.isArray(shop) ? shop[0] : null;
+    if (row && row.names_claim_on === false) return { error: 'Name claims are off' };
+    if (row && Number(row.claim_cents) >= 199) amount = Math.round(Number(row.claim_cents));
+  } catch (e) {}
+  const own = await fetch(SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&select=name', { headers });
+  const owns = await own.json();
+  if (Array.isArray(owns) && owns.some((x) => String(x.name || '').toLowerCase() === nm.toLowerCase())) {
+    return { error: 'That name is taken' };
+  }
+  const pr = await fetch(SUPABASE_URL + '/rest/v1/profiles?display_name=ilike.' + encodeURIComponent(nm) + '&select=display_name', { headers });
+  const profs = await pr.json();
+  if (Array.isArray(profs) && profs.some((x) => String(x.display_name || '').toLowerCase() === nm.toLowerCase())) {
+    return { error: 'That name is taken' };
+  }
+  return { amount, name: nm, kind: 'claim' };
+}
+
 async function lookupResaleAmount(name) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
   if (!nm) return { error: 'Not for sale' };
@@ -312,7 +345,6 @@ async function lookupResaleAmount(name) {
   const row = Array.isArray(rows) ? rows[0] : null;
   const amount = Number(row && row.sale_price_cents) || 0;
   if (!row || amount < 200) return { error: 'Not listed' };
-  if (String(row.kind) === 'signup') return { error: 'Not for sale' };
   return { amount, sellerId: row.user_id, name: row.name, kind: 'resale' };
 }
 
@@ -336,7 +368,6 @@ async function loadUsedNameRows() {
     const nm = String(row && row.name || '');
     const price = Number(row && row.sale_price_cents) || 0;
     if (price < 200) return false;
-    if (String(row.kind) === 'signup') return false;
     return true;
   }).map((row) => ({
     name: row.name,
@@ -579,7 +610,6 @@ async function setNameListing(userId, name, priceCents) {
   const rows = await found.json();
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return { ok: false, error: 'You do not own that name' };
-  if (String(row.kind) === 'signup') return { ok: false, error: 'Free signup names cannot be sold' };
   if (listed && /^\d+$/.test(nm)) {
     const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10) + '&select=held_forever', { headers: svcHeaders() });
     const vrows = await vr.json();
@@ -703,7 +733,6 @@ async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stri
     ? rows.find((x) => String(x.name || '').toLowerCase() === nm.toLowerCase())
     : null;
   if (!row || !row.user_id) throw new Error('Name is not for resale');
-  if (String(row.kind) === 'signup') throw new Error('Not for sale');
   if (row.user_id === buyerId) return { ok: true, name: nm, already: true, seller_net_cents: 0 };
   if (sellerId && row.user_id !== sellerId) throw new Error('Listing changed');
   const seller = row.user_id;
@@ -1096,7 +1125,8 @@ server.on('request', (req, res) => {
           return;
         }
         const isResale = body.kind === 'resale' || body.resale === true;
-        const kind = isResale ? 'resale' : (body.kind === 'letter' ? 'letter' : 'number');
+        const isClaim = body.kind === 'claim';
+        const kind = isResale ? 'resale' : (isClaim ? 'claim' : (body.kind === 'letter' ? 'letter' : 'number'));
         const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
         const userId = shopUser.id;
         if (!name || !userId) {
@@ -1104,7 +1134,7 @@ server.on('request', (req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'Missing name' }));
           return;
         }
-        const priced = isResale ? await lookupResaleAmount(name) : await lookupVanityAmount(kind, name);
+        const priced = isResale ? await lookupResaleAmount(name) : (isClaim ? await lookupClaimAmount(name) : await lookupVanityAmount(kind, name));
         if (priced.error) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: priced.error }));

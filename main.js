@@ -1403,13 +1403,7 @@ async function setAudioOutput(audioElement, targetId) {
 }
 function updateSpeakerButton() {
   const audioOutputButton = document.getElementById('audioOutputButton');
-  if (!audioOutputButton) return;
-  const loud = audioOutputMode === 'speaker';
-  audioOutputButton.title = loud ? 'Speaker on — tap for quieter' : 'Quiet — tap for speaker';
-  audioOutputButton.setAttribute('aria-label', audioOutputButton.title);
-  audioOutputButton.textContent = loud ? '🔊' : '🔈';
-  audioOutputButton.classList.toggle('speaker', loud);
-  audioOutputButton.classList.toggle('hidden', !voiceCallActive);
+  if (audioOutputButton) audioOutputButton.classList.add('hidden');
 }
 function applyMicMute() {
   if (localStream) {

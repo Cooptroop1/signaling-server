@@ -2133,9 +2133,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   updateComposerSend();
   updateAttachButton();
-  document.getElementById('audioOutputButton').onclick = () => {
-    toggleAudioOutput();
-  };
+  const spk = document.getElementById('audioOutputButton');
+  if (spk) spk.onclick = () => toggleAudioOutput();
   const micBtn = document.getElementById('micMuteButton');
   if (micBtn) micBtn.onclick = () => toggleMicMute();
   const vidMic = document.getElementById('videoMicMuteBtn');

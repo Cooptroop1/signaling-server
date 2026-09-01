@@ -606,18 +606,40 @@ function goCoverStory() {
 
 const STEGO_MAGIC = [77, 79, 79, 83, 69, 49];
 
-function embedTextInPng(image, text) {
+function dataUrlToImage(url) {
+  return new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error('Could not compress photo'));
+    i.src = url;
+  });
+}
+async function embedTextInPng(image, text) {
   const srcW = image.naturalWidth || image.width;
   const srcH = image.naturalHeight || image.height;
   if (!srcW || !srcH) throw new Error('Could not read that photo');
-  const minSide = 1400;
-  const scale = Math.max(1, minSide / Math.min(srcW, srcH));
+  const maxEdge = 960;
+  let w = srcW;
+  let h = srcH;
+  const longEdge = Math.max(w, h);
+  if (longEdge > maxEdge) {
+    const s = maxEdge / longEdge;
+    w = Math.max(1, Math.round(w * s));
+    h = Math.max(1, Math.round(h * s));
+  }
+  const prep = document.createElement('canvas');
+  prep.width = w;
+  prep.height = h;
+  const pctx = prep.getContext('2d');
+  pctx.imageSmoothingEnabled = true;
+  pctx.imageSmoothingQuality = 'high';
+  pctx.drawImage(image, 0, 0, w, h);
+  const jpg = await dataUrlToImage(prep.toDataURL('image/jpeg', 0.82));
   const c = document.createElement('canvas');
-  c.width = Math.min(2000, Math.round(srcW * scale));
-  c.height = Math.min(2000, Math.round(srcH * scale));
+  c.width = w;
+  c.height = h;
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(image, 0, 0, c.width, c.height);
+  ctx.drawImage(jpg, 0, 0, w, h);
   const imgd = ctx.getImageData(0, 0, c.width, c.height);
   const bytes = STEGO_MAGIC.concat([text.length], Array.from(new TextEncoder().encode(text)));
   let bit = 0;
@@ -663,7 +685,7 @@ function canvasToBlob(canvas, mime) {
   });
 }
 async function makeStegoBlob(image, text) {
-  const png = embedTextInPng(image, text);
+  const png = await embedTextInPng(image, text);
   const blob = await canvasToBlob(png, 'image/png');
   return { blob, name: 'holiday.png', mime: 'application/octet-stream' };
 }

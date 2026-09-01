@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901at">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901at">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901at">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901at">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901at">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901at">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901au">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901au">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901au">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901au">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901au">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901au">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1660,7 +1660,7 @@
       <p>The camera button opens photos, a 10 second video note, voice note, voice call and video call.</p>
       <p>Double-tap their picture to go full screen. Double-tap again to shrink it. Mute mic if you do not want to be heard.</p>
       <h3>Photo code</h3>
-      <p>Hide a room invite in a normal-looking photo. Send it as a <strong>file</strong>, not a compressed picture. They pick that photo to join.</p>
+      <p>We shrink the photo first, then hide the room code. Send it as a <strong>file</strong> (Telegram: file, not photo). Sending it as a picture wipes the code.</p>
       <p>The photo only works while your room is still open. Leave or burn the room and the invite dies.</p>
       <h3>Names and friends</h3>
       <p>Sign up for a name. Search someone. Tap <strong>Add friend</strong>. They confirm, or they burn (you wait 24 hours to ask again).</p>
@@ -1728,6 +1728,7 @@
       <h2 class="text-xl font-bold mb-3">Photo Code</h2>
       <p class="text-sm text-gray-600 mb-3">Hide a room code in a photo. On Telegram send the PNG as a <b>file / document</b>, not a compressed photo. You stay in the room; they decode and join you.</p>
       <p class="stego-label">Hide code in a photo</p>
+      <p class="text-xs text-gray-500 mb-2">We shrink it first, then hide the code. In Telegram send as a <strong>file</strong>, not a picture.</p>
       <label class="stego-file-btn">Tap to pick a photo<input id="stegoFile" type="file" accept="image/*"></label>
       <button id="stegoEncodeBtn" type="button" class="bg-gray-800 text-white px-3 py-2 rounded text-sm w-full mb-4">Hide code in photo</button>
       <p class="stego-label">Decode a photo</p>
@@ -1979,15 +1980,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901at"></script>
-  <script src="ratchet.js?v=260901at"></script>
-  <script src="utils.js?v=260901at"></script>
-  <script src="main.js?v=260901at"></script>
-  <script src="init.js?v=260901at"></script>
-  <script src="events.js?v=260901at"></script>
+    <script src="crypto.js?v=260901au"></script>
+  <script src="ratchet.js?v=260901au"></script>
+  <script src="utils.js?v=260901au"></script>
+  <script src="main.js?v=260901au"></script>
+  <script src="init.js?v=260901au"></script>
+  <script src="events.js?v=260901au"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901at"></script>
-  <script src="account-ui.js?v=260901at"></script>
-  <script src="logged-features.js?v=260901at"></script>
+  <script src="supabase-auth.js?v=260901au"></script>
+  <script src="account-ui.js?v=260901au"></script>
+  <script src="logged-features.js?v=260901au"></script>
 </body>
 </html>

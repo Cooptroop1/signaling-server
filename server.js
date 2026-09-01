@@ -610,6 +610,19 @@ async function setNameListing(userId, name, priceCents) {
   const rows = await found.json();
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return { ok: false, error: 'You do not own that name' };
+  if (listed) {
+    const all = await fetch(
+      SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&select=name,listed_for_sale',
+      { headers: svcHeaders() }
+    );
+    const mine = await all.json();
+    const owned = Array.isArray(mine) ? mine : [];
+    const thisListed = owned.some((x) => String(x.name || '').toLowerCase() === nm.toLowerCase() && x.listed_for_sale);
+    const unlisted = owned.filter((x) => !x.listed_for_sale).length;
+    if (!thisListed && unlisted <= 1) {
+      return { ok: false, error: 'Keep one name. You cannot sell your last name.' };
+    }
+  }
   if (listed && /^\d+$/.test(nm)) {
     const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_numbers?n=eq.' + parseInt(nm, 10) + '&select=held_forever', { headers: svcHeaders() });
     const vrows = await vr.json();

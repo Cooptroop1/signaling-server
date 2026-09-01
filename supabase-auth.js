@@ -910,7 +910,9 @@ async function loadMyNames() {
 
 function canSellName(n) {
   if (!n || !n.name) return false;
-  return true;
+  if (n.listed) return true;
+  const keepers = (window.__myNames || []).filter((x) => x && x.name && !x.listed).length;
+  return keepers > 1;
 }
 function sellerNetGuess(price, abroad) {
   const rate = abroad ? 0.075 : 0.015;
@@ -936,7 +938,7 @@ function extraBoughtNames(list) {
 function showMyNamesWrap(list) {
   const wrap = document.getElementById('myNamesWrap');
   if (!wrap) return;
-  wrap.classList.toggle('hidden', !(isLoggedIn() && extraBoughtNames(list).length));
+  wrap.classList.toggle('hidden', !(isLoggedIn() && extraBoughtNames(list).length > 1));
 }
 async function openMyNames() {
   const m = document.getElementById('myNamesModal');
@@ -1043,6 +1045,12 @@ function markNameBusy(name, busy, extra) {
 }
 async function listOwnedName(name, presetPrice) {
   if (!isLoggedIn() || !name) return;
+  const keepers = (window.__myNames || []).filter((x) => x && x.name && !x.listed).length;
+  const already = (window.__myNames || []).some((x) => x && String(x.name) === String(name) && x.listed);
+  if (!already && keepers <= 1) {
+    if (typeof showStatusMessage === 'function') showStatusMessage('Keep one name. You cannot sell your last name.');
+    return;
+  }
   if (window.__nameBusy && window.__nameBusy[name]) return;
   let price = presetPrice;
   if (!price) {

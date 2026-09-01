@@ -358,7 +358,13 @@ async function startPeerConnection(targetId, isOfferer) {
   }
   if (isOfferer) {
     try { peerConnection.addTransceiver('audio', { direction: 'sendrecv' }); } catch (e) {}
-    try { peerConnection.addTransceiver('video', { direction: 'sendrecv' }); } catch (e) {}
+    try {
+      const dummy = dummyVideoTrack();
+      if (dummy) peerConnection.addTransceiver(dummy, { direction: 'sendrecv' });
+      else peerConnection.addTransceiver('video', { direction: 'sendrecv' });
+    } catch (e) {
+      try { peerConnection.addTransceiver('video', { direction: 'sendrecv' }); } catch (e2) {}
+    }
   }
   peerConnection.onicecandidate = (event) => {
     if (!event.candidate) return;
@@ -597,7 +603,8 @@ async function processReceivedMessage(data, targetId) {
     return;
   }
   if (data.type === 'video-call-start') {
-    if (videoCallActive) return;
+    if (hasLiveCam() && videoCallActive) return;
+    showVideoStage(false);
     const bar = document.getElementById('videoJoinBar');
     if (bar) bar.classList.remove('hidden');
     showStatusMessage('Video call — tap Join so this phone can ask for camera.');
@@ -829,6 +836,25 @@ function videoCallsOn() {
   if (window.__mooseShop && window.__mooseShop.video_calls_on === false) return false;
   return features.enableVideoCalls !== false;
 }
+function dummyVideoTrack() {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 16;
+    c.height = 16;
+    const g = c.getContext('2d');
+    g.fillStyle = '#111';
+    g.fillRect(0, 0, 16, 16);
+    const s = c.captureStream(5);
+    const tr = s.getVideoTracks()[0];
+    if (tr) tr.enabled = true;
+    return tr || null;
+  } catch (e) {
+    return null;
+  }
+}
+function hasLiveCam() {
+  return !!(localStream && localStream.getVideoTracks && localStream.getVideoTracks().some((tr) => tr.readyState === 'live'));
+}
 function showVideoStage(on) {
   const stage = document.getElementById('videoCallStage');
   if (stage) stage.classList.toggle('hidden', !on);
@@ -852,8 +878,11 @@ function joinIncomingVideo() {
   showVideoStage(true);
   const el = document.getElementById('remoteVideo');
   if (el) el.play().catch(() => {});
-  if (videoCallActive) {
-    if (localStream) setLocalPreview(localStream);
+  if (hasLiveCam()) {
+    videoCallActive = true;
+    setLocalPreview(localStream);
+    updateVideoTracks('add');
+    updateAudioTracks('add');
     return;
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -973,10 +1002,7 @@ function stopAllMedia() {
     localStream = null;
   }
   document.querySelectorAll('#localVideo, #remoteVideo').forEach((el) => {
-    try {
-      if (el.srcObject && el.srcObject.getTracks) el.srcObject.getTracks().forEach((tr) => tr.stop());
-      el.srcObject = null;
-    } catch (e) {}
+    try { el.srcObject = null; } catch (e) {}
   });
   videoCallActive = false;
   voiceCallActive = false;
@@ -987,6 +1013,8 @@ function stopAllMedia() {
 function stopVoiceCall() {
   updateAudioTracks('remove');
   updateVideoTracks('remove');
+  try { renegotiationCounts.clear(); } catch (e) {}
+  document.getElementById('videoJoinBar')?.classList.add('hidden');
   stopAllMedia();
   videoCallActive = false;
   const localVid = document.getElementById('localVideo');
@@ -1545,7 +1573,6 @@ function finishVideoCall(stream, opts) {
   }
   const rem = document.getElementById('remoteVideo');
   if (rem) rem.play().catch(() => {});
-  setTimeout(() => flushRenegotiate(), 300);
   if (!opts.fromJoin) broadcastVoiceCallEvent('video-call-start');
   if (saw) showStatusMessage('You should see yourself on the left. Them on the right.');
   else showStatusMessage('This phone did not start the camera. Tap Join again.');

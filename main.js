@@ -1040,7 +1040,7 @@ async function startVoiceCall() {
     document.getElementById('audioOutputButton')?.classList.remove('hidden');
     document.getElementById('micMuteButton')?.classList.remove('hidden');
     micMuted = false;
-    applyMicMute();
+    updateMicMuteButton();
     if (typeof updateAttachButton === 'function') updateAttachButton();
     if (typeof updateSpeakerButton === 'function') updateSpeakerButton();
     showStatusMessage('Call started. Use speaker if you cannot hear them.');
@@ -1394,13 +1394,6 @@ function applyMicMute() {
   if (localStream) {
     localStream.getAudioTracks().forEach((tr) => { tr.enabled = !micMuted; });
   }
-  if (typeof peerConnections !== 'undefined') {
-    peerConnections.forEach((pc) => {
-      pc.getSenders().forEach((s) => {
-        if (s.track && s.track.kind === 'audio') s.track.enabled = !micMuted;
-      });
-    });
-  }
   updateMicMuteButton();
 }
 function updateMicMuteButton() {
@@ -1666,8 +1659,7 @@ function finishVideoCall(stream, opts) {
   }
   localStream = stream || null;
   micMuted = false;
-  if (localStream) localStream.getTracks().forEach((tr) => { if (tr.kind !== 'audio') tr.enabled = true; });
-  applyMicMute();
+  if (localStream) localStream.getTracks().forEach((tr) => { tr.enabled = true; });
   videoCallActive = true;
   voiceCallActive = true;
   showVideoStage(true);
@@ -1679,6 +1671,7 @@ function finishVideoCall(stream, opts) {
     updateAudioTracks('add');
     if (localStream.getVideoTracks().length) updateVideoTracks('add');
   }
+  updateMicMuteButton();
   const saw = setLocalPreview(localStream);
   const rem = document.getElementById('remoteVideo');
   if (rem) rem.play().catch(() => {});

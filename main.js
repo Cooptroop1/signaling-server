@@ -906,6 +906,9 @@ function senderForKind(pc, kind) {
   });
   return tr ? tr.sender : null;
 }
+function cloneTrack(track) {
+  try { return track.clone(); } catch (e) { return track; }
+}
 function updateVideoTracks(action) {
   peerConnections.forEach((peerConnection) => {
     const tr = peerConnection.getTransceivers().find((x) => {
@@ -915,8 +918,10 @@ function updateVideoTracks(action) {
     const sender = (tr && tr.sender) || senderForKind(peerConnection, 'video');
     if (action === 'add' && localStream) {
       localStream.getVideoTracks().forEach(track => {
+        const send = cloneTrack(track);
+        send.enabled = true;
         try { if (tr) tr.direction = 'sendrecv'; } catch (e) {}
-        if (sender) sender.replaceTrack(track).catch(() => {});
+        if (sender) sender.replaceTrack(send).catch(() => {});
       });
     } else if (action === 'remove') {
       if (sender) sender.replaceTrack(null).catch(() => {});
@@ -1544,10 +1549,7 @@ function setLocalPreview(stream) {
     return false;
   }
   live.forEach((tr) => { tr.enabled = true; });
-  let preview = stream;
-  try { preview = stream.clone(); } catch (e) { preview = new MediaStream(live); }
-  try { preview.getAudioTracks().forEach((tr) => preview.removeTrack(tr)); } catch (e) {}
-  localVid.srcObject = preview;
+  localVid.srcObject = new MediaStream(live);
   const go = () => localVid.play().catch(() => {});
   go();
   setTimeout(go, 250);
@@ -1566,13 +1568,14 @@ function finishVideoCall(stream, opts) {
   document.getElementById('videoCallButton')?.classList.add('active');
   document.getElementById('audioOutputButton')?.classList.remove('hidden');
   if (typeof updateAttachButton === 'function') updateAttachButton();
-  const saw = setLocalPreview(localStream);
   if (localStream) {
     updateAudioTracks('add');
     if (localStream.getVideoTracks().length) updateVideoTracks('add');
   }
+  const saw = setLocalPreview(localStream);
   const rem = document.getElementById('remoteVideo');
   if (rem) rem.play().catch(() => {});
+  if (opts.fromJoin) setTimeout(() => flushRenegotiate(), 200);
   if (!opts.fromJoin) broadcastVoiceCallEvent('video-call-start');
   if (saw) showStatusMessage('You should see yourself on the left. Them on the right.');
   else showStatusMessage('This phone did not start the camera. Tap Join again.');

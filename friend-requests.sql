@@ -173,10 +173,10 @@ begin
   select * into r from public.moose_friends where user_a = a and user_b = b;
   if found then
     if r.status = 'friends' then
-      return jsonb_build_object('ok', true, 'status', 'friends');
+      return jsonb_build_object('ok', true, 'status', 'friends', 'already', true);
     end if;
     if r.status = 'pending' and r.from_id = me then
-      return jsonb_build_object('ok', true, 'status', 'pending');
+      return jsonb_build_object('ok', true, 'status', 'pending', 'already', true);
     end if;
     if r.status = 'pending' and r.to_id = me then
       update public.moose_friends set status = 'friends', updated_at = now()

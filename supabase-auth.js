@@ -1687,11 +1687,11 @@ async function friendStatus(name) {
   catch (e) { return { status: 'none' }; }
 }
 async function friendAsk(name) {
-  const wait = typeof coolTap === 'function' ? coolTap('friend-ask:' + String(name).toLowerCase(), 8000) : 0;
-  if (wait) throw new Error('Wait ' + wait + 's');
   const row = await friendRpc('moose_friend_ask', { p_name: name });
   if (row && row.ok === false) throw new Error(row.error || 'Could not ask');
-  try { pingRemoteInbox(name, 'friend'); } catch (e) {}
+  if (!(row && row.already)) {
+    try { pingRemoteInbox(name, 'friend'); } catch (e) {}
+  }
   loadFriendInbox().catch(() => {});
   return row;
 }

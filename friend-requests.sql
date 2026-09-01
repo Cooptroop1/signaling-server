@@ -1,5 +1,4 @@
--- Friend requests: search a name, they confirm or burn. Burn = 24h cooldown.
--- P2P room codes stay open. Named mail/call/invite/poke need friends.
+-- Friend requests (safe types). Named mail/call need friends. Room codes stay open.
 create table if not exists public.moose_friends (
   user_a uuid not null,
   user_b uuid not null,
@@ -45,8 +44,10 @@ as $$
   select p_a is not null and p_b is not null and p_a <> p_b and exists (
     select 1 from public.moose_friends f
     where f.status = 'friends'
-      and f.user_a = least(p_a, p_b)
-      and f.user_b = greatest(p_a, p_b)
+      and (
+        (f.user_a = p_a and f.user_b = p_b)
+        or (f.user_a = p_b and f.user_b = p_a)
+      )
   );
 $$;
 
@@ -63,11 +64,41 @@ as $$
   );
 $$;
 
+create or replace function public.moose_mail_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  dest uuid;
+begin
+  if me is null then
+    raise exception 'friends only';
+  end if;
+  begin
+    dest := NEW.to_user_id;
+  exception when others then
+    raise exception 'friends only';
+  end;
+  if dest is null or not public.moose_can_mail(me, dest) then
+    raise exception 'friends only';
+  end if;
+  return NEW;
+end;
+$$;
+
 drop policy if exists "mail insert authed" on public.offline_messages;
 drop policy if exists "mail insert friends" on public.offline_messages;
 create policy "mail insert friends" on public.offline_messages
   for insert to authenticated
-  with check (from_user_id = auth.uid() and public.moose_can_mail(auth.uid(), to_user_id));
+  with check (auth.uid() is not null);
+
+drop trigger if exists moose_mail_guard_trg on public.offline_messages;
+create trigger moose_mail_guard_trg
+before insert on public.offline_messages
+for each row execute procedure public.moose_mail_guard();
 
 create or replace function public.moose_friend_status(p_name text)
 returns jsonb
@@ -92,7 +123,7 @@ begin
     return jsonb_build_object('status', 'self');
   end if;
   select * into r from public.moose_friends
-    where user_a = least(me, them) and user_b = greatest(me, them);
+    where (user_a = me and user_b = them) or (user_a = them and user_b = me);
   if not found then
     return jsonb_build_object('status', 'none');
   end if;
@@ -138,8 +169,7 @@ begin
     return jsonb_build_object('ok', false, 'error', 'That is you');
   end if;
   select coalesce(p.display_name, '') into my_name from public.profiles p where p.id = me;
-  a := least(me, them);
-  b := greatest(me, them);
+  if me::text < them::text then a := me; b := them; else a := them; b := me; end if;
   select * into r from public.moose_friends where user_a = a and user_b = b;
   if found then
     if r.status = 'friends' then
@@ -189,7 +219,7 @@ begin
   end if;
   update public.moose_friends
     set status = 'friends', updated_at = now()
-    where user_a = least(me, them) and user_b = greatest(me, them)
+    where ((user_a = me and user_b = them) or (user_a = them and user_b = me))
       and status = 'pending' and to_id = me;
   get diagnostics n = row_count;
   if n < 1 then
@@ -219,7 +249,7 @@ begin
   end if;
   update public.moose_friends
     set status = 'burned', burned_until = now() + interval '24 hours', updated_at = now()
-    where user_a = least(me, them) and user_b = greatest(me, them)
+    where ((user_a = me and user_b = them) or (user_a = them and user_b = me))
       and status = 'pending' and to_id = me;
   get diagnostics n = row_count;
   if n < 1 then
@@ -272,14 +302,17 @@ grant execute on function public.moose_friend_accept(text) to authenticated;
 grant execute on function public.moose_friend_burn(text) to authenticated;
 grant execute on function public.moose_friend_inbox() to authenticated;
 
--- Keep people you already Trusted so current chats do not lock.
 insert into public.moose_friends (user_a, user_b, from_id, to_id, from_name, to_name, status)
-select least(t.owner_id, t.peer_id), greatest(t.owner_id, t.peer_id), t.owner_id, t.peer_id,
+select
+  case when t.owner_id::text < t.peer_id::text then t.owner_id else t.peer_id end,
+  case when t.owner_id::text < t.peer_id::text then t.peer_id else t.owner_id end,
+  t.owner_id,
+  t.peer_id,
   coalesce((select p.display_name from public.profiles p where p.id = t.owner_id), ''),
   coalesce((select p.display_name from public.profiles p where p.id = t.peer_id), ''),
   'friends'
 from public.moose_trust t
-where t.owner_id <> t.peer_id
+where t.owner_id is not null and t.peer_id is not null and t.owner_id <> t.peer_id
 on conflict (user_a, user_b) do nothing;
 
 notify pgrst, 'reload schema';

@@ -1394,12 +1394,8 @@ async function handleSocketMessage(event) {
       return;
     }
     if (message.type === 'user-not-found') {
-      const searched = document.getElementById('searchUsernameInput').value.trim();
-      if (typeof offerNameClaim === 'function') offerNameClaim(searched);
-      else {
-        document.getElementById('searchError').textContent = 'User not found.';
-        setTimeout(() => { document.getElementById('searchError').textContent = ''; }, 5000);
-      }
+      document.getElementById('searchError').textContent = 'User not found.';
+      setTimeout(() => { document.getElementById('searchError').textContent = ''; }, 5000);
       return;
     }
     if (message.type === 'offline-message-sent') {
@@ -1728,11 +1724,8 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const found = await window.sbAuth.findUser(name);
         if (!found) {
-          if (typeof offerNameClaim === 'function') offerNameClaim(name);
-          else {
-            document.getElementById('searchError').textContent = 'User not found.';
-            setTimeout(() => { document.getElementById('searchError').textContent = ''; }, 5000);
-          }
+          document.getElementById('searchError').textContent = 'User not found.';
+          setTimeout(() => { document.getElementById('searchError').textContent = ''; }, 5000);
           return;
         }
         showUserSearchResult(name, found);
@@ -2459,68 +2452,6 @@ function deliverOfflineMessages(list) {
       confirmOfflineMessage(msg.id);
     }
   }
-}
-
-function claimableName(name) {
-  const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
-  if (!/^[A-Za-z0-9]{4,16}$/.test(nm)) return '';
-  if (/^[0-9]+$/.test(nm) && Number(nm) >= 1 && Number(nm) <= 999) return '';
-  if (nm.toLowerCase() === 'admin') return '';
-  return nm;
-}
-async function offerNameClaim(raw) {
-  const searchError = document.getElementById('searchError');
-  const searchResult = document.getElementById('searchResult');
-  if (searchError) searchError.textContent = '';
-  if (searchResult) searchResult.innerHTML = '';
-  const nm = claimableName(raw);
-  if (!nm) {
-    if (searchError) {
-      searchError.textContent = 'User not found.';
-      setTimeout(() => { if (searchError) searchError.textContent = ''; }, 5000);
-    }
-    return;
-  }
-  let taken = false;
-  try {
-    if (window.supabaseClient) {
-      const { data } = await window.supabaseClient.rpc('moose_name_taken', { p_name: nm });
-      taken = data === true;
-    }
-  } catch (e) {}
-  if (taken) {
-    if (searchError) {
-      searchError.textContent = 'User not found.';
-      setTimeout(() => { if (searchError) searchError.textContent = ''; }, 5000);
-    }
-    return;
-  }
-  const p = document.createElement('p');
-  p.innerHTML = '<strong>' + nm + '</strong> is available.';
-  searchResult.appendChild(p);
-  const hint = document.createElement('p');
-  hint.className = 'text-sm text-gray-600';
-  hint.textContent = 'Claim it for £1.99. You can use it in chat and sell it later.';
-  searchResult.appendChild(hint);
-  const btn = document.createElement('button');
-  btn.textContent = 'Claim ' + nm + ' for £1.99';
-  btn.onclick = async () => {
-    if (!window.sbAuth || !window.sbAuth.isLoggedIn()) {
-      if (typeof showStatusMessage === 'function') showStatusMessage('Log in to claim a name.');
-      if (window.sbAuth && typeof window.sbAuth.openLoginForShop === 'function') window.sbAuth.openLoginForShop();
-      else document.getElementById('openLoginBtn')?.click();
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = 'Opening payment…';
-    try {
-      await window.sbAuth.startVanityCheckout({ kind: 'claim', name: nm, price_cents: 199 });
-    } catch (e) {
-      btn.disabled = false;
-      btn.textContent = 'Claim ' + nm + ' for £1.99';
-    }
-  };
-  searchResult.appendChild(btn);
 }
 
 function renderFriendGate(box, name, rel, message) {

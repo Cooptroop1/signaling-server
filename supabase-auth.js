@@ -1235,11 +1235,13 @@ async function loadMooseShop() {
   if (wrap) wrap.classList.add('hidden');
   if (!sb) return;
   try {
-    let got = await sb.from('moose_shop').select('numbers_on, letters_on, video_notes_on, video_calls_on').eq('id', 1).maybeSingle();
+    let got = await sb.from('moose_shop').select('numbers_on, letters_on, video_notes_on, video_calls_on, names_claim_on, claim_cents').eq('id', 1).maybeSingle();
+    if (got.error) got = await sb.from('moose_shop').select('numbers_on, letters_on, names_claim_on, claim_cents').eq('id', 1).maybeSingle();
     if (got.error) got = await sb.from('moose_shop').select('numbers_on, letters_on').eq('id', 1).maybeSingle();
     if (got.error || !got.data) return;
     window.__mooseShop = got.data;
-    if (wrap && (got.data.numbers_on === true || got.data.letters_on === true)) wrap.classList.remove('hidden');
+    const claimOn = got.data.names_claim_on !== false;
+    if (wrap && (got.data.numbers_on === true || got.data.letters_on === true || claimOn)) wrap.classList.remove('hidden');
     if (typeof features !== 'undefined' && features) {
       if (got.data.video_notes_on === false) features.enableVideoNotes = false;
       else if (got.data.video_notes_on === true) features.enableVideoNotes = true;
@@ -1281,6 +1283,42 @@ async function checkMooseNumber(raw) {
   };
 }
 
+async function checkMooseClaim(raw) {
+  const nm = String(raw || '').replace(/[^A-Za-z0-9]/g, '');
+  if (!/^[A-Za-z0-9]{4,16}$/.test(nm)) {
+    return { ok: false, error: 'Use 4–16 letters or numbers. 1–999 are under Numbers.' };
+  }
+  if (/^[0-9]+$/.test(nm) && Number(nm) >= 1 && Number(nm) <= 999) {
+    return { ok: false, error: 'Numbers 1–999 are under Numbers.' };
+  }
+  if (['admin', 'anonomoose', 'moose', 'support', 'staff', 'help', 'root', 'system'].includes(nm.toLowerCase())) {
+    return { ok: false, error: 'That name is reserved.' };
+  }
+  if (!(window.__usedListings && window.__usedListings.length)) {
+    try { await loadUsedListings(); } catch (e) {}
+  }
+  const listed = (window.__usedListings || []).find((x) => String(x.name || '').toLowerCase() === nm.toLowerCase());
+  if (listed) {
+    const mine = isMyUsedListing(listed.name);
+    return { ok: true, kind: 'resale', resale: true, name: listed.name, price_cents: listed.price_cents, available: !mine, mine: mine };
+  }
+  if (!sb) return { ok: false, error: 'Not ready' };
+  let taken = false;
+  try {
+    const { data } = await sb.rpc('moose_name_taken', { p_name: nm });
+    taken = data === true;
+  } catch (e) {}
+  if (taken) return { ok: false, error: nm + ' is taken.' };
+  const shop = window.__mooseShop || {};
+  if (shop.names_claim_on === false) return { ok: false, error: 'Name claims are off.' };
+  const cents = Number(shop.claim_cents) >= 199 ? Math.round(Number(shop.claim_cents)) : 199;
+  return { ok: true, kind: 'claim', name: nm, price_cents: cents, available: true };
+}
+function claimPriceLabel(cents) {
+  const n = Number(cents || 0);
+  if (n % 100 === 0) return pounds(n);
+  return '£' + (n / 100).toFixed(2);
+}
 async function checkMooseLetter(raw) {
   const name = String(raw || '').replace(/[^A-Za-z0-9]/g, '');
   if (name.length < 1 || name.length > 3) return { ok: false, error: 'Use 1 to 3 letters or numbers, like Ace, AA1, 12A' };
@@ -1324,11 +1362,22 @@ async function loadUsedListings() {
     rows = [];
   }
   window.__usedListings = rows;
-  if (!rows.length) {
-    box.innerHTML = '<p class="text-sm text-gray-500">No used names listed yet.</p>';
-    return rows;
+  paintUsedList((document.getElementById('vanityNumberInput') || {}).value || '');
+  return rows;
+}
+function paintUsedList(filter) {
+  const box = document.getElementById('vanityUsedList');
+  if (!box) return;
+  const rows = window.__usedListings || [];
+  const q = String(filter || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+  const shown = q ? rows.filter((r) => String(r.name || '').toLowerCase().indexOf(q) !== -1) : rows;
+  if (!shown.length) {
+    box.innerHTML = q
+      ? '<p class="text-sm text-gray-500">No used names match that.</p>'
+      : '<p class="text-sm text-gray-500">No used names listed yet.</p>';
+    return;
   }
-  box.innerHTML = rows.map((r) => {
+  box.innerHTML = shown.map((r) => {
     const nm = String(r.name || '').replace(/</g, '').replace(/"/g, '');
     const mine = isMyUsedListing(nm);
     const bank = isBankTransferListing(r.price_cents);
@@ -1339,7 +1388,6 @@ async function loadUsedListings() {
   box.querySelectorAll('[data-used-name]').forEach((btn) => {
     btn.onclick = () => pickUsedListing(btn.getAttribute('data-used-name'), Number(btn.getAttribute('data-used-price') || 0), btn.getAttribute('data-mine') === '1');
   });
-  return rows;
 }
 function isMyUsedListing(name) {
   const mine = window.__myNames || [];
@@ -1384,19 +1432,23 @@ function setVanityTab(tab) {
   const used = document.getElementById('vanityUsedList');
   const tn = document.getElementById('vanityTabNum');
   const tl = document.getElementById('vanityTabLet');
+  const tc = document.getElementById('vanityTabClaim');
   const tu = document.getElementById('vanityTabUsed');
   const check = document.getElementById('vanityCheckBtn');
   if (input) {
     input.value = '';
-    input.maxLength = tab === 'used' ? 16 : 3;
-    input.placeholder = tab === 'letter' ? 'Ace, AA1, 12A' : (tab === 'used' ? 'listed name' : '1 to 999');
+    input.maxLength = (tab === 'used' || tab === 'claim') ? 16 : 3;
+    input.placeholder = tab === 'letter' ? 'Ace, AA1, 12A'
+      : (tab === 'used' ? 'Search used names'
+        : (tab === 'claim' ? '4–16 letters or numbers' : '1 to 999'));
     input.inputMode = tab === 'number' ? 'numeric' : 'text';
-    input.classList.toggle('hidden', tab === 'used');
+    input.classList.remove('hidden');
   }
   if (check) check.classList.toggle('hidden', tab === 'used');
   if (used) used.classList.toggle('hidden', tab !== 'used');
   if (tn) tn.className = tabClass(tab === 'number');
   if (tl) tl.className = tabClass(tab === 'letter');
+  if (tc) tc.className = tabClass(tab === 'claim');
   if (tu) tu.className = tabClass(tab === 'used');
   const buyBtn = document.getElementById('vanityBuyBtn');
   const bidBtn = document.getElementById('vanityBidBtn');
@@ -1405,7 +1457,11 @@ function setVanityTab(tab) {
   if (bidBtn) bidBtn.classList.add('hidden');
   if (bidInput) bidInput.classList.add('hidden');
   const out = document.getElementById('vanityShopResult');
-  if (out) out.textContent = tab === 'used' ? 'Used names. Buyer pays the list. Stripe fee + 5% comes from the seller.' : '';
+  if (out) {
+    out.textContent = tab === 'used'
+      ? 'Search the list. Buyer pays the list. Stripe fee + 5% comes from the seller.'
+      : (tab === 'claim' ? 'Extra names. £1.99 each. You can sell them later in Used.' : '');
+  }
   if (tab === 'used') loadUsedListings();
 }
 
@@ -1497,7 +1553,7 @@ async function startVanityCheckout(row) {
   }
   shopNote('Opening payment…');
   const body = {
-    kind: row.kind === 'resale' || row.resale ? 'resale' : (row.kind || (window.__vanityTab === 'letter' ? 'letter' : 'number')),
+    kind: row.kind === 'resale' || row.resale ? 'resale' : (row.kind === 'claim' || window.__vanityTab === 'claim' ? 'claim' : (row.kind || (window.__vanityTab === 'letter' ? 'letter' : 'number'))),
     resale: !!(row.kind === 'resale' || row.resale),
     n: row.n || null,
     name: row.name || (row.n != null ? String(row.n) : ''),
@@ -1544,9 +1600,11 @@ function bindVanityShop() {
   if (openBtn) openBtn.onclick = openVanityShop;
   const tn = document.getElementById('vanityTabNum');
   const tl = document.getElementById('vanityTabLet');
+  const tc = document.getElementById('vanityTabClaim');
   const tu = document.getElementById('vanityTabUsed');
   if (tn) tn.onclick = () => setVanityTab('number');
   if (tl) tl.onclick = () => setVanityTab('letter');
+  if (tc) tc.onclick = () => setVanityTab('claim');
   if (tu) tu.onclick = () => setVanityTab('used');
   if (closeBtn) closeBtn.onclick = () => {
     const m = document.getElementById('vanityShopModal');
@@ -1563,12 +1621,28 @@ function bindVanityShop() {
     if (!out) return;
     out.textContent = 'Checking…';
     hideActs();
-    const row = window.__vanityTab === 'letter'
-      ? await checkMooseLetter(input && input.value)
-      : await checkMooseNumber(input && input.value);
+    let row;
+    if (window.__vanityTab === 'claim') row = await checkMooseClaim(input && input.value);
+    else if (window.__vanityTab === 'letter') row = await checkMooseLetter(input && input.value);
+    else row = await checkMooseNumber(input && input.value);
     window.__vanityLast = row;
     if (!row || !row.ok) {
       out.textContent = (row && row.error) || 'Could not check';
+      return;
+    }
+    if (row.kind === 'resale' || row.resale) {
+      pickUsedListing(row.name, row.price_cents, row.mine);
+      return;
+    }
+    if (row.kind === 'claim') {
+      const label = row.name;
+      let msg = label + ' is available — ' + claimPriceLabel(row.price_cents) + '. You can use it and sell it later.';
+      out.textContent = msg;
+      if (buyBtn) {
+        buyBtn.disabled = false;
+        buyBtn.classList.remove('hidden');
+        buyBtn.textContent = 'Buy ' + label + ' for ' + claimPriceLabel(row.price_cents);
+      }
       return;
     }
     const label = row.kind === 'letter' ? row.name : ('#' + row.n);
@@ -1604,7 +1678,12 @@ function bindVanityShop() {
     }
   };
   if (checkBtn) checkBtn.onclick = runCheck;
-  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runCheck(); });
+  if (input) {
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') runCheck(); });
+    input.addEventListener('input', () => {
+      if (window.__vanityTab === 'used') paintUsedList(input.value);
+    });
+  }
   if (buyBtn) buyBtn.onclick = () => startVanityCheckout(window.__vanityLast || {});
   if (bidBtn) bidBtn.onclick = async () => {
     if (!isLoggedIn()) {

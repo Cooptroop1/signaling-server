@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901aw">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901aw">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901aw">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901aw">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901aw">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901aw">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901ax">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901ax">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901ax">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901ax">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901ax">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901ax">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1300,6 +1300,16 @@
       background: #e0f2fe;
       color: #075985;
     }
+    #vanityUsedList {
+      max-height: 16rem;
+      overflow-y: auto;
+    }
+    #vanityShopModal .shop-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-bottom: 0.75rem;
+    }
     #myNamesBox.hidden { display: none !important; }
     #sealedNotesWrap.has-mail #sealedNotesBtn {
       color: #dc2626 !important;
@@ -1666,7 +1676,7 @@
       <p>Sign up for a name. Search someone. Tap <strong>Add friend</strong>. They confirm, or they burn (you wait 24 hours to ask again).</p>
       <p>Once you are friends you can send a note, a read-once photo, a voice clip, or call them. Poke is just a nudge with no text.</p>
       <p>Sealed notes sit until they open them, or until the timer you set.</p>
-      <p>Moose Book is names you chose to save. Moose shop is extra names and numbers you can buy or sell.</p>
+      <p>Moose Book is names you chose to save. Moose shop is where you buy extra names (£1.99), numbers, and used names. Search is for people.</p>
       <h3>Safety</h3>
       <p>Nobody sees that you are typing. After a burn there is nothing useful left on the phone.</p>
       <p>Tap anywhere here to close.</p>
@@ -1707,13 +1717,14 @@
   <div id="vanityShopModal" class="totp-modal" role="dialog" aria-label="Moose shop">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-3">Moose shop</h2>
-      <p class="text-sm text-gray-600 mb-3">Log in, check a name, pay with card. Used names: buyer pays the list. Stripe fee + 5% comes from the seller.</p>
-      <div class="flex gap-2 mb-3">
+      <p class="text-sm text-gray-600 mb-3">Buy and sell here. Extra names (4–16) are £1.99. Used: buyer pays the list. Search people with Search, not here.</p>
+      <div class="shop-tabs">
         <button type="button" id="vanityTabNum" class="bg-gray-800 text-white px-3 py-1 rounded text-sm">Numbers</button>
-        <button type="button" id="vanityTabLet" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Short names</button>
+        <button type="button" id="vanityTabLet" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Short</button>
+        <button type="button" id="vanityTabClaim" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Names</button>
         <button type="button" id="vanityTabUsed" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Used</button>
       </div>
-      <input id="vanityNumberInput" type="text" inputmode="numeric" placeholder="1 to 999" class="border border-gray-300 p-3 w-full mb-3 rounded" maxlength="3">
+      <input id="vanityNumberInput" type="text" inputmode="numeric" placeholder="1 to 999" class="border border-gray-300 p-3 w-full mb-3 rounded" maxlength="16" autocomplete="off">
       <button id="vanityCheckBtn" type="button" class="bg-gray-800 text-white px-4 py-2 rounded w-full">Check</button>
       <div id="vanityUsedList" class="hidden mt-3"></div>
       <p id="vanityShopResult" class="text-sm text-gray-700 mt-3 mb-2"></p>
@@ -1980,15 +1991,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901aw"></script>
-  <script src="ratchet.js?v=260901aw"></script>
-  <script src="utils.js?v=260901aw"></script>
-  <script src="main.js?v=260901aw"></script>
-  <script src="init.js?v=260901aw"></script>
-  <script src="events.js?v=260901aw"></script>
+    <script src="crypto.js?v=260901ax"></script>
+  <script src="ratchet.js?v=260901ax"></script>
+  <script src="utils.js?v=260901ax"></script>
+  <script src="main.js?v=260901ax"></script>
+  <script src="init.js?v=260901ax"></script>
+  <script src="events.js?v=260901ax"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901aw"></script>
-  <script src="account-ui.js?v=260901aw"></script>
-  <script src="logged-features.js?v=260901aw"></script>
+  <script src="supabase-auth.js?v=260901ax"></script>
+  <script src="account-ui.js?v=260901ax"></script>
+  <script src="logged-features.js?v=260901ax"></script>
 </body>
 </html>

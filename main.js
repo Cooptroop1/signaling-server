@@ -603,11 +603,12 @@ async function processReceivedMessage(data, targetId) {
     return;
   }
   if (data.type === 'video-call-start') {
-    if (hasLiveCam() && videoCallActive) return;
-    showVideoStage(false);
-    const bar = document.getElementById('videoJoinBar');
-    if (bar) bar.classList.remove('hidden');
-    showStatusMessage('Video call — tap Join so this phone can ask for camera.');
+    whenCallSigIdle(async () => {
+      showVideoStage(false);
+      const bar = document.getElementById('videoJoinBar');
+      if (bar) bar.classList.remove('hidden');
+      showStatusMessage('Video call — tap Join so this phone can ask for camera.');
+    });
     return;
   }
   if (data.type === 'voice-call-start') {
@@ -615,8 +616,10 @@ async function processReceivedMessage(data, targetId) {
     return;
   }
   if (data.type === 'video-call-end' || data.type === 'voice-call-end') {
-    document.getElementById('videoJoinBar')?.classList.add('hidden');
-    if (voiceCallActive || videoCallActive) stopVoiceCall();
+    whenCallSigIdle(async () => {
+      document.getElementById('videoJoinBar')?.classList.add('hidden');
+      if (voiceCallActive || videoCallActive) await stopVoiceCall();
+    });
     return;
   }
   if (data.type === 'kick' || data.type === 'ban') {
@@ -882,7 +885,13 @@ async function armVideoSlot(pc) {
     try { await Promise.all(jobs); } catch (e) {}
   }
 }
-function parkVideoSlots() {
+let callSigChain = Promise.resolve();
+function whenCallSigIdle(fn) {
+  callSigChain = callSigChain.then(fn).catch(() => {});
+  return callSigChain;
+}
+async function parkVideoSlots() {
+  const jobs = [];
   peerConnections.forEach((pc) => {
     let dummy = null;
     try { dummy = dummyVideoTrack(); } catch (e) {}
@@ -894,13 +903,12 @@ function parkVideoSlots() {
           || '';
       } catch (e) {}
       if (kind !== 'video' || !tr.sender) return;
-      const old = tr.sender.track;
-      const put = dummy ? tr.sender.replaceTrack(dummy) : tr.sender.replaceTrack(null);
-      Promise.resolve(put).then(() => {
-        if (old && old !== dummy) { try { old.stop(); } catch (e) {} }
-      }).catch(() => {});
+      jobs.push(Promise.resolve(dummy ? tr.sender.replaceTrack(dummy) : tr.sender.replaceTrack(null)));
     });
   });
+  if (jobs.length) {
+    try { await Promise.all(jobs); } catch (e) {}
+  }
 }
 function showVideoStage(on) {
   const stage = document.getElementById('videoCallStage');
@@ -1063,9 +1071,9 @@ function stopAllMedia() {
   showVideoStage(false);
   if (typeof resetVoiceRecordingUi === 'function') resetVoiceRecordingUi();
 }
-function stopVoiceCall() {
+async function stopVoiceCall() {
   updateAudioTracks('remove');
-  parkVideoSlots();
+  try { await parkVideoSlots(); } catch (e) {}
   try { renegotiationCounts.clear(); } catch (e) {}
   document.getElementById('videoJoinBar')?.classList.add('hidden');
   stopAllMedia();
@@ -1648,13 +1656,17 @@ function toggleVideoCall() {
   showStatusMessage('Turning camera on (live, not saving)…');
   navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
     finishVideoCall(stream);
-  }).catch(() => {
+  }).catch((err) => {
     navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
       finishVideoCall(stream);
     }).catch(() => {
-      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-        finishVideoCall(stream);
-      }).catch(() => finishVideoCall(null));
+      if (err && err.name === 'NotFoundError') {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+          finishVideoCall(stream);
+        }).catch(() => finishVideoCall(null));
+      } else {
+        showStatusMessage('Allow camera, then tap Video call again.');
+      }
     });
   });
 }

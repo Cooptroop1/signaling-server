@@ -930,14 +930,35 @@ function attachRemoteVideo(targetId, stream, track) {
   el.play().catch(() => {});
   if (videoCallActive) showVideoStage(true);
 }
+function attachExistingRemoteVideo() {
+  const el = document.getElementById('remoteVideo');
+  if (!el || typeof peerConnections === 'undefined') return;
+  let track = null;
+  peerConnections.forEach((pc) => {
+    pc.getReceivers().forEach((r) => {
+      if (track) return;
+      if (r.track && r.track.kind === 'video' && r.track.readyState !== 'ended') track = r.track;
+    });
+  });
+  if (!track) return;
+  try { track.enabled = true; } catch (e) {}
+  el.srcObject = new MediaStream([track]);
+  el.muted = true;
+  el.playsInline = true;
+  el.setAttribute('playsinline', '');
+  el.setAttribute('webkit-playsinline', 'true');
+  const go = () => el.play().catch(() => {});
+  go();
+  setTimeout(go, 250);
+  try { track.onunmute = go; } catch (e) {}
+}
 function hideVideoJoinBar() {
   document.getElementById('videoJoinBar')?.classList.add('hidden');
 }
 function joinIncomingVideo() {
   hideVideoJoinBar();
   showVideoStage(true);
-  const el = document.getElementById('remoteVideo');
-  if (el) el.play().catch(() => {});
+  attachExistingRemoteVideo();
   if (hasLiveCam()) {
     videoCallActive = true;
     setLocalPreview(localStream);
@@ -1673,8 +1694,7 @@ function finishVideoCall(stream, opts) {
   }
   updateMicMuteButton();
   const saw = setLocalPreview(localStream);
-  const rem = document.getElementById('remoteVideo');
-  if (rem) rem.play().catch(() => {});
+  attachExistingRemoteVideo();
   if (!opts.fromJoin) broadcastVoiceCallEvent('video-call-start');
   if (saw) showStatusMessage('You should see yourself on the left. Them on the right.');
   else showStatusMessage('This phone did not start the camera. Tap Join again.');

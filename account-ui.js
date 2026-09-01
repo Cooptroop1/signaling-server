@@ -101,14 +101,12 @@ window.pendingInbox = window.pendingInbox || [];
 
 function updateSealedNotesBadge() {
   const wrap = document.getElementById('sealedNotesWrap');
-  const dot = document.getElementById('sealedNotesDot');
   const logged = window.sbAuth && window.sbAuth.isLoggedIn();
   const n = (window.pendingInbox || []).length;
   if (wrap) {
     wrap.classList.toggle('hidden', !logged);
     wrap.classList.toggle('has-mail', !!(logged && n > 0));
   }
-  if (dot) dot.classList.toggle('hidden', !(logged && n > 0));
 }
 
 function renderMooseInbox() {

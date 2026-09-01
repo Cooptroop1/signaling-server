@@ -753,6 +753,7 @@ async function handleOffer(offer, targetId) {
       await peerConnection.setLocalDescription({type: 'rollback'});
     }
     await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    armVideoSlot(peerConnection);
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
@@ -854,6 +855,48 @@ function dummyVideoTrack() {
 }
 function hasLiveCam() {
   return !!(localStream && localStream.getVideoTracks && localStream.getVideoTracks().some((tr) => tr.readyState === 'live'));
+}
+function armVideoSlot(pc) {
+  if (!pc) return;
+  let dummy = null;
+  try { dummy = dummyVideoTrack(); } catch (e) {}
+  pc.getTransceivers().forEach((tr) => {
+    let kind = '';
+    try {
+      kind = (tr.receiver && tr.receiver.track && tr.receiver.track.kind)
+        || (tr.sender && tr.sender.track && tr.sender.track.kind)
+        || '';
+    } catch (e) {}
+    if (kind === 'audio' || kind === 'video') {
+      try { tr.direction = 'sendrecv'; } catch (e) {}
+    }
+    if (kind === 'video' && tr.sender && dummy) {
+      const cur = tr.sender.track;
+      if (!cur || cur.readyState === 'ended') {
+        tr.sender.replaceTrack(dummy).catch(() => {});
+      }
+    }
+  });
+}
+function parkVideoSlots() {
+  peerConnections.forEach((pc) => {
+    let dummy = null;
+    try { dummy = dummyVideoTrack(); } catch (e) {}
+    pc.getTransceivers().forEach((tr) => {
+      let kind = '';
+      try {
+        kind = (tr.receiver && tr.receiver.track && tr.receiver.track.kind)
+          || (tr.sender && tr.sender.track && tr.sender.track.kind)
+          || '';
+      } catch (e) {}
+      if (kind !== 'video' || !tr.sender) return;
+      const old = tr.sender.track;
+      const put = dummy ? tr.sender.replaceTrack(dummy) : tr.sender.replaceTrack(null);
+      Promise.resolve(put).then(() => {
+        if (old && old !== dummy) { try { old.stop(); } catch (e) {} }
+      }).catch(() => {});
+    });
+  });
 }
 function showVideoStage(on) {
   const stage = document.getElementById('videoCallStage');
@@ -1017,7 +1060,7 @@ function stopAllMedia() {
 }
 function stopVoiceCall() {
   updateAudioTracks('remove');
-  updateVideoTracks('remove');
+  parkVideoSlots();
   try { renegotiationCounts.clear(); } catch (e) {}
   document.getElementById('videoJoinBar')?.classList.add('hidden');
   stopAllMedia();
@@ -1575,7 +1618,6 @@ function finishVideoCall(stream, opts) {
   const saw = setLocalPreview(localStream);
   const rem = document.getElementById('remoteVideo');
   if (rem) rem.play().catch(() => {});
-  if (opts.fromJoin) setTimeout(() => flushRenegotiate(), 200);
   if (!opts.fromJoin) broadcastVoiceCallEvent('video-call-start');
   if (saw) showStatusMessage('You should see yourself on the left. Them on the right.');
   else showStatusMessage('This phone did not start the camera. Tap Join again.');
@@ -1585,7 +1627,7 @@ function toggleVideoCall() {
     showStatusMessage('Video calls are off.');
     return;
   }
-  if (videoCallActive) {
+  if (videoCallActive && hasLiveCam()) {
     stopVoiceCall();
     broadcastVoiceCallEvent('video-call-end');
     broadcastVoiceCallEvent('voice-call-end');

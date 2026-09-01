@@ -415,16 +415,12 @@ async function startPeerConnection(targetId, isOfferer) {
     const stream = event.streams[0] || new MediaStream([event.track]);
     if (event.track && event.track.kind === 'video') {
       const attach = () => {
-        if (event.track.readyState !== 'live') return;
-        const set = event.track.getSettings && event.track.getSettings();
-        if (set && !set.width && !set.height) return;
+        if (event.track.readyState === 'ended') return;
         attachRemoteVideo(targetId, stream, event.track);
       };
-      if (event.track.muted) {
-        event.track.addEventListener('unmute', attach, { once: true });
-        return;
-      }
-      attach();
+      event.track.addEventListener('unmute', attach, { once: true });
+      if (!event.track.muted) attach();
+      else setTimeout(attach, 800);
       return;
     }
     let audio = remoteAudios.get(targetId);
@@ -853,19 +849,23 @@ function hideVideoJoinBar() {
 }
 function joinIncomingVideo() {
   hideVideoJoinBar();
+  showVideoStage(true);
   const el = document.getElementById('remoteVideo');
   if (el) el.play().catch(() => {});
-  if (videoCallActive) return;
+  if (videoCallActive) {
+    if (localStream) setLocalPreview(localStream);
+    return;
+  }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    finishVideoCall(null);
+    finishVideoCall(null, { fromJoin: true });
     return;
   }
   navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
-    finishVideoCall(stream);
+    finishVideoCall(stream, { fromJoin: true });
   }).catch(() => {
     navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
-      finishVideoCall(stream);
-    }).catch(() => finishVideoCall(null));
+      finishVideoCall(stream, { fromJoin: true });
+    }).catch(() => finishVideoCall(null, { fromJoin: true }));
   });
 }
 function senderForKind(pc, kind) {
@@ -1504,34 +1504,51 @@ function ensureRecvVideo() {
 }
 function setLocalPreview(stream) {
   const localVid = document.getElementById('localVideo');
-  if (!localVid) return;
-  if (stream && stream.getVideoTracks().length) {
-    localVid.srcObject = stream;
-    localVid.play().catch(() => {});
-  } else {
+  if (!localVid) return false;
+  localVid.muted = true;
+  localVid.autoplay = true;
+  localVid.playsInline = true;
+  localVid.setAttribute('playsinline', '');
+  localVid.setAttribute('webkit-playsinline', 'true');
+  const live = (stream && stream.getVideoTracks) ? stream.getVideoTracks().filter((tr) => tr.readyState !== 'ended') : [];
+  if (!live.length) {
     localVid.srcObject = null;
+    return false;
   }
+  live.forEach((tr) => { tr.enabled = true; });
+  let preview = stream;
+  try { preview = stream.clone(); } catch (e) { preview = new MediaStream(live); }
+  try { preview.getAudioTracks().forEach((tr) => preview.removeTrack(tr)); } catch (e) {}
+  localVid.srcObject = preview;
+  const go = () => localVid.play().catch(() => {});
+  go();
+  setTimeout(go, 250);
+  return true;
 }
-function finishVideoCall(stream) {
+function finishVideoCall(stream, opts) {
+  opts = opts || {};
   if (localStream && localStream !== stream) {
     localStream.getTracks().forEach((tr) => tr.stop());
   }
   localStream = stream || null;
+  if (localStream) localStream.getTracks().forEach((tr) => { tr.enabled = true; });
   videoCallActive = true;
   voiceCallActive = true;
   showVideoStage(true);
   document.getElementById('videoCallButton')?.classList.add('active');
   document.getElementById('audioOutputButton')?.classList.remove('hidden');
   if (typeof updateAttachButton === 'function') updateAttachButton();
+  const saw = setLocalPreview(localStream);
   if (localStream) {
     updateAudioTracks('add');
     if (localStream.getVideoTracks().length) updateVideoTracks('add');
-    setLocalPreview(localStream);
   }
-  flushRenegotiate();
-  broadcastVoiceCallEvent('video-call-start');
-  if (localStream && localStream.getVideoTracks().length) showStatusMessage('Live camera — nothing is saved. You left, them right.');
-  else showStatusMessage('No camera here — you should see them on the right.');
+  const rem = document.getElementById('remoteVideo');
+  if (rem) rem.play().catch(() => {});
+  setTimeout(() => flushRenegotiate(), 300);
+  if (!opts.fromJoin) broadcastVoiceCallEvent('video-call-start');
+  if (saw) showStatusMessage('You should see yourself on the left. Them on the right.');
+  else showStatusMessage('This phone did not start the camera. Tap Join again.');
 }
 function toggleVideoCall() {
   if (!videoCallsOn()) {

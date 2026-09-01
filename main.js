@@ -23,7 +23,8 @@ const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
 let globalSendRate = { count: 0, startTime: performance.now() }; // Global send limit
 const renegotiationCounts = new Map(); // New: Per-peer renegotiation attempt counter
-const maxRenegotiations = 5; // New: Max renegotiation attempts per peer
+const maxRenegotiations = 40;
+const renegotiateTimers = new Map();
 let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
@@ -862,9 +863,6 @@ function updateVideoTracks(action) {
         }
       });
     }
-    if (peerConnection.signalingState === 'stable') {
-      renegotiate(targetId);
-    }
   });
 }
 async function toggleVoiceCall() {
@@ -901,10 +899,11 @@ function updateAudioTracks(action) {
         }
       });
     }
-    if (peerConnection.signalingState === 'stable') {
-      renegotiate(targetId);
-    }
   });
+}
+function flushRenegotiate() {
+  if (typeof peerConnections === 'undefined') return;
+  peerConnections.forEach((_, id) => renegotiate(id));
 }
 async function startVoiceCall() {
   if (voiceCallActive && localStream) return;
@@ -917,6 +916,7 @@ async function startVoiceCall() {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
     updateAudioTracks('add');
+    flushRenegotiate();
     voiceCallActive = true;
     const callBtn = document.getElementById('voiceCallButton');
     callBtn.classList.add('active');
@@ -947,6 +947,7 @@ function stopVoiceCall() {
   }
   updateAudioTracks('remove');
   updateVideoTracks('remove');
+  flushRenegotiate();
   videoCallActive = false;
   const localVid = document.getElementById('localVideo');
   if (localVid) localVid.srcObject = null;
@@ -966,43 +967,42 @@ function stopVoiceCall() {
   if (typeof updateAttachButton === 'function') updateAttachButton();
   showStatusMessage('Call ended.');
 }
-async function renegotiate(targetId) {
+function renegotiate(targetId) {
+  if (renegotiateTimers.has(targetId)) clearTimeout(renegotiateTimers.get(targetId));
+  renegotiateTimers.set(targetId, setTimeout(() => {
+    renegotiateTimers.delete(targetId);
+    renegotiateNow(targetId);
+  }, 200));
+}
+async function renegotiateNow(targetId) {
   const peerConnection = peerConnections.get(targetId);
-  if (peerConnection) {
-    const count = renegotiationCounts.get(targetId) || 0;
-    if (count >= maxRenegotiations) {
-      console.warn(`Max renegotiations reached for ${targetId} (${maxRenegotiations}), aborting.`);
-      cleanupPeerConnection(targetId);
-      return;
-    }
-    renegotiationCounts.set(targetId, count + 1);
-    if (!negotiationQueues.has(targetId)) {
-      negotiationQueues.set(targetId, Promise.resolve());
-    }
-    negotiationQueues.set(targetId, negotiationQueues.get(targetId).then(async () => {
-      if (renegotiating.get(targetId)) {
-        console.log(`Renegotiation already in progress for ${targetId}, skipping.`);
-        return;
+  if (!peerConnection) return;
+  if (peerConnection.signalingState !== 'stable') {
+    const wait = () => {
+      peerConnection.removeEventListener('signalingstatechange', wait);
+      if (peerConnections.get(targetId) === peerConnection && peerConnection.signalingState === 'stable') {
+        renegotiate(targetId);
       }
-      if (peerConnection.signalingState !== 'stable') {
-        console.log(`Cannot renegotiate with ${targetId}: state is ${peerConnection.signalingState}. Queuing.`);
-        return renegotiate(targetId);
-      }
-      renegotiating.set(targetId, true);
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
-      } catch (error) {
-        console.error(`Error renegotiating with ${targetId}:`, error);
-      } finally {
-        renegotiating.set(targetId, false);
-      }
-    }).catch(error => {
-      console.error(`Negotiation queue error for ${targetId}:`, error);
-    }));
-  } else {
-    console.log(`No peer connection for ${targetId}, cannot renegotiate.`);
+    };
+    peerConnection.addEventListener('signalingstatechange', wait);
+    return;
+  }
+  if (renegotiating.get(targetId)) return;
+  const count = renegotiationCounts.get(targetId) || 0;
+  if (count >= maxRenegotiations) {
+    console.warn('Skipping extra renegotiate for', targetId);
+    return;
+  }
+  renegotiationCounts.set(targetId, count + 1);
+  renegotiating.set(targetId, true);
+  try {
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    sendSignalingMessage('offer', { offer: peerConnection.localDescription, targetId });
+  } catch (error) {
+    console.error('Error renegotiating with', targetId, error);
+  } finally {
+    renegotiating.set(targetId, false);
   }
 }
 function sendMessageViaSocket(type, additionalData, isRelay = false) {

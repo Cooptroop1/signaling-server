@@ -879,13 +879,17 @@ function senderForKind(pc, kind) {
 }
 function updateVideoTracks(action) {
   peerConnections.forEach((peerConnection) => {
+    const tr = peerConnection.getTransceivers().find((x) => {
+      const k = (x.receiver && x.receiver.track && x.receiver.track.kind) || (x.sender && x.sender.track && x.sender.track.kind);
+      return k === 'video';
+    });
+    const sender = (tr && tr.sender) || senderForKind(peerConnection, 'video');
     if (action === 'add' && localStream) {
       localStream.getVideoTracks().forEach(track => {
-        const sender = senderForKind(peerConnection, 'video');
+        try { if (tr) tr.direction = 'sendrecv'; } catch (e) {}
         if (sender) sender.replaceTrack(track).catch(() => {});
       });
     } else if (action === 'remove') {
-      const sender = senderForKind(peerConnection, 'video');
       if (sender) sender.replaceTrack(null).catch(() => {});
     }
   });
@@ -1526,7 +1530,7 @@ function finishVideoCall(stream) {
   }
   flushRenegotiate();
   broadcastVoiceCallEvent('video-call-start');
-  if (localStream && localStream.getVideoTracks().length) showStatusMessage('Video call started. You left, them right.');
+  if (localStream && localStream.getVideoTracks().length) showStatusMessage('Live camera — nothing is saved. You left, them right.');
   else showStatusMessage('No camera here — you should see them on the right.');
 }
 function toggleVideoCall() {
@@ -1541,14 +1545,13 @@ function toggleVideoCall() {
     return;
   }
   if (typeof mediaRecorder !== 'undefined' && mediaRecorder && mediaRecorder.state === 'recording') {
-    showStatusMessage('Stop the note first.');
-    return;
+    try { voiceCancelled = true; mediaRecorder.stop(); } catch (e) {}
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     finishVideoCall(null);
     return;
   }
-  showStatusMessage('Starting video call…');
+  showStatusMessage('Turning camera on (live, not saving)…');
   navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
     finishVideoCall(stream);
   }).catch(() => {

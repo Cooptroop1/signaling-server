@@ -356,6 +356,8 @@ async function startPeerConnection(targetId, isOfferer) {
     setupDataChannel(dataChannel, targetId);
     dataChannels.set(targetId, dataChannel);
   }
+  try { peerConnection.addTransceiver('audio', { direction: 'sendrecv' }); } catch (e) {}
+  try { peerConnection.addTransceiver('video', { direction: 'sendrecv' }); } catch (e) {}
   peerConnection.onicecandidate = (event) => {
     if (!event.candidate) return;
     const line = String(event.candidate.candidate || '');
@@ -586,15 +588,15 @@ async function processReceivedMessage(data, targetId) {
     applyRemoteRoomWipe();
     return;
   }
-  if (data.type === 'voice-call-start' || data.type === 'video-call-start') {
-    if (data.type === 'video-call-start') {
-      videoCallActive = true;
-      showVideoStage(true);
-      ensureRecvVideo();
-    }
-    if (!voiceCallActive) {
-      startVoiceCall();
-    }
+  if (data.type === 'video-call-start') {
+    videoCallActive = true;
+    voiceCallActive = true;
+    showVideoStage(true);
+    document.getElementById('videoCallButton')?.classList.add('active');
+    return;
+  }
+  if (data.type === 'voice-call-start') {
+    if (!voiceCallActive && !videoCallActive) startVoiceCall();
     return;
   }
   if (data.type === 'voice-call-end') {
@@ -825,43 +827,33 @@ function showVideoStage(on) {
   if (stage) stage.classList.toggle('hidden', !on);
 }
 function attachRemoteVideo(targetId, stream, track) {
-  const box = document.getElementById('remoteVideos');
   const stage = document.getElementById('videoCallStage');
-  if (!box || !stage) return;
+  const el = document.getElementById('remoteVideo');
+  if (!stage || !el) return;
   stage.classList.remove('hidden');
-  let el = document.getElementById('remoteVideo-' + targetId);
-  if (!el) {
-    el = document.createElement('video');
-    el.id = 'remoteVideo-' + targetId;
-    el.autoplay = true;
-    el.playsInline = true;
-    el.setAttribute('playsinline', '');
-    box.appendChild(el);
-  }
   const ms = stream || new MediaStream([track]);
   el.srcObject = ms;
   el.play().catch(() => {});
 }
+function senderForKind(pc, kind) {
+  const hit = pc.getSenders().find(s => s.track && s.track.kind === kind);
+  if (hit) return hit;
+  const tr = pc.getTransceivers().find((x) => {
+    const k = (x.receiver && x.receiver.track && x.receiver.track.kind) || (x.sender && x.sender.track && x.sender.track.kind);
+    return k === kind;
+  });
+  return tr ? tr.sender : null;
+}
 function updateVideoTracks(action) {
-  peerConnections.forEach((peerConnection, targetId) => {
+  peerConnections.forEach((peerConnection) => {
     if (action === 'add' && localStream) {
       localStream.getVideoTracks().forEach(track => {
-        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(track).catch(() => {
-            try { peerConnection.addTrack(track, localStream); } catch (e) {}
-          });
-        } else {
-          try { peerConnection.addTrack(track, localStream); } catch (e) {}
-        }
+        const sender = senderForKind(peerConnection, 'video');
+        if (sender) sender.replaceTrack(track).catch(() => {});
       });
     } else if (action === 'remove') {
-      peerConnection.getSenders().forEach(sender => {
-        if (sender.track && sender.track.kind === 'video') {
-          try { sender.replaceTrack(null); } catch (e) {}
-          try { peerConnection.removeTrack(sender); } catch (e) {}
-        }
-      });
+      const sender = senderForKind(peerConnection, 'video');
+      if (sender) sender.replaceTrack(null).catch(() => {});
     }
   });
 }
@@ -879,25 +871,15 @@ async function toggleVoiceCall() {
   }
 }
 function updateAudioTracks(action) {
-  peerConnections.forEach((peerConnection, targetId) => {
+  peerConnections.forEach((peerConnection) => {
     if (action === 'add' && localStream) {
       localStream.getAudioTracks().forEach(track => {
-        const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'audio');
-        if (sender) {
-          sender.replaceTrack(track).catch(() => {
-            try { peerConnection.addTrack(track, localStream); } catch (e) {}
-          });
-        } else {
-          try { peerConnection.addTrack(track, localStream); } catch (e) {}
-        }
+        const sender = senderForKind(peerConnection, 'audio');
+        if (sender) sender.replaceTrack(track).catch(() => {});
       });
     } else if (action === 'remove') {
-      peerConnection.getSenders().forEach(sender => {
-        if (sender.track && sender.track.kind === 'audio') {
-          try { sender.replaceTrack(null); } catch (e) {}
-          try { peerConnection.removeTrack(sender); } catch (e) {}
-        }
-      });
+      const sender = senderForKind(peerConnection, 'audio');
+      if (sender) sender.replaceTrack(null).catch(() => {});
     }
   });
 }
@@ -947,12 +929,11 @@ function stopVoiceCall() {
   }
   updateAudioTracks('remove');
   updateVideoTracks('remove');
-  flushRenegotiate();
   videoCallActive = false;
   const localVid = document.getElementById('localVideo');
   if (localVid) localVid.srcObject = null;
-  const rem = document.getElementById('remoteVideos');
-  if (rem) rem.innerHTML = '';
+  const rem = document.getElementById('remoteVideo');
+  if (rem) rem.srcObject = null;
   showVideoStage(false);
   const vcallBtn = document.getElementById('videoCallButton');
   if (vcallBtn) vcallBtn.classList.remove('active');
@@ -1486,16 +1467,11 @@ function finishVideoCall(stream) {
   if (localStream) {
     updateAudioTracks('add');
     if (localStream.getVideoTracks().length) updateVideoTracks('add');
-    else ensureRecvVideo();
     setLocalPreview(localStream);
-  } else {
-    ensureRecvVideo();
   }
-  flushRenegotiate();
   broadcastVoiceCallEvent('video-call-start');
-  broadcastVoiceCallEvent('voice-call-start');
-  if (localStream && localStream.getVideoTracks().length) showStatusMessage('Video call started.');
-  else showStatusMessage('No camera here — you can still see them if they turn theirs on.');
+  if (localStream && localStream.getVideoTracks().length) showStatusMessage('Video call started. You left, them right.');
+  else showStatusMessage('No camera here — you should see them on the right.');
 }
 function toggleVideoCall() {
   if (!videoCallsOn()) {

@@ -8,6 +8,7 @@ let grokBotActive = false;
 let grokApiKey = localStorage.getItem('grokApiKey') || '';
 let renegotiating = new Map();
 let audioOutputMode = 'speaker';
+let micMuted = false;
 let totpEnabled = false;
 let totpSecret = '';
 let pendingTotpSecret = null;
@@ -1005,6 +1006,7 @@ function updateAudioTracks(action) {
   peerConnections.forEach((peerConnection) => {
     if (action === 'add' && localStream) {
       localStream.getAudioTracks().forEach(track => {
+        track.enabled = !micMuted;
         const sender = senderForKind(peerConnection, 'audio');
         if (sender) sender.replaceTrack(track).catch(() => {});
       });
@@ -1036,6 +1038,9 @@ async function startVoiceCall() {
     callBtn.title = 'End call';
     callBtn.setAttribute('aria-label', 'End call');
     document.getElementById('audioOutputButton')?.classList.remove('hidden');
+    document.getElementById('micMuteButton')?.classList.remove('hidden');
+    micMuted = false;
+    applyMicMute();
     if (typeof updateAttachButton === 'function') updateAttachButton();
     if (typeof updateSpeakerButton === 'function') updateSpeakerButton();
     showStatusMessage('Call started. Use speaker if you cannot hear them.');
@@ -1097,6 +1102,9 @@ async function stopVoiceCall() {
     callBtn.setAttribute('aria-label', 'Start voice call');
   }
   document.getElementById('audioOutputButton')?.classList.add('hidden');
+  document.getElementById('micMuteButton')?.classList.add('hidden');
+  micMuted = false;
+  updateMicMuteButton();
   if (typeof updateAttachButton === 'function') updateAttachButton();
   showStatusMessage('Call ended.');
 }
@@ -1382,6 +1390,42 @@ function updateSpeakerButton() {
   audioOutputButton.classList.toggle('speaker', loud);
   audioOutputButton.classList.toggle('hidden', !voiceCallActive);
 }
+function applyMicMute() {
+  if (localStream) {
+    localStream.getAudioTracks().forEach((tr) => { tr.enabled = !micMuted; });
+  }
+  if (typeof peerConnections !== 'undefined') {
+    peerConnections.forEach((pc) => {
+      pc.getSenders().forEach((s) => {
+        if (s.track && s.track.kind === 'audio') s.track.enabled = !micMuted;
+      });
+    });
+  }
+  updateMicMuteButton();
+}
+function updateMicMuteButton() {
+  const inCall = !!(voiceCallActive || videoCallActive);
+  const label = micMuted ? 'Mic off' : 'Mute mic';
+  const a = document.getElementById('micMuteButton');
+  if (a) {
+    a.classList.toggle('hidden', !inCall);
+    a.classList.toggle('muted', micMuted);
+    a.textContent = micMuted ? '🔇' : '🎤';
+    a.title = label;
+    a.setAttribute('aria-label', label);
+  }
+  const b = document.getElementById('videoMicMuteBtn');
+  if (b) {
+    b.classList.toggle('muted', micMuted);
+    b.textContent = label;
+  }
+}
+function toggleMicMute() {
+  if (!voiceCallActive && !videoCallActive) return;
+  micMuted = !micMuted;
+  applyMicMute();
+  showStatusMessage(micMuted ? 'Mic muted' : 'Mic on');
+}
 function toggleAudioOutput() {
   audioOutputMode = audioOutputMode === 'earpiece' ? 'speaker' : 'earpiece';
   remoteAudios.forEach((audio, targetId) => {
@@ -1621,12 +1665,15 @@ function finishVideoCall(stream, opts) {
     localStream.getTracks().forEach((tr) => tr.stop());
   }
   localStream = stream || null;
-  if (localStream) localStream.getTracks().forEach((tr) => { tr.enabled = true; });
+  micMuted = false;
+  if (localStream) localStream.getTracks().forEach((tr) => { if (tr.kind !== 'audio') tr.enabled = true; });
+  applyMicMute();
   videoCallActive = true;
   voiceCallActive = true;
   showVideoStage(true);
   document.getElementById('videoCallButton')?.classList.add('active');
   document.getElementById('audioOutputButton')?.classList.remove('hidden');
+  document.getElementById('micMuteButton')?.classList.remove('hidden');
   if (typeof updateAttachButton === 'function') updateAttachButton();
   if (localStream) {
     updateAudioTracks('add');

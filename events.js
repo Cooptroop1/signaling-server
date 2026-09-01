@@ -2136,6 +2136,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('audioOutputButton').onclick = () => {
     toggleAudioOutput();
   };
+  const micBtn = document.getElementById('micMuteButton');
+  if (micBtn) micBtn.onclick = () => toggleMicMute();
+  const vidMic = document.getElementById('videoMicMuteBtn');
+  if (vidMic) vidMic.onclick = () => toggleMicMute();
   document.getElementById('saveGrokKey').onclick = () => {
     saveGrokKey();
   };

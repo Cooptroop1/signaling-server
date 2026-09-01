@@ -913,6 +913,10 @@ async function parkVideoSlots() {
 function showVideoStage(on) {
   const stage = document.getElementById('videoCallStage');
   if (stage) stage.classList.toggle('hidden', !on);
+  if (!on) {
+    const rem = document.getElementById('remoteVideo');
+    if (rem && rem.parentElement) rem.parentElement.classList.remove('video-full');
+  }
 }
 function attachRemoteVideo(targetId, stream, track) {
   const el = document.getElementById('remoteVideo');

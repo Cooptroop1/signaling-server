@@ -2083,6 +2083,24 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   const joinBtn = document.getElementById('videoJoinBtn');
   if (joinBtn) joinBtn.onclick = () => joinIncomingVideo();
+  const remVid = document.getElementById('remoteVideo');
+  if (remVid && !remVid._fullBound) {
+    remVid._fullBound = true;
+    let tapAt = 0;
+    const onTap = (evnt) => {
+      const n = Date.now();
+      if (n - tapAt < 320) {
+        evnt.preventDefault();
+        if (remVid.parentElement) remVid.parentElement.classList.toggle('video-full');
+        tapAt = 0;
+      } else tapAt = n;
+    };
+    remVid.addEventListener('click', onTap);
+    remVid.addEventListener('touchend', (evnt) => {
+      if (evnt.changedTouches && evnt.changedTouches.length > 1) return;
+      onTap(evnt);
+    }, { passive: false });
+  }
   const ignoreBtn = document.getElementById('videoIgnoreBtn');
   if (ignoreBtn) ignoreBtn.onclick = () => {
     document.getElementById('videoJoinBar')?.classList.add('hidden');

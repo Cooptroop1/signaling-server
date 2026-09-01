@@ -2446,7 +2446,7 @@ async function offerNameClaim(raw) {
     return;
   }
   const p = document.createElement('p');
-  p.innerHTML = '<strong>' + nm + '</strong> is free.';
+  p.innerHTML = '<strong>' + nm + '</strong> is available.';
   searchResult.appendChild(p);
   const hint = document.createElement('p');
   hint.className = 'text-sm text-gray-600';

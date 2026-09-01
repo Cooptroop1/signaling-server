@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901y">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901y">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901y">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901y">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901y">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901y">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901z">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901z">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901z">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901z">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901z">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901z">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -461,6 +461,29 @@
       margin: 0 0 8px;
     }
     .video-call-stage.hidden { display: none !important; }
+    .video-join-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: #111827;
+      color: #fff;
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin: 0 0 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .video-join-bar.hidden { display: none !important; }
+    .video-join-bar button {
+      border: 0;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #videoJoinBtn { background: #22c55e; color: #fff; }
+    #videoIgnoreBtn { background: #374151; color: #fff; }
     .video-slot {
       position: relative;
       background: #111;
@@ -1403,6 +1426,13 @@
           <button id="addUserText" class="hidden" aria-label="Add another person">Add User</button>
           <button id="roomQrButton" aria-label="Show room QR">Room QR</button>
         </div>
+        <div id="videoJoinBar" class="video-join-bar hidden">
+          <span>Video call</span>
+          <span>
+            <button type="button" id="videoJoinBtn">Join</button>
+            <button type="button" id="videoIgnoreBtn">Ignore</button>
+          </span>
+        </div>
         <div id="videoCallStage" class="video-call-stage hidden">
           <div class="video-slot">
             <video id="localVideo" muted autoplay playsinline></video>
@@ -1845,15 +1875,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901y"></script>
-  <script src="ratchet.js?v=260901y"></script>
-  <script src="utils.js?v=260901y"></script>
-  <script src="main.js?v=260901y"></script>
-  <script src="init.js?v=260901y"></script>
-  <script src="events.js?v=260901y"></script>
+    <script src="crypto.js?v=260901z"></script>
+  <script src="ratchet.js?v=260901z"></script>
+  <script src="utils.js?v=260901z"></script>
+  <script src="main.js?v=260901z"></script>
+  <script src="init.js?v=260901z"></script>
+  <script src="events.js?v=260901z"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901y"></script>
-  <script src="account-ui.js?v=260901y"></script>
-  <script src="logged-features.js?v=260901y"></script>
+  <script src="supabase-auth.js?v=260901z"></script>
+  <script src="account-ui.js?v=260901z"></script>
+  <script src="logged-features.js?v=260901z"></script>
 </body>
 </html>

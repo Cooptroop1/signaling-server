@@ -601,20 +601,19 @@ async function processReceivedMessage(data, targetId) {
     return;
   }
   if (data.type === 'video-call-start') {
-    videoCallActive = true;
-    voiceCallActive = true;
-    showVideoStage(true);
-    document.getElementById('videoCallButton')?.classList.add('active');
+    if (videoCallActive) return;
+    const bar = document.getElementById('videoJoinBar');
+    if (bar) bar.classList.remove('hidden');
+    showStatusMessage('Video call — tap Join so this phone can ask for camera.');
     return;
   }
   if (data.type === 'voice-call-start') {
     if (!voiceCallActive && !videoCallActive) startVoiceCall();
     return;
   }
-  if (data.type === 'voice-call-end') {
-    if (voiceCallActive) {
-      stopVoiceCall();
-    }
+  if (data.type === 'video-call-end' || data.type === 'voice-call-end') {
+    document.getElementById('videoJoinBar')?.classList.add('hidden');
+    if (voiceCallActive || videoCallActive) stopVoiceCall();
     return;
   }
   if (data.type === 'kick' || data.type === 'ban') {
@@ -839,13 +838,35 @@ function showVideoStage(on) {
   if (stage) stage.classList.toggle('hidden', !on);
 }
 function attachRemoteVideo(targetId, stream, track) {
-  const stage = document.getElementById('videoCallStage');
   const el = document.getElementById('remoteVideo');
-  if (!stage || !el) return;
-  stage.classList.remove('hidden');
-  const ms = stream || new MediaStream([track]);
+  if (!el) return;
+  const ms = new MediaStream([track]);
   el.srcObject = ms;
+  el.muted = true;
+  el.playsInline = true;
+  el.setAttribute('playsinline', '');
   el.play().catch(() => {});
+  if (videoCallActive) showVideoStage(true);
+}
+function hideVideoJoinBar() {
+  document.getElementById('videoJoinBar')?.classList.add('hidden');
+}
+function joinIncomingVideo() {
+  hideVideoJoinBar();
+  const el = document.getElementById('remoteVideo');
+  if (el) el.play().catch(() => {});
+  if (videoCallActive) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    finishVideoCall(null);
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+    finishVideoCall(stream);
+  }).catch(() => {
+    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+      finishVideoCall(stream);
+    }).catch(() => finishVideoCall(null));
+  });
 }
 function senderForKind(pc, kind) {
   const hit = pc.getSenders().find(s => s.track && s.track.kind === kind);
@@ -1515,6 +1536,7 @@ function toggleVideoCall() {
   }
   if (videoCallActive) {
     stopVoiceCall();
+    broadcastVoiceCallEvent('video-call-end');
     broadcastVoiceCallEvent('voice-call-end');
     return;
   }

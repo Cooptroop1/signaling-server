@@ -2076,6 +2076,12 @@ document.addEventListener('DOMContentLoaded', () => {
       handleAttachAction(tile.getAttribute('data-action'));
     };
   });
+  const joinBtn = document.getElementById('videoJoinBtn');
+  if (joinBtn) joinBtn.onclick = () => joinIncomingVideo();
+  const ignoreBtn = document.getElementById('videoIgnoreBtn');
+  if (ignoreBtn) ignoreBtn.onclick = () => {
+    document.getElementById('videoJoinBar')?.classList.add('hidden');
+  };
   const voiceSendBtn = document.getElementById('voiceSendButton');
   if (voiceSendBtn) {
     voiceSendBtn.onclick = () => {

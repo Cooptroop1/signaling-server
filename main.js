@@ -753,7 +753,7 @@ async function handleOffer(offer, targetId) {
       await peerConnection.setLocalDescription({type: 'rollback'});
     }
     await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-    armVideoSlot(peerConnection);
+    await armVideoSlot(peerConnection);
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     sendSignalingMessage('answer', { answer: peerConnection.localDescription, targetId });
@@ -856,10 +856,11 @@ function dummyVideoTrack() {
 function hasLiveCam() {
   return !!(localStream && localStream.getVideoTracks && localStream.getVideoTracks().some((tr) => tr.readyState === 'live'));
 }
-function armVideoSlot(pc) {
+async function armVideoSlot(pc) {
   if (!pc) return;
   let dummy = null;
   try { dummy = dummyVideoTrack(); } catch (e) {}
+  const jobs = [];
   pc.getTransceivers().forEach((tr) => {
     let kind = '';
     try {
@@ -872,11 +873,14 @@ function armVideoSlot(pc) {
     }
     if (kind === 'video' && tr.sender && dummy) {
       const cur = tr.sender.track;
-      if (!cur || cur.readyState === 'ended') {
-        tr.sender.replaceTrack(dummy).catch(() => {});
+      if (!cur || cur.readyState === 'ended' || (cur.label || '').indexOf('canvas') !== -1) {
+        jobs.push(tr.sender.replaceTrack(dummy));
       }
     }
   });
+  if (jobs.length) {
+    try { await Promise.all(jobs); } catch (e) {}
+  }
 }
 function parkVideoSlots() {
   peerConnections.forEach((pc) => {
@@ -937,7 +941,9 @@ function joinIncomingVideo() {
   }).catch(() => {
     navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
       finishVideoCall(stream, { fromJoin: true });
-    }).catch(() => finishVideoCall(null, { fromJoin: true }));
+    }).catch(() => {
+      showStatusMessage('Allow camera on this device, then tap Join again.');
+    });
   });
 }
 function senderForKind(pc, kind) {
@@ -961,10 +967,9 @@ function updateVideoTracks(action) {
     const sender = (tr && tr.sender) || senderForKind(peerConnection, 'video');
     if (action === 'add' && localStream) {
       localStream.getVideoTracks().forEach(track => {
-        const send = cloneTrack(track);
-        send.enabled = true;
+        track.enabled = true;
         try { if (tr) tr.direction = 'sendrecv'; } catch (e) {}
-        if (sender) sender.replaceTrack(send).catch(() => {});
+        if (sender) sender.replaceTrack(track).catch(() => {});
       });
     } else if (action === 'remove') {
       if (sender) sender.replaceTrack(null).catch(() => {});

@@ -417,6 +417,28 @@ helpText.addEventListener('click', () => {
   helpModal.classList.add('active');
   helpModal.focus();
 });
+function openHowTo() {
+  const m = document.getElementById('howToModal');
+  if (!m) return;
+  m.classList.add('active');
+  m.focus();
+}
+function closeHowTo() {
+  const m = document.getElementById('howToModal');
+  if (!m) return;
+  m.classList.remove('active');
+}
+['howToUseBtn', 'howToUseGuest'].forEach((id) => {
+  const b = document.getElementById(id);
+  if (b) b.addEventListener('click', openHowTo);
+});
+const howToModal = document.getElementById('howToModal');
+if (howToModal) {
+  howToModal.addEventListener('click', closeHowTo);
+  howToModal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeHowTo();
+  });
+}
 helpModal.addEventListener('click', () => {
   helpModal.classList.remove('active');
   helpText.focus();
@@ -2648,7 +2670,6 @@ async function showUserSearchResult(searchedUsername, message) {
         inviteBtn.textContent = prev;
       }
     };
-    searchResult.appendChild(inviteBtn);
     const callBtn = document.createElement('button');
     callBtn.textContent = on ? 'Call now' : 'Call (missed call if offline)';
     callBtn.onclick = async () => {
@@ -2666,6 +2687,15 @@ async function showUserSearchResult(searchedUsername, message) {
       }
     };
     searchResult.appendChild(callBtn);
+    const sendFold = document.createElement('button');
+    sendFold.textContent = 'Send';
+    const extraBox = document.createElement('div');
+    extraBox.className = 'friend-send-box hidden';
+    sendFold.onclick = () => {
+      extraBox.classList.toggle('hidden');
+      sendFold.textContent = extraBox.classList.contains('hidden') ? 'Send' : 'Hide';
+    };
+    searchResult.appendChild(sendFold);
     const blockBtn = document.createElement('button');
     blockBtn.textContent = 'Block';
     blockBtn.className = 'block';
@@ -2805,7 +2835,9 @@ async function showUserSearchResult(searchedUsername, message) {
     offlineMsgContainer.appendChild(textarea);
     offlineMsgContainer.appendChild(sendBtn);
     offlineMsgContainer.appendChild(pokeBtn);
-    searchResult.appendChild(offlineMsgContainer);
+    extraBox.appendChild(inviteBtn);
+    extraBox.appendChild(offlineMsgContainer);
+    searchResult.appendChild(extraBox);
   } else {
     searchResult.appendChild(document.createTextNode('They have no encryption key on file, so mail cannot be sent.'));
   }

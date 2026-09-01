@@ -8,12 +8,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901ar">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901ar">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901ar">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901ar">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901ar">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901ar">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901as">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901as">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901as">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901as">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901as">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901as">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1170,6 +1170,59 @@
     #myNamesBtn {
       background: #92400e;
     }
+    .start-mini-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 0.35rem 0.85rem;
+      margin: 0.15rem 0 0.7rem;
+      pointer-events: auto;
+    }
+    .start-mini-row.hidden { display: none !important; }
+    .start-mini-row .start-btn-wrap {
+      width: auto;
+      height: auto;
+      margin: 0;
+      overflow: visible;
+      pointer-events: auto;
+    }
+    .start-mini-row .start-btn-wrap button {
+      width: auto;
+      height: auto;
+      min-height: 0;
+      max-height: none;
+      line-height: 1.3;
+      padding: 0.1rem 0;
+      background: none !important;
+      color: #2563eb !important;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: underline;
+      box-shadow: none;
+    }
+    .how-to-link {
+      display: block;
+      margin: 0.35rem auto 0;
+      background: none;
+      border: 0;
+      color: #2563eb;
+      text-decoration: underline;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .how-to-body h2 { margin-bottom: 0.75rem; }
+    .how-to-body h3 { font-size: 0.95rem; margin: 0.85rem 0 0.25rem; }
+    .how-to-body p { font-size: 0.9rem; color: #374151; margin: 0 0 0.4rem; }
+    .video-live-hint {
+      grid-column: 1 / -1;
+      margin: 0;
+      font-size: 0.72rem;
+      color: #6b7280;
+      text-align: center;
+    }
+    .friend-send-box.hidden { display: none !important; }
+
     .my-name-chip {
       display: inline-block;
       margin: 2px 4px 2px 0;
@@ -1415,19 +1468,21 @@
           <div class="start-btn-wrap"><button type="button" id="start2FAChatButton" class="bg-purple-500 text-white rounded hover:bg-purple-600">Start 2FA Room</button></div>
           <div class="start-btn-wrap"><button type="button" id="connectToggleButton" class="bg-green-500 text-white rounded hover:bg-green-600">Connect to Chat</button></div>
           <div class="start-btn-wrap"><button type="button" id="photoCodeToggle" class="text-white rounded hover:bg-orange-600">Photo Code</button></div>
-          <div class="start-btn-wrap hidden" id="vanityShopWrap">
-            <button type="button" id="vanityShopBtn" class="text-white rounded" style="background:#0f766e">Moose shop</button>
+          <div class="start-mini-row" id="startMiniRow">
+            <div class="start-btn-wrap hidden" id="vanityShopWrap">
+              <button type="button" id="vanityShopBtn">Moose shop</button>
+            </div>
+            <div class="start-btn-wrap logged-only-opt hidden" id="sealedNotesWrap">
+              <button type="button" id="sealedNotesBtn">Sealed Notes<span id="sealedNotesDot" class="mail-dot hidden"></span></button>
+            </div>
+            <div class="start-btn-wrap logged-only-opt hidden" id="mooseBookWrap">
+              <button type="button" id="mooseBookBtn">Moose Book</button>
+            </div>
+            <div class="start-btn-wrap hidden" id="myNamesWrap">
+              <button type="button" id="myNamesBtn">My names</button>
+            </div>
           </div>
-          <div class="start-btn-wrap logged-only-opt hidden" id="sealedNotesWrap">
-            <button type="button" id="sealedNotesBtn">Sealed Notes<span id="sealedNotesDot" class="mail-dot hidden"></span></button>
-          </div>
-          <div class="start-btn-wrap logged-only-opt hidden" id="mooseBookWrap">
-            <button type="button" id="mooseBookBtn">Moose Book</button>
-            <p id="friendReqHint" class="text-xs text-red-600 hidden"></p>
-          </div>
-          <div class="start-btn-wrap hidden" id="myNamesWrap">
-            <button type="button" id="myNamesBtn">My names</button>
-          </div>
+          <p id="friendReqHint" class="text-xs text-red-600 hidden"></p>
         </div>
         <div id="loggedLinkOpts" class="logged-link-box logged-only-opt hidden">
           <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheckStart"> Phone-to-phone only (never use the server backup)</label>
@@ -1470,6 +1525,7 @@
             <em>Them</em>
           </div>
           <button type="button" id="videoMicMuteBtn" class="mic-mute-btn">Mute mic</button>
+          <p class="video-live-hint">Live · not recording. Orange dot on iPhone is just the camera.</p>
         </div>
         <div class="messages-wrapper">
           <div id="messages" role="log" aria-live="polite"></div>
@@ -1570,6 +1626,8 @@
           <button id="openSignUpBtn" class="text-blue-500 hover:underline text-lg">Sign Up</button>
           <span class="text-gray-400 mx-3">•</span>
           <button id="openLoginBtn" class="text-blue-500 hover:underline text-lg">Login</button>
+          <span class="text-gray-400 mx-3">•</span>
+          <button type="button" id="howToUseGuest" class="text-blue-500 hover:underline text-lg">How to use</button>
         </div>
         
         <!-- Logged in state (always visible when logged in) -->
@@ -1584,6 +1642,7 @@
             <button id="myQrButton" type="button">My QR</button>
             <button id="signOutBtn" type="button" class="sign-out">Sign Out</button>
           </div>
+          <button type="button" id="howToUseBtn" class="how-to-link">How to use</button>
         </div>
         <div id="donateBox" class="donate-box">
           <p>Donate for server upgrades and upkeep</p>
@@ -1595,6 +1654,32 @@
     <div id="maxClientsContainer" class="hidden flex flex-col justify-center bg-black p-4 rounded-lg shadow-lg">
       <span class="text-white mb-2 font-bold">Max Users</span>
       <div id="maxClientsRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
+    </div>
+  </div>
+
+  <div id="howToModal" class="help-modal" role="dialog" aria-label="How to use" tabindex="-1">
+    <div class="help-modal-content how-to-body">
+      <h2>How to use</h2>
+      <h3>Rooms</h3>
+      <p><strong>Start Chat</strong> gives you a code. Send that code. They tap <strong>Connect to Chat</strong> and type it.</p>
+      <p>Up to 4 people is phone-to-phone. More than 4 uses the encrypted backup.</p>
+      <p>Close, refresh, or leave the app for 20 seconds and the room burns. Nothing is saved.</p>
+      <p>The moose in the corner: tap once to burn this phone. Tap twice to burn everyone and kill the code.</p>
+      <h3>Chat</h3>
+      <p>Type and send. Next to send you can burn that line in 10s, 30s or 1 minute on both phones.</p>
+      <p>The camera button opens photos, a 10 second video note, voice note, voice call and video call.</p>
+      <p>Double-tap their picture to go full screen. Double-tap again to shrink it. Mute mic if you do not want to be heard.</p>
+      <h3>Photo code</h3>
+      <p>Hide a room invite in a normal-looking photo. Send it as a <strong>file</strong>, not a compressed picture. They pick that photo to join.</p>
+      <p>The photo only works while your room is still open. Leave or burn the room and the invite dies.</p>
+      <h3>Names and friends</h3>
+      <p>Sign up for a name. Search someone. Tap <strong>Add friend</strong>. They confirm, or they burn (you wait 24 hours to ask again).</p>
+      <p>Once you are friends you can send a note, a read-once photo, a voice clip, or call them. Poke is just a nudge with no text.</p>
+      <p>Sealed notes sit until they open them, or until the timer you set.</p>
+      <p>Moose Book is names you chose to save. Moose shop is extra names and numbers you can buy or sell.</p>
+      <h3>Safety</h3>
+      <p>Nobody sees that you are typing. After a burn there is nothing useful left on the phone.</p>
+      <p>Tap anywhere here to close.</p>
     </div>
   </div>
   <div id="helpModal" class="help-modal" role="dialog" aria-label="Help information" tabindex="-1">
@@ -1904,15 +1989,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901ar"></script>
-  <script src="ratchet.js?v=260901ar"></script>
-  <script src="utils.js?v=260901ar"></script>
-  <script src="main.js?v=260901ar"></script>
-  <script src="init.js?v=260901ar"></script>
-  <script src="events.js?v=260901ar"></script>
+    <script src="crypto.js?v=260901as"></script>
+  <script src="ratchet.js?v=260901as"></script>
+  <script src="utils.js?v=260901as"></script>
+  <script src="main.js?v=260901as"></script>
+  <script src="init.js?v=260901as"></script>
+  <script src="events.js?v=260901as"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901ar"></script>
-  <script src="account-ui.js?v=260901ar"></script>
-  <script src="logged-features.js?v=260901ar"></script>
+  <script src="supabase-auth.js?v=260901as"></script>
+  <script src="account-ui.js?v=260901as"></script>
+  <script src="logged-features.js?v=260901as"></script>
 </body>
 </html>

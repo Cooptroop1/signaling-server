@@ -585,7 +585,12 @@ async function processReceivedMessage(data, targetId) {
     applyRemoteRoomWipe();
     return;
   }
-  if (data.type === 'voice-call-start') {
+  if (data.type === 'voice-call-start' || data.type === 'video-call-start') {
+    if (data.type === 'video-call-start') {
+      videoCallActive = true;
+      showVideoStage(true);
+      ensureRecvVideo();
+    }
     if (!voiceCallActive) {
       startVoiceCall();
     }
@@ -1419,6 +1424,54 @@ function stopVoiceRecording() {
     if (voiceStopping) cleanupVoiceRecorder();
   }, 2500);
 }
+async function getCamMic(wantVideo, wantAudio) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw Object.assign(new Error('no media'), { name: 'NotFoundError' });
+  }
+  const tries = [];
+  if (wantVideo && wantAudio) {
+    tries.push({ audio: true, video: { facingMode: 'user' } });
+    tries.push({ audio: true, video: true });
+  }
+  if (wantVideo) {
+    tries.push({ video: { facingMode: 'user' } });
+    tries.push({ video: true });
+  }
+  if (wantAudio) {
+    tries.push({ audio: { echoCancellation: true, noiseSuppression: true } });
+    tries.push({ audio: true });
+  }
+  let last = null;
+  for (let i = 0; i < tries.length; i++) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(tries[i]);
+    } catch (e) { last = e; }
+  }
+  throw last || Object.assign(new Error('no media'), { name: 'NotFoundError' });
+}
+function ensureRecvVideo() {
+  if (typeof peerConnections === 'undefined') return;
+  peerConnections.forEach((pc, targetId) => {
+    const has = pc.getTransceivers().some((tr) => {
+      const k = (tr.sender && tr.sender.track && tr.sender.track.kind) || (tr.receiver && tr.receiver.track && tr.receiver.track.kind);
+      return k === 'video';
+    });
+    if (!has) {
+      try { pc.addTransceiver('video', { direction: 'recvonly' }); } catch (e) {}
+    }
+    if (pc.signalingState === 'stable') renegotiate(targetId);
+  });
+}
+function setLocalPreview(stream) {
+  const localVid = document.getElementById('localVideo');
+  if (!localVid) return;
+  if (stream && stream.getVideoTracks().length) {
+    localVid.srcObject = stream;
+    localVid.play().catch(() => {});
+  } else {
+    localVid.srcObject = null;
+  }
+}
 async function toggleVideoCall() {
   if (!videoCallsOn()) {
     showStatusMessage('Video calls are off.');
@@ -1433,39 +1486,40 @@ async function toggleVideoCall() {
     showStatusMessage('Stop the note first.');
     return;
   }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showStatusMessage('Camera not supported.');
-    return;
-  }
+  showStatusMessage('Starting video call…');
+  showVideoStage(true);
+  videoCallActive = true;
+  voiceCallActive = true;
+  document.getElementById('videoCallButton')?.classList.add('active');
+  document.getElementById('audioOutputButton')?.classList.remove('hidden');
+  if (typeof updateAttachButton === 'function') updateAttachButton();
   try {
     if (localStream) {
       localStream.getTracks().forEach((tr) => tr.stop());
       localStream = null;
     }
-    localStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 15 } }
-    });
-    updateAudioTracks('add');
-    updateVideoTracks('add');
-    voiceCallActive = true;
-    videoCallActive = true;
-    const localVid = document.getElementById('localVideo');
-    if (localVid) {
-      localVid.srcObject = localStream;
-      localVid.play().catch(() => {});
+    try {
+      localStream = await getCamMic(true, true);
+    } catch (e1) {
+      try { localStream = await getCamMic(false, true); } catch (e2) { localStream = null; }
     }
-    showVideoStage(true);
-    document.getElementById('videoCallButton')?.classList.add('active');
-    document.getElementById('audioOutputButton')?.classList.remove('hidden');
-    if (typeof updateAttachButton === 'function') updateAttachButton();
+    if (localStream) {
+      updateAudioTracks('add');
+      if (localStream.getVideoTracks().length) updateVideoTracks('add');
+      else ensureRecvVideo();
+      setLocalPreview(localStream);
+    } else {
+      ensureRecvVideo();
+    }
+    broadcastVoiceCallEvent('video-call-start');
     broadcastVoiceCallEvent('voice-call-start');
-    showStatusMessage('Video call started.');
+    if (localStream && localStream.getVideoTracks().length) showStatusMessage('Video call started.');
+    else showStatusMessage('No camera here — you can still see them if they turn theirs on.');
   } catch (error) {
     console.error('video call', error);
-    if (error && error.name === 'NotAllowedError') showStatusMessage('Allow camera and mic, then tap video call again.');
-    else if (error && error.name === 'NotFoundError') showStatusMessage('No camera on this device.');
-    else showStatusMessage('Could not start video call.');
+    ensureRecvVideo();
+    broadcastVoiceCallEvent('video-call-start');
+    showStatusMessage('No camera here — you can still see them if they turn theirs on.');
   }
 }
 function startVideoRecording() {
@@ -1481,17 +1535,35 @@ function startVideoRecording() {
     stopVoiceRecording();
     return;
   }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
-    showStatusMessage('Video notes not supported in this browser.');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showStatusMessage('This device has no camera. The other person can still send a 10s video.');
+    return;
+  }
+  if (typeof MediaRecorder === 'undefined') {
+    showStatusMessage('This browser cannot record video notes.');
     return;
   }
   recordingVideo = true;
-  navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true },
-    video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 15 } }
-  }).then(stream => {
+  showStatusMessage('Starting camera…');
+  if (typeof setComposerRecording === 'function') setComposerRecording(true);
+  const hint0 = document.querySelector('.record-hint');
+  if (hint0) hint0.textContent = 'Video 10s';
+  getCamMic(true, true).then(stream => {
+    if (!stream.getVideoTracks().length) {
+      stream.getTracks().forEach((tr) => tr.stop());
+      recordingVideo = false;
+      if (typeof setComposerRecording === 'function') setComposerRecording(false);
+      showStatusMessage('This device has no camera. The other person can still send a 10s video.');
+      return;
+    }
+    setLocalPreview(stream);
+    showVideoStage(true);
     voiceRecordStream = stream;
-    const mimeTypes = [
+    const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+    const mimeTypes = isiOS ? [
+      'video/mp4',
+      'video/webm'
+    ] : [
       'video/webm;codecs=vp8,opus',
       'video/webm;codecs=vp9,opus',
       'video/mp4',
@@ -1527,7 +1599,10 @@ function startVideoRecording() {
       mediaRecorder = null;
       voiceChunks = [];
       resetVoiceRecordingUi();
-      const wasVideo = recordingVideo;
+      if (!videoCallActive) {
+        setLocalPreview(null);
+        showVideoStage(!!document.querySelector('#remoteVideos video'));
+      }
       recordingVideo = false;
       if (typeof voiceCancelled !== 'undefined' && voiceCancelled) {
         voiceCancelled = false;
@@ -1574,9 +1649,9 @@ function startVideoRecording() {
   }).catch(error => {
     recordingVideo = false;
     cleanupVoiceRecorder();
+    if (typeof setComposerRecording === 'function') setComposerRecording(false);
     if (error && error.name === 'NotAllowedError') showStatusMessage('Allow camera and mic, then tap Video 10s again.');
-    else if (error && error.name === 'NotFoundError') showStatusMessage('No camera on this device.');
-    else showStatusMessage('Could not start video note.');
+    else showStatusMessage('This device has no camera. The other person can still send a 10s video.');
   });
 }
 async function startTotpRoom(serverGenerated) {

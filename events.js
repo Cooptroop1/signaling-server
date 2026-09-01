@@ -1693,6 +1693,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('searchSubmitButton').onclick = async () => {
     const name = document.getElementById('searchUsernameInput').value.trim();
     if (!name) return;
+    const wait = typeof coolTap === 'function' ? coolTap('search', 1200) : 0;
+    if (wait) return;
+    const sbtn = document.getElementById('searchSubmitButton');
+    if (typeof lockBtn === 'function') lockBtn(sbtn, 1200);
     if (String(name).replace(/[^A-Za-z0-9]/g, '').toLowerCase() === 'admin') {
       document.getElementById('searchError').textContent = 'User not found.';
       setTimeout(() => { document.getElementById('searchError').textContent = ''; }, 5000);
@@ -2043,10 +2047,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('sendButton').onclick = () => {
     const messageInput = document.getElementById('messageInput');
     const message = messageInput.value.trim();
-    if (message) {
-      sendMessage(message);
-      updateComposerSend();
-    }
+    if (!message) return;
+    const wait = typeof coolTap === 'function' ? coolTap('live-send', 800) : 0;
+    if (wait) return;
+    sendMessage(message);
+    updateComposerSend();
   };
   document.getElementById('messageInput').addEventListener('input', updateComposerSend);
   document.getElementById('messageInput').addEventListener('keydown', (event) => {
@@ -2055,6 +2060,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const messageInput = document.getElementById('messageInput');
       const message = messageInput.value.trim();
       if (message) {
+        const wait = typeof coolTap === 'function' ? coolTap('live-send', 800) : 0;
+        if (wait) return;
         sendMessage(message);
         updateComposerSend();
       }
@@ -2554,6 +2561,8 @@ function renderFriendGate(box, name, rel, message) {
   ask.textContent = 'Add friend';
   ask.onclick = async () => {
     if (ask.disabled) return;
+    const wait = typeof coolTap === 'function' ? coolTap('ask:' + name, 8000) : 0;
+    if (wait) { alert('Wait ' + wait + 's'); return; }
     ask.disabled = true;
     ask.textContent = 'Sending…';
     try {
@@ -2737,11 +2746,16 @@ async function showUserSearchResult(searchedUsername, message) {
     const pokeBtn = document.createElement('button');
     pokeBtn.textContent = 'Poke (no text)';
     pokeBtn.onclick = async () => {
+      if (pokeBtn.disabled) return;
+      pokeBtn.disabled = true;
       try {
         await sendOfflineMessage(searchedUsername, '', { poke: true });
         pokeBtn.textContent = 'Poked';
-        setTimeout(() => { pokeBtn.textContent = 'Poke (no text)'; }, 1500);
-      } catch (e) { alert(e.message); }
+        setTimeout(() => { pokeBtn.textContent = 'Poke (no text)'; pokeBtn.disabled = false; }, 8000);
+      } catch (e) {
+        pokeBtn.disabled = false;
+        alert(e.message);
+      }
     };
     const offlineMsgContainer = document.createElement('div');
     const textarea = document.createElement('textarea');
@@ -2806,6 +2820,10 @@ async function sendOfflineMessage(toUsername, messageText, extra) {
   if (offlineSendLock.has(lockKey)) throw new Error('Already sending that note.');
   offlineSendLock.add(lockKey);
   try {
+  const coolKey = (extra.poke ? 'poke:' : (extra.kind === 'admin' ? 'admin:' : 'note:')) + String(toUsername).toLowerCase();
+  const coolMs = extra.poke ? 8000 : (extra.kind === 'admin' ? 15000 : 3000);
+  const waitNote = typeof coolTap === 'function' ? coolTap(coolKey, coolMs) : 0;
+  if (waitNote) throw new Error('Wait ' + waitNote + 's before sending again.');
   if (typeof isOwnName === 'function' && isOwnName(toUsername)) throw new Error('That is your name now.');
   if (typeof isBlocked === 'function' && isBlocked(toUsername)) throw new Error('That name is blocked');
   if (!(extra.kind === 'admin') && window.sbAuth && window.sbAuth.isLoggedIn() && window.sbAuth.friendStatus) {
@@ -2874,6 +2892,11 @@ async function inviteEncryptedChat(toUsername, theirPub, opts) {
   const isCall = !!opts.call;
   if (!theirPub) {
     showStatusMessage('That user has no encryption key.');
+    return;
+  }
+  const waitCall = typeof coolTap === 'function' ? coolTap((isCall ? 'call:' : 'invite:') + String(toUsername).toLowerCase(), 8000) : 0;
+  if (waitCall) {
+    showStatusMessage('Wait ' + waitCall + 's');
     return;
   }
   if (window.sbAuth && window.sbAuth.isLoggedIn() && window.sbAuth.friendStatus) {

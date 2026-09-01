@@ -874,6 +874,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   const familyBtn = document.getElementById('familyDropBtn');
   if (familyBtn) familyBtn.onclick = async () => {
+    const wait = typeof coolTap === 'function' ? coolTap('family-note', 8000) : 0;
+    if (wait) { alert('Wait ' + wait + 's'); return; }
     const text = prompt('Note to everyone tagged Family (or trusted if none tagged):');
     if (!text) return;
     try {
@@ -883,6 +885,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   const pokeFamilyBtn = document.getElementById('pokeFamilyBtn');
   if (pokeFamilyBtn) pokeFamilyBtn.onclick = async () => {
+    const wait = typeof coolTap === 'function' ? coolTap('family-poke', 8000) : 0;
+    if (wait) { alert('Wait ' + wait + 's'); return; }
     try {
       const n = await dropToFamily('', { poke: true });
       if (typeof showSaveToast === 'function') showSaveToast('Poked ' + n + ' family');

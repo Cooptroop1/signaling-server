@@ -543,3 +543,17 @@ function requestRoomWipe() {
     }
   } catch (e) {}
 }
+
+window.__tapCool = window.__tapCool || {};
+function coolTap(key, ms) {
+  const now = Date.now();
+  const until = window.__tapCool[key] || 0;
+  if (until > now) return Math.max(1, Math.ceil((until - now) / 1000));
+  window.__tapCool[key] = now + (ms || 2000);
+  return 0;
+}
+function lockBtn(el, ms) {
+  if (!el) return;
+  el.disabled = true;
+  setTimeout(() => { try { el.disabled = false; } catch (e) {} }, ms || 1500);
+}

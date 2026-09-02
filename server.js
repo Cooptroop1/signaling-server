@@ -356,6 +356,48 @@ function svcHeaders() {
     Prefer: 'return=representation'
   };
 }
+function vanityHoldKey(name) {
+  return 'vanity:hold:' + String(name || '').toLowerCase();
+}
+async function holdVanityName(name, userId) {
+  if (!name || !userId) return true;
+  try {
+    const key = vanityHoldKey(name);
+    const cur = await redisClient.get(key);
+    if (cur && String(cur) !== String(userId)) return false;
+    await redisClient.set(key, String(userId), { EX: 30 * 60 });
+    return true;
+  } catch (e) {
+    return true;
+  }
+}
+async function clearVanityHold(name) {
+  try { await redisClient.del(vanityHoldKey(name)); } catch (e) {}
+}
+async function uidForName(name) {
+  if (!SUPABASE_SERVICE_ROLE_KEY || !name) return null;
+  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_uid_for_name', {
+    method: 'POST',
+    headers: svcHeaders(),
+    body: JSON.stringify({ p_name: name })
+  });
+  const data = await r.json();
+  if (!data) return null;
+  if (typeof data === 'string') return data.replace(/"/g, '') || null;
+  return data;
+}
+async function canMailToName(fromId, toName) {
+  const them = await uidForName(toName);
+  if (!them || !fromId) return false;
+  if (String(them) === String(fromId)) return false;
+  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_can_mail', {
+    method: 'POST',
+    headers: svcHeaders(),
+    body: JSON.stringify({ p_from: fromId, p_to: them })
+  });
+  const data = await r.json();
+  return data === true;
+}
 async function loadUsedNameRows() {
   if (!SUPABASE_SERVICE_ROLE_KEY) return [];
   const r = await fetch(
@@ -844,6 +886,10 @@ async function fulfillPaidSession(session, userAccess) {
   const sellerId = (session.metadata && session.metadata.sellerId) || stored.sellerId || '';
   const doneKey = 'vanity:done:' + session.id;
   try {
+    const nx = await redisClient.set(doneKey, name, { NX: true, EX: 30 * 24 * 3600 });
+    if (!nx) return { ok: true, name, userId, applied: true };
+  } catch (e) {}
+  try {
     if (metaKind === 'resale') {
       const info = await chargeInfoFromSession(session);
       const moved = await attachResaleName(userId, sellerId, name, session.id, paidAmount || locked, info.fee);
@@ -855,11 +901,12 @@ async function fulfillPaidSession(session, userAccess) {
     } else {
       await attachPaidName(userId, name, session.id, paidAmount || locked);
     }
-    await redisClient.set(doneKey, name, { EX: 30 * 24 * 3600 });
     await redisClient.set('vanity:paid:' + userId, name, { EX: 7 * 24 * 3600 });
+    await clearVanityHold(name);
     return { ok: true, name, userId, applied: true };
   } catch (e) {
     logger.warn('vanity fulfill %s', e && e.message);
+    try { await redisClient.del(doneKey); } catch (e2) {}
     return { ok: false, error: cleanPayError(e && e.message), name, userId, applied: false };
   }
 }
@@ -1084,30 +1131,30 @@ server.on('request', (req, res) => {
         const sig = req.headers['stripe-signature'];
         const whsec = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim();
         let account = null;
-        if (stripe && whsec) {
-          try {
-            const event = stripe.webhooks.constructEvent(raw, sig, whsec);
-            if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
-              session = event.data && event.data.object;
-            }
-            if (event.type === 'account.updated') {
-              account = event.data && event.data.object;
-            }
-          } catch (e) {
-            logger.warn('stripe webhook sig %s', e && e.message);
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'invalid signature' }));
-            return;
+        if (!whsec) {
+          logger.warn('stripe webhook secret missing');
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'webhook not configured' }));
+          return;
+        }
+        if (!stripe) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ received: true }));
+          return;
+        }
+        try {
+          const event = stripe.webhooks.constructEvent(raw, sig, whsec);
+          if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+            session = event.data && event.data.object;
           }
-        } else if (stripe) {
-          let body = {};
-          try { body = JSON.parse(raw.toString('utf8') || '{}'); } catch (e) {}
-          const eventType = body.type || '';
-          const eventId = (body.data && body.data.object && body.data.object.id) || '';
-          if (eventId && (eventType === 'checkout.session.completed' || eventType === 'checkout.session.async_payment_succeeded' || !eventType)) {
-            session = await stripe.checkout.sessions.retrieve(eventId);
+          if (event.type === 'account.updated') {
+            account = event.data && event.data.object;
           }
-          if (eventType === 'account.updated' && body.data && body.data.object) account = body.data.object;
+        } catch (e) {
+          logger.warn('stripe webhook sig %s', e && e.message);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid signature' }));
+          return;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ received: true }));
@@ -1166,6 +1213,12 @@ server.on('request', (req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'This listing is too large for card. Message admin to arrange payment.' }));
           return;
         }
+        const held = await holdVanityName(name, userId);
+        if (!held) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Someone else is buying that name. Try again in a few minutes.' }));
+          return;
+        }
         try {
           const sessionOpts = {
             mode: 'payment',
@@ -1197,6 +1250,7 @@ server.on('request', (req, res) => {
           }));
         } catch (e) {
           logger.warn('stripe checkout %s', e && e.message);
+          await clearVanityHold(name);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: (e && e.message) || 'Stripe checkout failed' }));
         }
@@ -1215,15 +1269,21 @@ server.on('request', (req, res) => {
           res.end(JSON.stringify({ ok: false }));
           return;
         }
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
-        const result = await fulfillPaidSession(session);
-        if (result.userId && claimUser.id !== result.userId) {
+        try {
+          const session = await stripe.checkout.sessions.retrieve(sessionId);
+          const result = await fulfillPaidSession(session);
+          if (result.userId && claimUser.id !== result.userId) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'This payment belongs to another account' }));
+            return;
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'This payment belongs to another account' }));
-          return;
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          logger.warn('vanity-claim %s', e && e.message);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Could not check payment' }));
         }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(result));
         return;
       }
       if (fullUrl.pathname === '/connect-onboard') {
@@ -1324,6 +1384,11 @@ server.on('request', (req, res) => {
         res.end(JSON.stringify({ ok: true }));
         return;
       }
+      if (fullUrl.pathname !== '/inbox-ping') {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false }));
+        return;
+      }
       const pingUser = await verifySbUser(bearerFrom(req, body));
       if (!pingUser) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -1342,9 +1407,21 @@ server.on('request', (req, res) => {
         res.end(JSON.stringify({ ok: false }));
         return;
       }
+      let allowPing = false;
+      try {
+        if (kind === 'friend') {
+          const fk = 'ping:friend:' + pingUser.id + ':' + to;
+          const nx = await redisClient.set(fk, '1', { NX: true, EX: 24 * 3600 });
+          allowPing = !!nx;
+        } else {
+          allowPing = await canMailToName(pingUser.id, to);
+        }
+      } catch (e) {
+        allowPing = false;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
-      if (!webpush) return;
+      if (!allowPing || !webpush) return;
       try {
         const raw = await redisClient.get('push:' + to);
         if (!raw) return;
@@ -1425,8 +1502,10 @@ server.on('request', (req, res) => {
         return;
       }
       let raw = '';
-      req.on('data', (c) => { raw += c; if (raw.length > 4000) req.destroy(); });
+      let tooBig = false;
+      req.on('data', (c) => { raw += c; if (raw.length > 4000) tooBig = true; });
       req.on('end', () => {
+        if (tooBig) { sendNotFound(res); return; }
         let secret = '';
         try {
           const ct = String(req.headers['content-type'] || '');

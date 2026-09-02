@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /admin.html
+Disallow: /moose-desk
+Disallow: /offline.html
+Disallow: /random.html
+Disallow: /w.html
+
+Sitemap: https://www.anonomoose.com/sitemap.xml

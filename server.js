@@ -894,6 +894,7 @@ function pingCors(res) {
 }
 const PUBLIC_PATHS = new Set([
   '/', '/index.html', '/offline.html', '/cover.html', '/random.html', '/w.html',
+  '/robots.txt', '/sitemap.xml',
   '/manifest.json', '/sw.js', '/oldsw.js',
   '/crypto.js', '/ratchet.js', '/utils.js', '/main.js', '/init.js', '/events.js',
   '/supabase-auth.js', '/account-ui.js', '/logged-features.js',
@@ -1499,6 +1500,10 @@ server.on('request', (req, res) => {
       contentType = 'image/jpeg';
     } else if (filePath.endsWith('.json')) {
       contentType = 'application/json';
+    } else if (filePath.endsWith('.xml')) {
+      contentType = 'application/xml';
+    } else if (filePath.endsWith('.txt')) {
+      contentType = 'text/plain; charset=utf-8';
     }
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(data);

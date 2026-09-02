@@ -19,6 +19,16 @@ let voiceRecordStream = null;
 let voiceRecordStartedAt = 0;
 let voiceStopping = false;
 let messageCount = 0;
+let mooseWakeLock = null;
+async function holdWakeLock() {
+  try {
+    if (navigator.wakeLock) mooseWakeLock = await navigator.wakeLock.request('screen');
+  } catch (e) { mooseWakeLock = null; }
+}
+function dropWakeLock() {
+  try { if (mooseWakeLock) mooseWakeLock.release(); } catch (e) {}
+  mooseWakeLock = null;
+}
 const CHUNK_SIZE = 32768;
 const chunkBuffers = new Map(); // {chunkId: {chunks: [], total: m}}
 const negotiationQueues = new Map(); // Queue pending negotiations per peer
@@ -53,6 +63,8 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
         element.textContent = 'Burned';
         element.disabled = true;
         content = '';
+        try { element.dataset.gone = '1'; } catch (e) {}
+        setTimeout(() => { try { element.remove(); } catch (e) {} }, 1200);
       });
     } else if (type === 'image') {
       element = document.createElement('img');
@@ -975,6 +987,7 @@ function joinIncomingVideo() {
   attachExistingRemoteVideo();
   if (hasLiveCam()) {
     videoCallActive = true;
+    if (typeof holdWakeLock === 'function') holdWakeLock();
     setLocalPreview(localStream);
     updateVideoTracks('add');
     updateAudioTracks('add');
@@ -1068,6 +1081,7 @@ async function startVoiceCall() {
     updateAudioTracks('add');
     flushRenegotiate();
     voiceCallActive = true;
+    if (typeof holdWakeLock === 'function') holdWakeLock();
     const callBtn = document.getElementById('voiceCallButton');
     callBtn.classList.add('active');
     callBtn.title = 'End call';
@@ -1112,6 +1126,7 @@ function stopAllMedia() {
   videoCallActive = false;
   voiceCallActive = false;
   recordingVideo = false;
+  dropWakeLock();
   showVideoStage(false);
   if (typeof resetVoiceRecordingUi === 'function') resetVoiceRecordingUi();
 }
@@ -1691,6 +1706,7 @@ function finishVideoCall(stream, opts) {
   if (localStream) localStream.getTracks().forEach((tr) => { tr.enabled = true; });
   videoCallActive = true;
   voiceCallActive = true;
+  if (typeof holdWakeLock === 'function') holdWakeLock();
   showVideoStage(true);
   document.getElementById('videoCallButton')?.classList.add('active');
   document.getElementById('audioOutputButton')?.classList.remove('hidden');

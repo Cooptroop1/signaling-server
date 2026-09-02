@@ -416,6 +416,10 @@ function fillSettingsForm() {
   if (dead) dead.value = String(accGet('deadManHours', 0) || 0);
   const lock = document.getElementById('appLockCheck');
   if (lock) lock.checked = !!accGet('appLockOn', false);
+  const idle = document.getElementById('appLockIdle');
+  if (idle) idle.value = String(accGet('appLockIdle', 0) || 0);
+  const bio = document.getElementById('appLockBio');
+  if (bio) bio.checked = !!accGet('appLockBio', false);
 }
 
 async function saveSettings() {
@@ -506,13 +510,30 @@ async function savePinsFromForm() {
   if (real) accSet('realPin', await hashPin(real));
   if (panic) accSet('panicPin', await hashPin(panic));
   const lock = document.getElementById('appLockCheck');
+  const idle = document.getElementById('appLockIdle');
+  const bio = document.getElementById('appLockBio');
+  if (lock && lock.checked && !real && !accGet('realPin', '')) {
+    lock.checked = false;
+    alert('Set a PIN first, then tick lock.');
+  }
   accSet('appLockOn', !!(lock && lock.checked && (real || accGet('realPin', ''))));
+  accSet('appLockIdle', Number(idle && idle.value) || 0);
+  accSet('appLockBio', !!(bio && bio.checked));
+  if (bio && bio.checked) {
+    try { await enrollAppLockBio(); } catch (e) {
+      accSet('appLockBio', false);
+      bio.checked = false;
+      alert(e.message || 'Could not save Face ID / fingerprint on this phone.');
+    }
+  }
   if (!real && document.getElementById('clearPins') && document.getElementById('clearPins').checked) {
     accSet('realPin', '');
     accSet('panicPin', '');
     accSet('appLockOn', false);
+    accSet('appLockBio', false);
     window.__bookUnlocked = true;
     showAppLockGate(false);
+    showPrivacyBlur(false);
   }
   document.getElementById('setRealPin').value = '';
   document.getElementById('setPanicPin').value = '';
@@ -528,65 +549,282 @@ function shouldAppLock() {
 function showAppLockGate(on) {
   const g = document.getElementById('appLockGate');
   if (g) g.classList.toggle('hidden', !on);
+  if (on) {
+    const pin = document.getElementById('appLockPin');
+    if (pin) {
+      pin.value = '';
+      setTimeout(() => { try { pin.focus(); } catch (e) {} }, 50);
+    }
+  }
+}
+function showPrivacyBlur(on) {
+  const g = document.getElementById('privacyBlur');
+  if (g) g.classList.toggle('hidden', !on);
+}
+function shouldPrivacyBlur() {
+  try {
+    const chat = document.getElementById('chatContainer');
+    const inRoom = !!(chat && !chat.classList.contains('hidden'));
+    const logged = !!(window.sbAuth && window.sbAuth.isLoggedIn());
+    return inRoom || logged || shouldAppLock();
+  } catch (e) { return false; }
 }
 let appLockBusy = false;
+let appLockResolver = null;
+let lockTimer = null;
+let lockedAway = false;
+
+function fillPinPad(el, input, onGo) {
+  if (!el || el.dataset.ready === '1' || !input) return;
+  el.dataset.ready = '1';
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'].forEach((k) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = k;
+    if (k === 'OK') b.classList.add('pin-ok');
+    b.onclick = () => {
+      if (k === '⌫') input.value = String(input.value || '').slice(0, -1);
+      else if (k === 'OK') onGo();
+      else if (String(input.value || '').length < 12) input.value = String(input.value || '') + k;
+    };
+    el.appendChild(b);
+  });
+}
+function lockCredKey() {
+  return 'moose_lock_cred_' + (location.hostname || 'local');
+}
+function canAppLockBio() {
+  try {
+    return !!(window.PublicKeyCredential && navigator.credentials && localStorage.getItem(lockCredKey()) && accGet('appLockBio', false));
+  } catch (e) { return false; }
+}
+async function enrollAppLockBio() {
+  if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create) {
+    throw new Error('This phone does not support Face ID / fingerprint');
+  }
+  const uid = (typeof accUid === 'function' ? accUid() : 'user') + '|lock';
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: 'Anonomoose', id: location.hostname },
+      user: { id: new TextEncoder().encode(uid), name: 'app-lock', displayName: 'Anonomoose lock' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
+      timeout: 60000
+    }
+  });
+  if (!cred || !cred.rawId) throw new Error('Fingerprint not saved');
+  const bytes = new Uint8Array(cred.rawId);
+  let s = '';
+  bytes.forEach((n) => { s += String.fromCharCode(n); });
+  localStorage.setItem(lockCredKey(), btoa(s));
+}
+async function unlockWithBio() {
+  try {
+    const stored = localStorage.getItem(lockCredKey());
+    if (!stored) return false;
+    const raw = Uint8Array.from(atob(stored), (c) => c.charCodeAt(0));
+    const cred = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: location.hostname,
+        allowCredentials: [{ type: 'public-key', id: raw }],
+        userVerification: 'required',
+        timeout: 45000
+      }
+    });
+    return !!cred;
+  } catch (e) { return false; }
+}
+function finishAppLock(ok) {
+  if (ok || isPanicMode() || !accGet('realPin', '')) {
+    lockedAway = false;
+    showAppLockGate(false);
+    showPrivacyBlur(false);
+  }
+  if (appLockResolver) {
+    const r = appLockResolver;
+    appLockResolver = null;
+    r(!!ok);
+  }
+  appLockBusy = false;
+}
+async function submitAppLockPin() {
+  const pinInput = document.getElementById('appLockPin');
+  const err = document.getElementById('appLockErr');
+  const ok = await checkPinValue(pinInput && pinInput.value);
+  if (ok) {
+    finishAppLock(true);
+    return;
+  }
+  if (err) err.textContent = isPanicMode() ? '' : 'Wrong PIN';
+  if (pinInput) pinInput.value = '';
+  if (isPanicMode() || !accGet('realPin', '')) finishAppLock(false);
+}
 async function runAppLock() {
   if (!shouldAppLock()) {
     showAppLockGate(false);
+    showPrivacyBlur(false);
+    lockedAway = false;
     return;
   }
+  lockedAway = true;
+  showPrivacyBlur(true);
   showAppLockGate(true);
+  const bioBtn = document.getElementById('appLockBioBtn');
+  if (bioBtn) bioBtn.classList.toggle('hidden', !canAppLockBio());
   if (appLockBusy) return;
   appLockBusy = true;
-  const ok = await requireUnlock('Unlock Anonomoose', true);
-  appLockBusy = false;
-  if (ok) showAppLockGate(false);
+  if (canAppLockBio()) {
+    const bioOk = await unlockWithBio();
+    if (bioOk) {
+      window.__bookUnlocked = true;
+      window.__moosePanic = false;
+      finishAppLock(true);
+      return;
+    }
+  }
+  await new Promise((resolve) => { appLockResolver = resolve; });
+}
+function onAppHide() {
+  if (shouldPrivacyBlur()) showPrivacyBlur(true);
+  window.__bookUnlocked = false;
+  window.__notesUnlocked = false;
+  if (!shouldAppLock()) return;
+  const idle = Number(accGet('appLockIdle', 0) || 0);
+  clearTimeout(lockTimer);
+  if (idle <= 0) {
+    lockedAway = true;
+    showAppLockGate(true);
+  } else {
+    lockTimer = setTimeout(() => {
+      lockedAway = true;
+      showAppLockGate(true);
+    }, idle * 1000);
+  }
+}
+function onAppShow() {
+  clearTimeout(lockTimer);
+  if (shouldAppLock() && (lockedAway || !window.__bookUnlocked)) runAppLock();
+  else showPrivacyBlur(false);
 }
 function isStandaloneApp() {
   return !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
 }
+function a2hsOnStartPage() {
+  const start = document.getElementById('initialContainer');
+  const chat = document.getElementById('chatContainer');
+  return !!(start && !start.classList.contains('hidden') && chat && chat.classList.contains('hidden'));
+}
 function bindA2hsBar() {
-  const bar = document.getElementById('a2hsBar');
-  if (!bar || isStandaloneApp()) return;
-  try { if (localStorage.getItem('moose_hide_a2hs') === '1') return; } catch (e) {}
+  const sheet = document.getElementById('a2hsSheet');
+  if (!sheet) return;
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent || '');
+  const steps = document.getElementById('a2hsSteps');
+  const lead = document.getElementById('a2hsLead');
+  const go = document.getElementById('a2hsGo');
   let deferred = null;
+  const hideForever = () => {
+    try { localStorage.setItem('moose_hide_a2hs', '1'); } catch (e) {}
+    sheet.classList.add('hidden');
+  };
+  const hideWeek = () => {
+    try { localStorage.setItem('moose_a2hs_later', String(Date.now() + 7 * 86400000)); } catch (e) {}
+    sheet.classList.add('hidden');
+  };
+  const blocked = () => {
+    try {
+      if (localStorage.getItem('moose_hide_a2hs') === '1') return true;
+      const later = Number(localStorage.getItem('moose_a2hs_later') || 0);
+      if (later && Date.now() < later) return true;
+    } catch (e) {}
+    return false;
+  };
+  const openSheet = (force) => {
+    if (isStandaloneApp()) return;
+    if (!force && blocked()) return;
+    if (!force && !a2hsOnStartPage()) return;
+    if (!force && document.getElementById('appLockGate') && !document.getElementById('appLockGate').classList.contains('hidden')) return;
+    if (ios) {
+      if (lead) lead.textContent = 'iPhone: add the moose icon. Calls and sealed notes can ping when you leave Safari.';
+      if (go) go.textContent = 'Got it';
+    } else if (deferred) {
+      if (lead) lead.textContent = 'Add Anonomoose to your home screen. Calls and notes work better.';
+      if (steps) steps.classList.add('hidden');
+      if (go) go.textContent = 'Add';
+    } else {
+      if (lead) lead.textContent = 'Browser menu → Add to Home Screen / Install app. Then open the moose icon.';
+      if (go) go.textContent = 'Got it';
+    }
+    sheet.classList.remove('hidden');
+  };
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferred = e;
-    const txt = document.getElementById('a2hsText');
-    if (txt) txt.textContent = 'Add Anonomoose to your home screen.';
-    bar.classList.remove('hidden');
+    if (!blocked() && a2hsOnStartPage()) openSheet(false);
   });
-  if (ios) {
-    const txt = document.getElementById('a2hsText');
-    if (txt) txt.textContent = 'iPhone: Share then Add to Home Screen. Calls and notes work better.';
-    bar.classList.remove('hidden');
-  }
-  const hide = document.getElementById('a2hsHide');
-  const go = document.getElementById('a2hsGo');
-  if (hide) hide.onclick = () => {
-    bar.classList.add('hidden');
-    try { localStorage.setItem('moose_hide_a2hs', '1'); } catch (e) {}
-  };
+  window.addEventListener('appinstalled', () => hideForever());
   if (go) go.onclick = async () => {
     if (deferred && deferred.prompt) {
-      deferred.prompt();
+      try { await deferred.prompt(); } catch (e) {}
       deferred = null;
-      bar.classList.add('hidden');
+      hideForever();
       return;
     }
-    alert('On iPhone tap the Share button (square with arrow) then Add to Home Screen.');
+    hideWeek();
   };
+  const later = document.getElementById('a2hsLater');
+  const hide = document.getElementById('a2hsHide');
+  if (later) later.onclick = hideWeek;
+  if (hide) hide.onclick = hideForever;
+  const showBtn = document.getElementById('showA2hsBtn');
+  if (showBtn) showBtn.onclick = () => openSheet(true);
+  setTimeout(() => { try { openSheet(false); } catch (e) {} }, 7000);
+  window.__mooseShowA2hs = () => openSheet(true);
+}
+function bindAppLockControls() {
+  fillPinPad(document.getElementById('appLockPad'), document.getElementById('appLockPin'), () => submitAppLockPin());
+  fillPinPad(document.getElementById('pinUnlockPad'), document.getElementById('pinUnlockInput'), () => {
+    document.getElementById('pinUnlockSubmit')?.click();
+  });
+  const pin = document.getElementById('appLockPin');
+  if (pin) pin.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitAppLockPin(); }
+  });
+  const unlockBtn = document.getElementById('appLockUnlock');
+  if (unlockBtn) unlockBtn.onclick = () => submitAppLockPin();
+  const bioBtn = document.getElementById('appLockBioBtn');
+  if (bioBtn) bioBtn.onclick = async () => {
+    const ok = await unlockWithBio();
+    if (ok) {
+      window.__bookUnlocked = true;
+      window.__moosePanic = false;
+      finishAppLock(true);
+    } else {
+      const err = document.getElementById('appLockErr');
+      if (err) err.textContent = 'Use your PIN';
+    }
+  };
+  const lock = document.getElementById('appLockCheck');
+  if (lock) lock.addEventListener('change', () => {
+    if (lock.checked && !accGet('realPin', '')) {
+      lock.checked = false;
+      alert('Set a PIN first, then tick lock.');
+      return;
+    }
+    accSet('appLockOn', !!lock.checked);
+    if (!lock.checked) {
+      showAppLockGate(false);
+      showPrivacyBlur(false);
+    }
+    showSaveToast(lock.checked ? 'App will lock when you leave' : 'App lock off');
+  });
+  const idle = document.getElementById('appLockIdle');
+  if (idle) idle.addEventListener('change', () => accSet('appLockIdle', Number(idle.value) || 0));
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    window.__bookUnlocked = false;
-    window.__notesUnlocked = false;
-    if (shouldAppLock()) showAppLockGate(true);
-  } else if (shouldAppLock()) {
-    runAppLock();
-  }
+  if (document.hidden) onAppHide();
+  else onAppShow();
   if (document.hidden && document.documentElement.classList.contains('shot-guard')) {
     const img = document.getElementById('sealedNoteImg');
     const text = document.getElementById('sealedNoteText');
@@ -594,6 +832,10 @@ document.addEventListener('visibilitychange', () => {
     if (text) text.textContent = 'Hidden';
   }
 });
+window.addEventListener('pagehide', onAppHide);
+window.addEventListener('pageshow', (e) => { if (e.persisted) onAppShow(); });
+document.addEventListener('freeze', onAppHide);
+document.addEventListener('resume', onAppShow);
 
 async function hashSecret(kind, value) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('moose|' + kind + '|' + value));
@@ -916,10 +1158,9 @@ window.loggedFeatures = {
 
 document.addEventListener('DOMContentLoaded', () => {
   bindModalBackdropClose();
-  const unlockBtn = document.getElementById('appLockUnlock');
-  if (unlockBtn) unlockBtn.onclick = () => runAppLock();
+  bindAppLockControls();
   bindA2hsBar();
-  setTimeout(() => { try { runAppLock(); } catch (e) {} }, 600);
+  setTimeout(() => { try { runAppLock(); } catch (e) {} }, 800);
   const safetyBtn = document.getElementById('safetySettingsBtn');
   if (safetyBtn) safetyBtn.onclick = async () => {
     const ok = await requireUnlock('Unlock settings', true);

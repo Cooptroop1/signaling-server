@@ -3249,7 +3249,12 @@ wss.on('connection', (ws, req) => {
         const newInitiator = await redisClient.sRandMember(clientsKey);
         if (newInitiator) {
           rooms.get(code).initiator = newInitiator;
-          await redisClient.set(roomKey, JSON.stringify({ initiator: newInitiator, maxClients: rooms.get(code).maxClients }), { EX: 86400 });
+          await redisClient.set(roomKey, JSON.stringify({
+            initiator: newInitiator,
+            maxClients: rooms.get(code).maxClients,
+            forceRelay: !!rooms.get(code).forceRelay,
+            knock: !!rooms.get(code).knock
+          }), { EX: 86400 });
           const initiatorChangedMsg = {
             type: 'initiator-changed',
             newInitiator,

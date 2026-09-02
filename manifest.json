@@ -2,39 +2,47 @@
   "background_color": "#000000",
   "dir": "ltr",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
+  "id": "/",
   "name": "Anonomoose",
   "orientation": "portrait",
   "scope": "/",
   "short_name": "Anonomoose",
   "start_url": "/",
-  "theme_color": "#3b82f6",
+  "theme_color": "#111111",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG",
-      "type": "image/jpeg",
-      "sizes": "960x960",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/192.png?v=260828e",
+      "src": "/192.png?v=260902a",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/256.png?v=260828e",
+      "src": "/192.png?v=260902a",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/256.png?v=260902a",
       "type": "image/png",
       "sizes": "256x256",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/512.png?v=260828e",
+      "src": "/512.png?v=260902a",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/512.png?v=260902a",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ],
-  "description": "Secure, anonymous end-to-end encrypted chat app with no data storage.",
+  "description": "Encrypted chat. Code to join. Moose to burn. Nothing saved.",
   "lang": "en",
   "categories": [
     "security",

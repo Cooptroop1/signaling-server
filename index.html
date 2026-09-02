@@ -4,18 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="google-site-verification" content="vAmDW0QvisliLkICqedIBGW0ZYAGMCXtKhzpGqK4tfY" />
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Anonomoose">
+  <meta name="application-name" content="Anonomoose">
   <link rel="sitemap" type="application/xml" href="/sitemap.xml">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://raw.githubusercontent.com https://cdnjs.cloudflare.com; media-src 'self' blob: data:; connect-src 'self' wss://signal.anonomoose.com https://signal.anonomoose.com wss://signaling-server-zc6m.onrender.com https://signaling-server-zc6m.onrender.com wss://signaling-server-1.onrender.com https://api.x.ai https://crgmcdpmmxtrcocfbsac.supabase.co wss://crgmcdpmmxtrcocfbsac.supabase.co https://www.anonomoose.com https://static.cloudflareinsights.com; object-src 'none'; base-uri 'self'; form-action 'self';">
   <title>Anonomoose Chat</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901bb">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901bb">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901bb">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901bb">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901bb">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901bb">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902a">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902a">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902a">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902a">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902a">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902a">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1216,26 +1222,67 @@
     .how-to-body h2 { margin-bottom: 0.75rem; }
     .how-to-body h3 { font-size: 0.95rem; margin: 0.85rem 0 0.25rem; }
     .how-to-body p { font-size: 0.9rem; color: #374151; margin: 0 0 0.4rem; }
-    #appLockGate {
+    #appLockGate, #privacyBlur {
       position: fixed; inset: 0; z-index: 99990;
-      background: #111; color: #fff;
+      background: #0a0a0a; color: #fff;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 0.75rem;
+      gap: 0.55rem; padding: 1.2rem;
     }
-    #appLockGate.hidden { display: none !important; }
+    #privacyBlur { z-index: 99980; }
+    #appLockGate.hidden, #privacyBlur.hidden, #a2hsSheet.hidden { display: none !important; }
+    #appLockGate img, #privacyBlur img {
+      width: 96px; height: 96px; border-radius: 22px; object-fit: cover;
+    }
+    #appLockGate .lock-title { font-size: 1.35rem; font-weight: 700; margin: 0; }
+    #appLockGate .lock-sub { font-size: 0.85rem; color: #9ca3af; margin: 0 0 0.3rem; }
+    #appLockGate .lock-err { color: #fca5a5; font-size: 0.85rem; min-height: 1.1rem; margin: 0; }
+    #appLockPin, #pinUnlockInput {
+      font-size: 1.15rem; letter-spacing: 0.35rem; text-align: center;
+      background: #1f1f1f; color: #fff; border: 1px solid #333;
+      border-radius: 0.6rem; padding: 0.7rem; width: min(260px, 80vw);
+    }
+    #pinUnlockInput { background: #fff; color: #111; border: 1px solid #d1d5db; }
+    .pin-pad {
+      display: grid; grid-template-columns: repeat(3, 4.4rem); gap: 0.45rem; margin: 0.35rem 0;
+    }
+    .pin-pad button {
+      width: 4.4rem; height: 4.4rem; border-radius: 999px; border: 0;
+      background: #1f1f1f; color: #fff; font-size: 1.25rem; cursor: pointer;
+    }
+    .pin-pad button.pin-ok { background: #2563eb; }
+    #pinUnlockModal .pin-pad button { background: #e5e7eb; color: #111; }
+    #pinUnlockModal .pin-pad button.pin-ok { background: #2563eb; color: #fff; }
     #pinUnlockModal.active { z-index: 100000 !important; }
-    #appLockGate button {
-      background: #2563eb; color: #fff; border: 0; border-radius: 0.5rem;
-      padding: 0.7rem 1.4rem; font-size: 1rem; cursor: pointer;
+    #appLockGate button#appLockUnlock, #appLockGate button#appLockBioBtn {
+      background: #2563eb; color: #fff; border: 0; border-radius: 0.55rem;
+      padding: 0.7rem 1.3rem; font-size: 1rem; cursor: pointer; width: min(260px, 80vw);
     }
-    #a2hsBar {
-      position: fixed; left: 0.6rem; right: 0.6rem; bottom: 0.6rem; z-index: 40;
-      background: #111; color: #fff; border-radius: 0.7rem; padding: 0.7rem 0.85rem;
-      font-size: 0.85rem; display: flex; gap: 0.5rem; align-items: center; justify-content: space-between;
+    #appLockGate button#appLockBioBtn { background: #111; border: 1px solid #444; }
+    #a2hsSheet {
+      position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.55);
+      display: flex; align-items: flex-end; justify-content: center;
     }
-    #a2hsBar.hidden { display: none !important; }
-    #a2hsBar button { background: #2563eb; color: #fff; border: 0; border-radius: 0.4rem; padding: 0.35rem 0.6rem; cursor: pointer; }
-    #a2hsBar .a2hs-x { background: transparent; color: #9ca3af; }
+    .a2hs-card {
+      background: #111; color: #fff; border-radius: 1rem 1rem 0 0;
+      padding: 1.1rem 1.15rem 1.4rem; width: 100%; max-width: 28rem;
+    }
+    .a2hs-card h3 { font-size: 1.1rem; font-weight: 700; margin: 0 0 0.4rem; }
+    .a2hs-card p { font-size: 0.88rem; color: #d1d5db; margin: 0 0 0.6rem; }
+    .a2hs-card ol { margin: 0 0 0.9rem 1.1rem; padding: 0; font-size: 0.9rem; color: #e5e7eb; }
+    .a2hs-card li { margin: 0.35rem 0; }
+    .a2hs-card button {
+      width: 100%; border: 0; border-radius: 0.55rem; padding: 0.7rem;
+      font-size: 0.95rem; cursor: pointer; margin-top: 0.4rem;
+    }
+    #a2hsGo { background: #2563eb; color: #fff; }
+    #a2hsLater { background: #1f1f1f; color: #fff; }
+    .a2hs-quiet { background: transparent; color: #9ca3af !important; }
+    .a2hs-share { display: inline-block; padding: 0 0.2rem; font-weight: 700; }
+    .last-out-bar {
+      background: #7f1d1d; color: #fff; border-radius: 0.5rem;
+      padding: 0.5rem 0.65rem; margin: 0.35rem 0; font-size: 0.85rem; text-align: center;
+    }
+    .last-out-bar.hidden { display: none !important; }
     .legal-links { text-align: center; margin: 0.6rem 0 0; font-size: 0.8rem; }
     .legal-links a { color: #6b7280; margin: 0 0.35rem; }
     .knock-join-bar {
@@ -1552,6 +1599,7 @@
             <button type="button" id="knockDenyBtn">Ignore</button>
           </span>
         </div>
+        <div id="lastOutBar" class="last-out-bar hidden">You are last. Leave, close, or refresh and the room + code burn.</div>
         <div id="videoJoinBar" class="video-join-bar hidden">
           <span>Video call</span>
           <span>
@@ -1703,16 +1751,33 @@
     </div>
   </div>
 
-  <div id="appLockGate" class="hidden" role="dialog" aria-label="App locked">
-    <p>Locked</p>
+  <div id="privacyBlur" class="hidden" aria-hidden="true">
+    <img src="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG" alt="">
+    <p>Anonomoose</p>
+  </div>
+  <div id="appLockGate" class="hidden" role="dialog" aria-label="App locked" aria-modal="true">
+    <img src="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG" alt="">
+    <p class="lock-title">Locked</p>
+    <p class="lock-sub">Enter your PIN to open Anonomoose</p>
+    <input id="appLockPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" placeholder="••••">
+    <div id="appLockPad" class="pin-pad"></div>
+    <p id="appLockErr" class="lock-err"></p>
+    <button type="button" id="appLockBioBtn" class="hidden">Face ID / fingerprint</button>
     <button type="button" id="appLockUnlock">Unlock</button>
   </div>
-  <div id="a2hsBar" class="hidden">
-    <span id="a2hsText">Add to Home Screen for calls and notes.</span>
-    <span>
+  <div id="a2hsSheet" class="hidden" role="dialog" aria-label="Add to Home Screen">
+    <div class="a2hs-card">
+      <h3>Add to Home Screen</h3>
+      <p id="a2hsLead">Works like an app. Calls and sealed notes can ping when you leave the browser.</p>
+      <ol id="a2hsSteps">
+        <li>Tap <strong>Share</strong> <span class="a2hs-share">□↑</span> at the bottom of Safari</li>
+        <li>Scroll and tap <strong>Add to Home Screen</strong></li>
+        <li>Tap <strong>Add</strong>, then open the moose icon — not this Safari tab</li>
+      </ol>
       <button type="button" id="a2hsGo">Add</button>
-      <button type="button" class="a2hs-x" id="a2hsHide">✕</button>
-    </span>
+      <button type="button" id="a2hsLater">Not now</button>
+      <button type="button" id="a2hsHide" class="a2hs-quiet">Don't show again</button>
+    </div>
   </div>
   <div id="howToModal" class="help-modal" role="dialog" aria-label="How to use" tabindex="-1">
     <div class="help-modal-content how-to-body">
@@ -1737,7 +1802,8 @@
       <p>Moose Book is names you chose to save. Moose shop is where you buy extra names (£1.99), numbers, and used names. Search is for people.</p>
       <h3>Safety</h3>
       <p>Nobody sees that you are typing. After a burn there is nothing useful left on the phone.</p>
-      <p>Set a PIN in Safety and tick <strong>Lock app when I leave</strong>. On iPhone use Share → Add to Home Screen so calls and notes still ping.</p>
+      <p><strong>Lock:</strong> Safety → set a 4+ digit PIN → tick <strong>Lock app when I leave</strong>. Optional Face ID / fingerprint on this phone. Leave the screen and the app is a black lock until the PIN. Three wrong PINs burns the book on this phone.</p>
+      <p><strong>Home Screen (iPhone):</strong> Safari → Share (square with arrow, bottom) → Add to Home Screen → Add. Then open the moose icon, not the Safari tab. Calls and sealed notes can ping. Android: tap Add when the prompt appears.</p>
       <p>Paid name problems: Moose shop, message admin. Privacy / Terms / Refunds are on the start page.</p>
       <p>Tap anywhere here to close.</p>
     </div>
@@ -1987,7 +2053,8 @@
   <div id="pinUnlockModal" class="totp-modal hidden" role="dialog" aria-label="PIN">
     <div class="totp-modal-content">
       <h2 id="pinUnlockTitle" class="text-xl font-bold mb-4">Enter PIN</h2>
-      <input id="pinUnlockInput" type="password" inputmode="numeric" class="border border-gray-300 p-3 w-full mb-2 rounded" placeholder="PIN">
+      <input id="pinUnlockInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" class="border border-gray-300 p-3 w-full mb-2 rounded" placeholder="PIN">
+      <div id="pinUnlockPad" class="pin-pad" style="margin: 0 auto 0.6rem;"></div>
       <p id="pinUnlockError" class="text-red-500 text-sm mb-2"></p>
       <button id="pinUnlockSubmit" class="bg-blue-500 text-white px-4 py-2 rounded w-full">Unlock</button>
       <button id="pinUnlockCancel" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2">Cancel</button>
@@ -2024,12 +2091,20 @@
       </select>
       <button id="saveSafetySettings" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-4">Save settings</button>
       <h3 class="font-bold mb-1">PIN / panic PIN</h3>
-      <p class="text-xs text-gray-500 mb-2">Saved only on this device. Real PIN unlocks the app, Search, inbox and notes. Panic PIN looks like it worked but shows an empty book. Three wrong guesses burns the book on this device.</p>
+      <p class="text-xs text-gray-500 mb-2">Saved only on this phone. Real PIN unlocks the app, Search, inbox and notes. Panic PIN looks like it worked but shows an empty book. Three wrong guesses burns the book on this device.</p>
       <input id="setRealPin" type="password" inputmode="numeric" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="New real PIN (4+)">
       <input id="setPanicPin" type="password" inputmode="numeric" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Panic PIN (different)">
       <label class="text-xs block mb-2"><input type="checkbox" id="appLockCheck"> Lock app when I leave this screen</label>
+      <label class="text-xs block mb-1">When to lock</label>
+      <select id="appLockIdle" class="border border-gray-300 p-2 w-full mb-2 rounded text-sm">
+        <option value="0">As soon as I leave</option>
+        <option value="60">After 1 minute away</option>
+        <option value="300">After 5 minutes away</option>
+      </select>
+      <label class="text-xs block mb-2"><input type="checkbox" id="appLockBio"> Unlock with Face ID / fingerprint on this phone</label>
       <label class="text-xs block mb-2"><input type="checkbox" id="clearPins"> Clear PINs</label>
-      <button id="savePinSettings" class="bg-black text-white px-4 py-2 rounded w-full mb-4">Save PINs on this device</button>
+      <button id="savePinSettings" class="bg-black text-white px-4 py-2 rounded w-full mb-3">Save PINs on this device</button>
+      <button type="button" id="showA2hsBtn" class="bg-gray-800 text-white px-4 py-2 rounded w-full mb-4">Add to Home Screen steps</button>
       <h3 class="font-bold mb-1">Duress login</h3>
       <p class="text-xs text-gray-500 mb-2">A second password. Looks logged in, empty book, no notes.</p>
       <input id="setDuressPass" type="password" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Duress password (6+)">
@@ -2052,15 +2127,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901bb"></script>
-  <script src="ratchet.js?v=260901bb"></script>
-  <script src="utils.js?v=260901bb"></script>
-  <script src="main.js?v=260901bb"></script>
-  <script src="init.js?v=260901bb"></script>
-  <script src="events.js?v=260901bb"></script>
+    <script src="crypto.js?v=260902a"></script>
+  <script src="ratchet.js?v=260902a"></script>
+  <script src="utils.js?v=260902a"></script>
+  <script src="main.js?v=260902a"></script>
+  <script src="init.js?v=260902a"></script>
+  <script src="events.js?v=260902a"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901bb"></script>
-  <script src="account-ui.js?v=260901bb"></script>
-  <script src="logged-features.js?v=260901bb"></script>
+  <script src="supabase-auth.js?v=260902a"></script>
+  <script src="account-ui.js?v=260902a"></script>
+  <script src="logged-features.js?v=260902a"></script>
 </body>
 </html>

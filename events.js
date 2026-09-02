@@ -832,6 +832,7 @@ async function handleSocketMessage(event) {
       if (txt) txt.textContent = (message.username || 'Someone') + ' wants in';
       if (bar) bar.classList.remove('hidden');
       window.__knockTarget = message.clientId;
+      try { if (navigator.vibrate) navigator.vibrate([90, 50, 90, 50, 120]); } catch (e) {}
       return;
     }
     if (message.type === 'init') {
@@ -946,6 +947,12 @@ async function handleSocketMessage(event) {
       connectedClients.add(message.clientId);
       updateMaxClientsUI();
       updateDots();
+      const lastBar = document.getElementById('lastOutBar');
+      if (lastBar) lastBar.classList.toggle('hidden', totalClients > 1 ? true : false);
+      if (totalClients > 1) {
+        inputContainer.classList.remove('hidden');
+        messages.classList.remove('waiting');
+      }
       if (isInitiator && message.clientId !== clientId && !peerConnections.has(message.clientId) && !groupRelayOn()) {
         console.log(`Initiating peer connection with client ${message.clientId}`);
         startPeerConnection(message.clientId, true);
@@ -990,17 +997,14 @@ async function handleSocketMessage(event) {
       }
       updateMaxClientsUI();
       updateDots();
+      const lastBar = document.getElementById('lastOutBar');
       if (totalClients <= 1) {
-        showStatusMessage('The other person left. Room is still open if they rejoin.');
+        if (lastBar) lastBar.classList.remove('hidden');
+        showStatusMessage('You are last. Leave, close, or refresh — the room and code burn.');
         inputContainer.classList.add('hidden');
         messages.classList.add('waiting');
-        statusElement.textContent = 'Waiting for connection...';
-      }
-      if (totalClients <= 1) {
-        inputContainer.classList.add('hidden');
-        messages.classList.add('waiting');
-        endChat();
-      }
+        statusElement.textContent = 'You are last. Leave and the room + code burn.';
+      } else if (lastBar) lastBar.classList.add('hidden');
       return;
     }
     if (message.type === 'max-clients') {
@@ -2204,6 +2208,11 @@ document.addEventListener('DOMContentLoaded', () => {
     saveGrokKey();
   };
   document.getElementById('newSessionButton').onclick = () => {
+    const last = typeof totalClients === 'number' && totalClients <= 1;
+    const msg = last
+      ? 'You are last. Leave and the room + code burn. Nothing is saved.'
+      : 'Leave this room? The chat on this phone burns.';
+    if (!confirm(msg)) return;
     burnChatSession();
     window.location.href = 'https://anonomoose.com';
   };

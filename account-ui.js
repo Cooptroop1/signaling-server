@@ -372,29 +372,6 @@ function renderMooseBook() {
   const book = panic ? [] : getBook().filter((b) => !isOwnName(b.name));
   if (!logged) return;
   list.innerHTML = '';
-  const mine = panic ? [] : (window.__myNames || []);
-  if (mine.length) {
-    const head = document.createElement('p');
-    head.className = 'text-xs text-gray-500 mb-1';
-    head.textContent = 'Your names — mail to any of these reaches you';
-    list.appendChild(head);
-    mine.forEach((n) => {
-      const row = document.createElement('div');
-      row.className = 'book-row';
-      const label = document.createElement('strong');
-      label.textContent = n.name + (n.active ? ' (in chat)' : '');
-      row.appendChild(label);
-      if (!n.active) {
-        const useBtn = document.createElement('button');
-        useBtn.textContent = 'Use in chat';
-        useBtn.onclick = () => {
-          if (typeof setActiveOwnedName === 'function') setActiveOwnedName(n.name);
-        };
-        row.appendChild(useBtn);
-      }
-      list.appendChild(row);
-    });
-  }
   if (!book.length) {
     const p = document.createElement('p');
     p.className = 'text-sm text-gray-500';

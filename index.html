@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902b">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902b">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902b">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902b">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902b">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902b">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902c">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902c">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902c">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902c">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902c">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902c">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1580,7 +1580,7 @@
         <div id="loggedLinkOpts" class="logged-link-box logged-only-opt hidden">
           <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheckStart"> Phone-to-phone only (never use the server backup)</label>
           <label class="p2p-only-row"><input type="checkbox" id="lanDropCheckStart"> Same Wi‑Fi: drop internet after phones link</label>
-          <label class="p2p-only-row"><input type="checkbox" id="knockCheckStart"> Ask before they join</label>
+          <label class="p2p-only-row"><input type="checkbox" id="knockCheckStart"> Ask before they join (they wait until you Allow)</label>
         </div>
       </div>
       <div id="usernameContainer" class="hidden">
@@ -1589,7 +1589,7 @@
         <div id="usernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
         <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheck"> Phone-to-phone only (never use the server backup)</label>
         <label class="p2p-only-row"><input type="checkbox" id="lanDropCheck"> Same Wi‑Fi: drop internet after phones link</label>
-        <label class="p2p-only-row"><input type="checkbox" id="knockCheck"> Ask before they join</label>
+        <label class="p2p-only-row"><input type="checkbox" id="knockCheck"> Ask before they join (they wait until you Allow)</label>
         <button id="joinWithUsernameButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Join chat with username">Join Chat</button>
         <button id="backButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
       </div>
@@ -1797,7 +1797,10 @@
       <p><strong>Start Chat</strong> gives you a code. Send that code. They tap <strong>Connect to Chat</strong> and type it.</p>
       <p>Up to 4 people is phone-to-phone. More than 4 uses the encrypted backup.</p>
       <p>Close, refresh, leave for 20 seconds, or last person out: the room and the code burn. Nothing is saved.</p>
-      <p>Tick <strong>Ask before they join</strong> if they must wait for you to Allow. Tick <strong>Same Wi‑Fi</strong> when the phones are on the same network.</p>
+      <p>Tick <strong>Same Wi‑Fi</strong> when both phones are on the same network.</p>
+      <h3>Ask before they join</h3>
+      <p>Tick this <strong>before you start</strong> the room. Leave it off and anyone with the code walks straight in.</p>
+      <p>Tick it on and they cannot walk in. They see “Waiting for them to let you in…”. You get a bar with their name, <strong>Allow</strong> or <strong>Ignore</strong>, and the phone buzzes. Allow lets them in. Ignore leaves them out. The code alone is not enough while this is on.</p>
       <p>The moose in the corner: tap once to burn this phone. Tap twice to burn everyone and kill the code.</p>
       <h3>Chat</h3>
       <p>Type and send. Next to send: Keep, Once (photo burns after they tap it), or 10s / 30s / 1 minute on both phones.</p>
@@ -2138,15 +2141,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902b"></script>
-  <script src="ratchet.js?v=260902b"></script>
-  <script src="utils.js?v=260902b"></script>
-  <script src="main.js?v=260902b"></script>
-  <script src="init.js?v=260902b"></script>
-  <script src="events.js?v=260902b"></script>
+    <script src="crypto.js?v=260902c"></script>
+  <script src="ratchet.js?v=260902c"></script>
+  <script src="utils.js?v=260902c"></script>
+  <script src="main.js?v=260902c"></script>
+  <script src="init.js?v=260902c"></script>
+  <script src="events.js?v=260902c"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902b"></script>
-  <script src="account-ui.js?v=260902b"></script>
-  <script src="logged-features.js?v=260902b"></script>
+  <script src="supabase-auth.js?v=260902c"></script>
+  <script src="account-ui.js?v=260902c"></script>
+  <script src="logged-features.js?v=260902c"></script>
 </body>
 </html>

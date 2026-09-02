@@ -859,6 +859,15 @@ async function finishVanityReturn() {
       shopNote(data.error);
       return;
     }
+    if (data && data.kind === 'coins') {
+      await loadMooseWallet();
+      const msg = mooseLabel(data.coins) + ' added.' + (data.balance != null ? ' You have ' + mooseLabel(data.balance) + '.' : '');
+      shopNote(msg);
+      if (typeof showStatusMessage === 'function') showStatusMessage(msg);
+      try { localStorage.removeItem('vanitySession'); localStorage.removeItem('vanityPendingName'); } catch (e) {}
+      try { history.replaceState({}, '', location.pathname); } catch (e) {}
+      return;
+    }
     if (data && data.name) paidName = data.name;
     const ok = await applyBoughtName(paidName, !!(data && data.applied));
     if (ok) {
@@ -1221,6 +1230,100 @@ function shopNote(text) {
   if (typeof showStatusMessage === 'function') showStatusMessage(text);
 }
 
+function mooseLabel(n) {
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  return v.toLocaleString('en-GB') + ' moose';
+}
+async function loadMooseWallet() {
+  const el = document.getElementById('mooseCoinHave');
+  if (!isLoggedIn() || !sb) {
+    window.__mooseCoins = 0;
+    if (el) el.textContent = 'Log in for moose';
+    return 0;
+  }
+  try {
+    const { data, error } = await sb.rpc('moose_my_wallet');
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    const coins = (!error && row && row.ok) ? Number(row.coins) || 0 : 0;
+    window.__mooseCoins = coins;
+    if (el) el.textContent = mooseLabel(coins);
+    return coins;
+  } catch (e) {
+    window.__mooseCoins = 0;
+    if (el) el.textContent = '0 moose';
+    return 0;
+  }
+}
+async function buyMoosePack(coins) {
+  if (!isLoggedIn()) {
+    openLoginForShop();
+    return;
+  }
+  if (window.__buyBusy) return;
+  window.__buyBusy = true;
+  shopNote('Opening payment for ' + mooseLabel(coins) + '…');
+  try {
+    const r = await fetch('https://signal.anonomoose.com/vanity-checkout', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        kind: 'coins',
+        coins: Number(coins),
+        access: sbBearer()
+      })
+    });
+    const data = await r.json();
+    if (data && data.url) {
+      try { localStorage.setItem('vanityPendingName', 'coins:' + coins); } catch (e) {}
+      window.location.href = data.url;
+      return;
+    }
+    shopNote((data && data.error) || 'Could not start payment. Try again.');
+  } catch (e) {
+    shopNote('Could not start payment. Try again.');
+  } finally {
+    window.__buyBusy = false;
+  }
+}
+async function spendClaimCoins(name) {
+  if (!isLoggedIn() || !sb) {
+    openLoginForShop();
+    return;
+  }
+  if (window.__buyBusy) return;
+  window.__buyBusy = true;
+  const buyBtn = document.getElementById('vanityBuyBtn');
+  if (buyBtn) {
+    buyBtn.disabled = true;
+    buyBtn.textContent = 'Spending moose…';
+  }
+  shopNote('Spending 20 moose on ' + name + '…');
+  try {
+    const { data, error } = await sb.rpc('moose_spend_claim', { p_name: name });
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    if (error) throw error;
+    if (!row || row.ok === false) {
+      const need = row && Number(row.need);
+      shopNote((row && row.error) || 'Could not buy that name.');
+      if (need) await loadMooseWallet();
+      return;
+    }
+    window.__mooseCoins = Number(row.coins) || 0;
+    const el = document.getElementById('mooseCoinHave');
+    if (el) el.textContent = mooseLabel(window.__mooseCoins);
+    await applyBoughtName(row.name, true);
+  } catch (e) {
+    shopNote((e && e.message) || 'Could not buy that name.');
+  } finally {
+    window.__buyBusy = false;
+    const b = document.getElementById('vanityBuyBtn');
+    if (b) {
+      b.disabled = false;
+      b.textContent = 'Buy for 20 moose';
+    }
+  }
+}
+
 function openLoginForShop() {
   shopNote('Log in with your email first. The name is saved on that account, same as your password login.');
   const loginModal = document.getElementById('supabaseLoginModal');
@@ -1311,8 +1414,7 @@ async function checkMooseClaim(raw) {
   if (taken) return { ok: false, error: nm + ' is taken.' };
   const shop = window.__mooseShop || {};
   if (shop.names_claim_on === false) return { ok: false, error: 'Name claims are off.' };
-  const cents = Number(shop.claim_cents) >= 199 ? Math.round(Number(shop.claim_cents)) : 199;
-  return { ok: true, kind: 'claim', name: nm, price_cents: cents, available: true };
+  return { ok: true, kind: 'claim', name: nm, coins: 20, price_cents: 200, available: true };
 }
 function claimPriceLabel(cents) {
   const n = Number(cents || 0);
@@ -1342,6 +1444,7 @@ function openVanityShop() {
   const out = document.getElementById('vanityShopResult');
   if (out) out.textContent = '';
   if (window.__vanityTab === 'used') loadUsedListings();
+  loadMooseWallet();
 }
 
 function tabClass(on) {
@@ -1460,7 +1563,7 @@ function setVanityTab(tab) {
   if (out) {
     out.textContent = tab === 'used'
       ? 'Search the list. Buyer pays the list. Stripe fee + 5% comes from the seller.'
-      : (tab === 'claim' ? 'Extra names. £1.99 each. You can sell them later in Used.' : '');
+      : (tab === 'claim' ? 'Extra names. 20 moose each (£2). Buy moose above if you need more.' : '');
   }
   if (tab === 'used') loadUsedListings();
 }
@@ -1544,6 +1647,10 @@ async function startVanityCheckout(row) {
     await messageListingOwner(row);
     return;
   }
+  if ((row && (row.kind === 'claim' || row.coins)) || window.__vanityTab === 'claim') {
+    await spendClaimCoins((row && row.name) || '');
+    return;
+  }
   if (window.__buyBusy) return;
   window.__buyBusy = true;
   const buyBtn = document.getElementById('vanityBuyBtn');
@@ -1598,6 +1705,9 @@ function bindVanityShop() {
   const out = document.getElementById('vanityShopResult');
   window.__vanityTab = 'number';
   if (openBtn) openBtn.onclick = openVanityShop;
+  document.querySelectorAll('#mooseCoinBar .coin-pack').forEach((btn) => {
+    btn.onclick = () => buyMoosePack(Number(btn.getAttribute('data-coins') || 0));
+  });
   const tn = document.getElementById('vanityTabNum');
   const tl = document.getElementById('vanityTabLet');
   const tc = document.getElementById('vanityTabClaim');
@@ -1636,12 +1746,14 @@ function bindVanityShop() {
     }
     if (row.kind === 'claim') {
       const label = row.name;
-      let msg = label + ' is available — ' + claimPriceLabel(row.price_cents) + '. You can use it and sell it later.';
+      const have = await loadMooseWallet();
+      let msg = label + ' is 20 moose. You have ' + mooseLabel(have) + '.';
+      if (have < 20) msg += ' Buy a pack above first.';
       out.textContent = msg;
       if (buyBtn) {
         buyBtn.disabled = false;
         buyBtn.classList.remove('hidden');
-        buyBtn.textContent = 'Buy ' + label + ' for ' + claimPriceLabel(row.price_cents);
+        buyBtn.textContent = have < 20 ? 'Need 20 moose' : 'Buy for 20 moose';
       }
       return;
     }

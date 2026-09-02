@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902d">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902d">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902d">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902d">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902d">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902d">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902e">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902e">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902e">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902e">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902e">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902e">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1403,6 +1403,25 @@
       gap: 0.4rem;
       margin-bottom: 0.75rem;
     }
+    #mooseCoinBar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    #mooseCoinBar .coin-pack {
+      background: #111;
+      color: #fff;
+      padding: 0.4rem 0.7rem;
+      border-radius: 0.4rem;
+      font-size: 0.8rem;
+    }
+    #mooseCoinHave {
+      font-weight: 700;
+      font-size: 0.9rem;
+      margin-right: 0.25rem;
+    }
     #myNamesBox.hidden { display: none !important; }
     #sealedNotesWrap.has-mail #sealedNotesBtn {
       color: #dc2626 !important;
@@ -1813,7 +1832,7 @@
       <p>Sign up for a name. Search someone. Tap <strong>Add friend</strong>. They confirm, or they burn (you wait 24 hours to ask again).</p>
       <p>Once you are friends you can send a note, a read-once photo, a voice clip, or call them. Poke is just a nudge with no text.</p>
       <p>Sealed notes sit until they open them, or until the timer you set.</p>
-      <p>Moose Book is names you chose to save. Moose shop is where you buy extra names (£1.99), numbers, and used names. Search is for people.</p>
+      <p>Moose Book is names you chose to save. Moose shop: extra names cost 20 moose. Buy moose in the shop (10 for £1). Used names still use card. Search is for people.</p>
       <h3>Safety</h3>
       <p>Nobody sees that you are typing. After a burn there is nothing useful left on the phone.</p>
       <p><strong>Lock:</strong> Safety → set a 4+ digit PIN → tick <strong>Lock app when I leave</strong>. Optional Face ID / fingerprint on this phone. Leave the screen and the app is a black lock until the PIN. Three wrong PINs burns the book on this phone.</p>
@@ -1857,7 +1876,14 @@
   <div id="vanityShopModal" class="totp-modal" role="dialog" aria-label="Moose shop">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-3">Moose shop</h2>
-      <p class="text-sm text-gray-600 mb-3">Buy and sell here. Extra names (4–16) are £1.99. Used: buyer pays the list. Search people with Search, not here.</p>
+      <p class="text-sm text-gray-600 mb-3">Buy moose (10 for £1). Extra names are 20 moose. Used names still take card. Search people with Search, not here.</p>
+      <div id="mooseCoinBar">
+        <span id="mooseCoinHave">0 moose</span>
+        <button type="button" class="coin-pack" data-coins="50">50 · £5</button>
+        <button type="button" class="coin-pack" data-coins="100">100 · £10</button>
+        <button type="button" class="coin-pack" data-coins="200">200 · £20</button>
+        <button type="button" class="coin-pack" data-coins="500">500 · £50</button>
+      </div>
       <div class="shop-tabs">
         <button type="button" id="vanityTabNum" class="bg-gray-800 text-white px-3 py-1 rounded text-sm">Numbers</button>
         <button type="button" id="vanityTabLet" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">Short</button>
@@ -2141,15 +2167,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902d"></script>
-  <script src="ratchet.js?v=260902d"></script>
-  <script src="utils.js?v=260902d"></script>
-  <script src="main.js?v=260902d"></script>
-  <script src="init.js?v=260902d"></script>
-  <script src="events.js?v=260902d"></script>
+    <script src="crypto.js?v=260902e"></script>
+  <script src="ratchet.js?v=260902e"></script>
+  <script src="utils.js?v=260902e"></script>
+  <script src="main.js?v=260902e"></script>
+  <script src="init.js?v=260902e"></script>
+  <script src="events.js?v=260902e"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902d"></script>
-  <script src="account-ui.js?v=260902d"></script>
-  <script src="logged-features.js?v=260902d"></script>
+  <script src="supabase-auth.js?v=260902e"></script>
+  <script src="account-ui.js?v=260902e"></script>
+  <script src="logged-features.js?v=260902e"></script>
 </body>
 </html>

@@ -181,6 +181,12 @@ try {
   if (stripeKey) stripe = require('stripe')(stripeKey);
 } catch (e) { logger.warn('stripe %s', e.message); }
 if (stripe) logger.info('Stripe mode %s', stripeKey.startsWith('sk_live_') ? 'LIVE' : (stripeKey.startsWith('sk_test_') ? 'TEST (swap to sk_live_ on Render)' : 'set'));
+const COIN_PACKS = [
+  { coins: 50, pence: 500 },
+  { coins: 100, pence: 1000 },
+  { coins: 200, pence: 2000 },
+  { coins: 500, pence: 5000 }
+];
 const SUPABASE_SERVICE_ROLE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim().replace(/^["']|["']$/g, '');
 logger.info('Vanity service role %s', SUPABASE_SERVICE_ROLE_KEY ? 'present' : 'MISSING');
 
@@ -859,6 +865,56 @@ function cleanPayError(err) {
   return s.slice(0, 160) || 'Could not save the name';
 }
 
+async function fulfillCoinPack(session, stored) {
+  const userId = (session.metadata && session.metadata.userId) || stored.userId;
+  const coins = parseInt((session.metadata && session.metadata.coins) || stored.coins, 10) || 0;
+  const locked = parseInt((session.metadata && session.metadata.amount) || stored.amount, 10) || 0;
+  const paidAmount = Number(session.amount_total) || 0;
+  const pack = COIN_PACKS.find((p) => p.coins === coins && p.pence === locked);
+  if (!userId || !pack) return { ok: false, error: 'Missing coin pack' };
+  if (paidAmount && paidAmount !== pack.pence) return { ok: false, error: 'Paid amount does not match the pack' };
+  if (!SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Could not add moose' };
+  const doneKey = 'coins:done:' + session.id;
+  try {
+    const nx = await redisClient.set(doneKey, String(coins), { NX: true, EX: 30 * 24 * 3600 });
+    if (!nx) {
+      return { ok: true, kind: 'coins', coins, userId, applied: true };
+    }
+  } catch (e) {}
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_credit_coins', {
+      method: 'POST',
+      headers: svcHeaders(),
+      body: JSON.stringify({
+        p_user: userId,
+        p_coins: pack.coins,
+        p_session: session.id,
+        p_pence: pack.pence
+      })
+    });
+    const data = await r.json();
+    if (!r.ok || (data && data.ok === false)) {
+      throw new Error((data && data.error) || 'Could not add moose');
+    }
+    return { ok: true, kind: 'coins', coins: pack.coins, balance: data && data.coins, userId, applied: true };
+  } catch (e) {
+    logger.warn('coin fulfill %s', e && e.message);
+    try { await redisClient.del(doneKey); } catch (e2) {}
+    return { ok: false, error: cleanPayError(e && e.message), kind: 'coins', userId, applied: false };
+  }
+}
+
+async function loadHouseCoins() {
+  if (!SUPABASE_SERVICE_ROLE_KEY) return 0;
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/moose_house?id=eq.1&select=coins', { headers: svcHeaders() });
+    const rows = await r.json();
+    return Number(Array.isArray(rows) && rows[0] && rows[0].coins) || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
 async function fulfillPaidSession(session, userAccess) {
   let paid = session && (session.payment_status === 'paid' || session.status === 'complete');
   if (!paid && session && session.id && stripe) {
@@ -874,6 +930,8 @@ async function fulfillPaidSession(session, userAccess) {
     const raw = await redisClient.get('vanity:sess:' + session.id);
     if (raw) stored = JSON.parse(raw);
   } catch (e) {}
+  const metaKind = (session.metadata && session.metadata.kind) || stored.kind;
+  if (metaKind === 'coins') return fulfillCoinPack(session, stored);
   const name = (session.metadata && session.metadata.name) || stored.name;
   const userId = (session.metadata && session.metadata.userId) || stored.userId;
   const locked = parseInt((session.metadata && session.metadata.amount) || stored.amount, 10) || 0;
@@ -882,7 +940,6 @@ async function fulfillPaidSession(session, userAccess) {
   if (locked && paidAmount && paidAmount < locked) {
     return { ok: false, error: 'Paid amount does not match the shop price' };
   }
-  const metaKind = (session.metadata && session.metadata.kind) || stored.kind;
   const sellerId = (session.metadata && session.metadata.sellerId) || stored.sellerId || '';
   const doneKey = 'vanity:done:' + session.id;
   try {
@@ -1183,6 +1240,46 @@ server.on('request', (req, res) => {
         if (!stripe) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Payments are not available right now. Try again later.' }));
+          return;
+        }
+        if (body.kind === 'coins') {
+          const pack = COIN_PACKS.find((p) => p.coins === Number(body.coins));
+          if (!pack) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'Pick a moose pack' }));
+            return;
+          }
+          try {
+            const sessionOpts = {
+              mode: 'payment',
+              payment_method_types: ['card'],
+              client_reference_id: shopUser.id,
+              success_url: 'https://www.anonomoose.com/?vanity=ok&session_id={CHECKOUT_SESSION_ID}',
+              cancel_url: 'https://www.anonomoose.com/?vanity=cancel',
+              metadata: { kind: 'coins', userId: shopUser.id, coins: String(pack.coins), amount: String(pack.pence) },
+              line_items: [{
+                quantity: 1,
+                price_data: {
+                  currency: 'gbp',
+                  unit_amount: pack.pence,
+                  product_data: { name: pack.coins + ' moose' }
+                }
+              }]
+            };
+            if (shopUser.email) sessionOpts.customer_email = shopUser.email;
+            const session = await stripe.checkout.sessions.create(sessionOpts);
+            try {
+              await redisClient.set('vanity:sess:' + session.id, JSON.stringify({
+                kind: 'coins', userId: shopUser.id, coins: pack.coins, amount: pack.pence
+              }), { EX: 7 * 24 * 3600 });
+            } catch (e) {}
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, url: session.url }));
+          } catch (e) {
+            logger.warn('coin checkout %s', e && e.message);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: (e && e.message) || 'Stripe checkout failed' }));
+          }
           return;
         }
         const isResale = body.kind === 'resale' || body.resale === true;
@@ -2882,6 +2979,7 @@ wss.on('connection', (ws, req) => {
         let weekly = computeAggregate(7);
         let monthly = computeAggregate(30);
         let yearly = computeAggregate(365);
+        const houseCoins = await loadHouseCoins();
         ws.send(JSON.stringify({
           type: 'stats',
           dailyUsers: dailyUsers.get(day)?.size || 0,
@@ -2894,7 +2992,8 @@ wss.on('connection', (ws, req) => {
           yearlyConnections: yearly.connections,
           allTimeUsers: allTimeUsers.size,
           activeRooms: rooms.size,
-          totalClients: totalClients
+          totalClients: totalClients,
+          houseCoins: houseCoins
         }));
         return;
       }

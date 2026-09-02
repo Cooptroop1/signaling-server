@@ -30,7 +30,7 @@ let keyVersion = 0; // New: Global key version counter for ratcheting
 let globalSizeRate = { totalSize: 0, startTime: performance.now() }; // New: Client-side size tracking (mirror server 1MB/min)
 let processedNonces = new Map(); // Changed to Map<nonce, timestamp> for cleanup
 let messageQueue = new Map(); // New: Per-target message queue for retries
-function appendMessage({ username, timestamp, type, content, isSelf, fileName = null, claimed = false, burnMs = 0 }) {
+function appendMessage({ username, timestamp, type, content, isSelf, fileName = null, claimed = false, burnMs = 0, once = false }) {
   const messagesElement = document.getElementById('messages');
   const messageDiv = document.createElement('div');
   messageDiv.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
@@ -43,7 +43,18 @@ function appendMessage({ username, timestamp, type, content, isSelf, fileName = 
   messageDiv.appendChild(nameSpan);
   if (type === 'image' || type === 'voice' || type === 'video' || type === 'file') {
     let element;
-    if (type === 'image') {
+    if (type === 'image' && once) {
+      element = document.createElement('button');
+      element.type = 'button';
+      element.className = 'once-photo-btn';
+      element.textContent = isSelf ? 'Photo · they view once' : 'Tap to view once';
+      element.addEventListener('click', () => {
+        if (typeof createImageModal === 'function') createImageModal(content, `${type}Button`);
+        element.textContent = 'Burned';
+        element.disabled = true;
+        content = '';
+      });
+    } else if (type === 'image') {
       element = document.createElement('img');
       element.dataset.src = content;
       element.style.maxWidth = '100%';
@@ -201,8 +212,10 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
   const jitteredTimestamp = timestamp + jitter;
   const nonce = crypto.randomUUID();
   const sanitizedContent = content ? sanitizeMessage(content) : null;
-  const burnMs = Number((document.getElementById('liveBurnSelect') || {}).value) || 0;
-  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type, claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn()), burnMs });
+  const burnSel = (document.getElementById('liveBurnSelect') || {}).value || '0';
+  const once = burnSel === 'once';
+  const burnMs = once ? 0 : (Number(burnSel) || 0);
+  const metadata = JSON.stringify({ username, timestamp: jitteredTimestamp, type, claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn()), burnMs, once: !!(once && type === 'image') });
   let rawData = metadata + (dataToSend || sanitizedContent);
   const paddedLength = Math.min(Math.ceil(rawData.length / 512) * 512, 5 * 1024 * 1024);
   rawData = rawData.padEnd(paddedLength, ' ');
@@ -270,7 +283,7 @@ async function prepareAndSendMessage({ content, type = 'message', file = null, b
     return;
   }
   if (sent) {
-    appendMessage({ username, timestamp, type, content: sanitizedContent || dataToSend, isSelf: true, fileName: file?.name, claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn()), burnMs });
+    appendMessage({ username, timestamp, type, content: sanitizedContent || dataToSend, isSelf: true, fileName: file?.name, claimed: !!(window.sbAuth && window.sbAuth.isLoggedIn()), burnMs, once: !!(once && type === 'image') });
     processedMessageIds.add(messageId);
     processedNonces.set(nonce, Date.now());
     messageCount++;
@@ -656,7 +669,7 @@ async function processReceivedMessage(data, targetId) {
   }
   processedMessageIds.add(data.messageId);
   processedNonces.set(data.nonce, Date.now());
-  let senderUsername, timestamp, contentType, contentOrData, claimed = false, burnMs = 0;
+  let senderUsername, timestamp, contentType, contentOrData, claimed = false, burnMs = 0, onceFlag = false;
   try {
     let rawData = null;
     if (isSk) {
@@ -725,13 +738,14 @@ async function processReceivedMessage(data, targetId) {
     timestamp = metadata.timestamp;
     contentType = metadata.type;
     burnMs = Number(metadata.burnMs) || 0;
+    onceFlag = !!metadata.once;
     contentOrData = rawData.substring(metadataStr.length).trimEnd();
   } catch (error) {
     console.error(`Decryption/verification failed for message from ${targetId}:`, error);
     showStatusMessage('Failed to decrypt/verify message.');
     return;
   }
-  appendMessage({ username: senderUsername, timestamp, type: contentType, content: sanitizeMessage(contentOrData), isSelf: senderUsername === username, fileName: data.filename || 'file', claimed, burnMs });
+  appendMessage({ username: senderUsername, timestamp, type: contentType, content: sanitizeMessage(contentOrData), isSelf: senderUsername === username, fileName: data.filename || 'file', claimed, burnMs, once: !!onceFlag });
   if (isInitiator && !isDr && !isSk) {
     dataChannels.forEach((dc, id) => {
       if (id !== targetId && dc.readyState === 'open') {

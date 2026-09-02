@@ -10,12 +10,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901ba">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901ba">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901ba">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901ba">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901ba">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901ba">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260901bb">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260901bb">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260901bb">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260901bb">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260901bb">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260901bb">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1216,6 +1216,39 @@
     .how-to-body h2 { margin-bottom: 0.75rem; }
     .how-to-body h3 { font-size: 0.95rem; margin: 0.85rem 0 0.25rem; }
     .how-to-body p { font-size: 0.9rem; color: #374151; margin: 0 0 0.4rem; }
+    #appLockGate {
+      position: fixed; inset: 0; z-index: 99990;
+      background: #111; color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0.75rem;
+    }
+    #appLockGate.hidden { display: none !important; }
+    #pinUnlockModal.active { z-index: 100000 !important; }
+    #appLockGate button {
+      background: #2563eb; color: #fff; border: 0; border-radius: 0.5rem;
+      padding: 0.7rem 1.4rem; font-size: 1rem; cursor: pointer;
+    }
+    #a2hsBar {
+      position: fixed; left: 0.6rem; right: 0.6rem; bottom: 0.6rem; z-index: 40;
+      background: #111; color: #fff; border-radius: 0.7rem; padding: 0.7rem 0.85rem;
+      font-size: 0.85rem; display: flex; gap: 0.5rem; align-items: center; justify-content: space-between;
+    }
+    #a2hsBar.hidden { display: none !important; }
+    #a2hsBar button { background: #2563eb; color: #fff; border: 0; border-radius: 0.4rem; padding: 0.35rem 0.6rem; cursor: pointer; }
+    #a2hsBar .a2hs-x { background: transparent; color: #9ca3af; }
+    .legal-links { text-align: center; margin: 0.6rem 0 0; font-size: 0.8rem; }
+    .legal-links a { color: #6b7280; margin: 0 0.35rem; }
+    .knock-join-bar {
+      display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+      background: #1e3a8a; color: #fff; border-radius: 0.5rem; padding: 0.45rem 0.6rem; margin: 0.4rem 0;
+      font-size: 0.85rem;
+    }
+    .knock-join-bar.hidden { display: none !important; }
+    .knock-join-bar button { border: 0; border-radius: 0.35rem; padding: 0.25rem 0.55rem; cursor: pointer; }
+    .once-photo-btn {
+      display: block; width: 100%; background: #111; color: #fff; border: 0; border-radius: 0.5rem;
+      padding: 1.1rem 0.5rem; cursor: pointer; font-size: 0.9rem;
+    }
     .video-live-hint {
       grid-column: 1 / -1;
       margin: 0;
@@ -1462,7 +1495,7 @@
     <div class="bg-white p-8 rounded-lg shadow-lg flex-grow">
       <h1 class="text-3xl font-bold mb-1 text-center text-gray-800">Anonomoose Chat</h1>
       <p class="tagline">Encrypted chat. Code to join. Moose to burn. Nothing saved.</p>
-      <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Start a new chat or connect to an existing one</div>
+      <div id="status" class="text-center mb-4 text-gray-600" role="status" aria-live="polite">Leave, close, or last person out — the room burns. Nothing is saved.</div>
       <div id="privacyStatus" class="text-center mb-4 text-green-500 text-sm hidden" role="status" aria-live="polite">Phone to phone · encrypted</div>
       <div id="initialContainer">
         <div id="startActions">
@@ -1488,7 +1521,8 @@
         </div>
         <div id="loggedLinkOpts" class="logged-link-box logged-only-opt hidden">
           <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheckStart"> Phone-to-phone only (never use the server backup)</label>
-          <label class="p2p-only-row"><input type="checkbox" id="lanDropCheckStart"> Drop internet after phones link (same Wi‑Fi)</label>
+          <label class="p2p-only-row"><input type="checkbox" id="lanDropCheckStart"> Same Wi‑Fi: drop internet after phones link</label>
+          <label class="p2p-only-row"><input type="checkbox" id="knockCheckStart"> Ask before they join</label>
         </div>
       </div>
       <div id="usernameContainer" class="hidden">
@@ -1496,7 +1530,8 @@
         <input id="usernameInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameHelp" maxlength="16">
         <div id="usernameHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
         <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheck"> Phone-to-phone only (never use the server backup)</label>
-        <label class="p2p-only-row"><input type="checkbox" id="lanDropCheck"> Drop internet after phones link (same Wi‑Fi)</label>
+        <label class="p2p-only-row"><input type="checkbox" id="lanDropCheck"> Same Wi‑Fi: drop internet after phones link</label>
+        <label class="p2p-only-row"><input type="checkbox" id="knockCheck"> Ask before they join</label>
         <button id="joinWithUsernameButton" class="bg-blue-500 text-white px-4 py-2 rounded w-full hover:bg-blue-600 transition-colors" aria-label="Join chat with username">Join Chat</button>
         <button id="backButton" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2 hover:bg-gray-600 transition-colors" aria-label="Back to main menu">Back</button>
       </div>
@@ -1509,6 +1544,13 @@
           <button id="textCodeButton" aria-label="Share chat code">Text Code</button>
           <button id="addUserText" class="hidden" aria-label="Add another person">Add User</button>
           <button id="roomQrButton" aria-label="Show room QR">Room QR</button>
+        </div>
+        <div id="knockJoinBar" class="knock-join-bar hidden">
+          <span id="knockJoinText">Someone wants in</span>
+          <span>
+            <button type="button" id="knockAllowBtn">Allow</button>
+            <button type="button" id="knockDenyBtn">Ignore</button>
+          </span>
         </div>
         <div id="videoJoinBar" class="video-join-bar hidden">
           <span>Video call</span>
@@ -1583,6 +1625,7 @@
             <textarea id="messageInput" placeholder="Type a message..." cols="30" maxlength="1000" aria-describedby="messageHelp"></textarea>
             <select id="liveBurnSelect" class="live-burn-select" title="Burn this line on both phones" aria-label="Burn timer">
               <option value="0">Keep</option>
+              <option value="once">Once</option>
               <option value="10000">10s</option>
               <option value="30000">30s</option>
               <option value="60000">1m</option>
@@ -1607,7 +1650,7 @@
         <input id="usernameConnectInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter your username (1-16 chars)" aria-describedby="usernameConnectHelp" maxlength="16">
         <div id="usernameConnectHelp" class="text-sm text-gray-600 mb-2">Username must be 1-16 alphanumeric characters</div>
         <label class="p2p-only-row"><input type="checkbox" id="p2pOnlyCheckConnect"> Phone-to-phone only (never use the server backup)</label>
-        <label class="p2p-only-row"><input type="checkbox" id="lanDropCheckConnect"> Drop internet after phones link (same Wi‑Fi)</label>
+        <label class="p2p-only-row"><input type="checkbox" id="lanDropCheckConnect"> Same Wi‑Fi: drop internet after phones link</label>
         <label for="codeInput" class="sr-only">Enter chat code</label>
         <input id="codeInput" type="text" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Enter code (xxxx-xxxx-xxxx-xxxx)" aria-describedby="codeHelp" maxlength="19">
         <div id="codeHelp" class="text-sm text-gray-600 mb-2">Code format: xxxx-xxxx-xxxx-xxxx</div>
@@ -1649,6 +1692,7 @@
         <div id="donateBox" class="donate-box">
           <p>Donate for server upgrades and upkeep</p>
           <button type="button" id="copyEthDonate" title="Copy address">ETH 0x9D1AC5323583683666588B567C92FFCB1f41ba02</button>
+          <p class="legal-links"><a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a> · <a href="/refunds.html">Refunds</a></p>
         </div>
       </div>
     </div> <!-- ← THIS CLOSES THE WHITE CARD (bg-white) -->
@@ -1659,16 +1703,28 @@
     </div>
   </div>
 
+  <div id="appLockGate" class="hidden" role="dialog" aria-label="App locked">
+    <p>Locked</p>
+    <button type="button" id="appLockUnlock">Unlock</button>
+  </div>
+  <div id="a2hsBar" class="hidden">
+    <span id="a2hsText">Add to Home Screen for calls and notes.</span>
+    <span>
+      <button type="button" id="a2hsGo">Add</button>
+      <button type="button" class="a2hs-x" id="a2hsHide">✕</button>
+    </span>
+  </div>
   <div id="howToModal" class="help-modal" role="dialog" aria-label="How to use" tabindex="-1">
     <div class="help-modal-content how-to-body">
       <h2>How to use</h2>
       <h3>Rooms</h3>
       <p><strong>Start Chat</strong> gives you a code. Send that code. They tap <strong>Connect to Chat</strong> and type it.</p>
       <p>Up to 4 people is phone-to-phone. More than 4 uses the encrypted backup.</p>
-      <p>Close, refresh, or leave the app for 20 seconds and the room burns. Nothing is saved.</p>
+      <p>Close, refresh, leave for 20 seconds, or last person out: the room and the code burn. Nothing is saved.</p>
+      <p>Tick <strong>Ask before they join</strong> if they must wait for you to Allow. Tick <strong>Same Wi‑Fi</strong> when the phones are on the same network.</p>
       <p>The moose in the corner: tap once to burn this phone. Tap twice to burn everyone and kill the code.</p>
       <h3>Chat</h3>
-      <p>Type and send. Next to send you can burn that line in 10s, 30s or 1 minute on both phones.</p>
+      <p>Type and send. Next to send: Keep, Once (photo burns after they tap it), or 10s / 30s / 1 minute on both phones.</p>
       <p>The camera button opens photos, a 10 second video note, voice note, voice call and video call.</p>
       <p>Double-tap their picture to go full screen. Double-tap again to shrink it. Mute mic if you do not want to be heard.</p>
       <h3>Photo code</h3>
@@ -1681,6 +1737,8 @@
       <p>Moose Book is names you chose to save. Moose shop is where you buy extra names (£1.99), numbers, and used names. Search is for people.</p>
       <h3>Safety</h3>
       <p>Nobody sees that you are typing. After a burn there is nothing useful left on the phone.</p>
+      <p>Set a PIN in Safety and tick <strong>Lock app when I leave</strong>. On iPhone use Share → Add to Home Screen so calls and notes still ping.</p>
+      <p>Paid name problems: Moose shop, message admin. Privacy / Terms / Refunds are on the start page.</p>
       <p>Tap anywhere here to close.</p>
     </div>
   </div>
@@ -1966,9 +2024,10 @@
       </select>
       <button id="saveSafetySettings" class="bg-blue-500 text-white px-4 py-2 rounded w-full mb-4">Save settings</button>
       <h3 class="font-bold mb-1">PIN / panic PIN</h3>
-      <p class="text-xs text-gray-500 mb-2">Saved only on this device (phone or PC). Real PIN unlocks Search, inbox and notes. Panic PIN looks like it worked but shows an empty book. Three wrong guesses burns the book on this device.</p>
+      <p class="text-xs text-gray-500 mb-2">Saved only on this device. Real PIN unlocks the app, Search, inbox and notes. Panic PIN looks like it worked but shows an empty book. Three wrong guesses burns the book on this device.</p>
       <input id="setRealPin" type="password" inputmode="numeric" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="New real PIN (4+)">
       <input id="setPanicPin" type="password" inputmode="numeric" class="border border-gray-300 p-2 w-full mb-2 rounded" placeholder="Panic PIN (different)">
+      <label class="text-xs block mb-2"><input type="checkbox" id="appLockCheck"> Lock app when I leave this screen</label>
       <label class="text-xs block mb-2"><input type="checkbox" id="clearPins"> Clear PINs</label>
       <button id="savePinSettings" class="bg-black text-white px-4 py-2 rounded w-full mb-4">Save PINs on this device</button>
       <h3 class="font-bold mb-1">Duress login</h3>
@@ -1993,15 +2052,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260901ba"></script>
-  <script src="ratchet.js?v=260901ba"></script>
-  <script src="utils.js?v=260901ba"></script>
-  <script src="main.js?v=260901ba"></script>
-  <script src="init.js?v=260901ba"></script>
-  <script src="events.js?v=260901ba"></script>
+    <script src="crypto.js?v=260901bb"></script>
+  <script src="ratchet.js?v=260901bb"></script>
+  <script src="utils.js?v=260901bb"></script>
+  <script src="main.js?v=260901bb"></script>
+  <script src="init.js?v=260901bb"></script>
+  <script src="events.js?v=260901bb"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260901ba"></script>
-  <script src="account-ui.js?v=260901ba"></script>
-  <script src="logged-features.js?v=260901ba"></script>
+  <script src="supabase-auth.js?v=260901bb"></script>
+  <script src="account-ui.js?v=260901bb"></script>
+  <script src="logged-features.js?v=260901bb"></script>
 </body>
 </html>

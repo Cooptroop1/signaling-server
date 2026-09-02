@@ -414,6 +414,8 @@ function fillSettingsForm() {
   if (hide) hide.checked = !!accGet('hideLastSeen', false);
   if (disc) disc.value = accGet('discover', 'anyone') || 'anyone';
   if (dead) dead.value = String(accGet('deadManHours', 0) || 0);
+  const lock = document.getElementById('appLockCheck');
+  if (lock) lock.checked = !!accGet('appLockOn', false);
 }
 
 async function saveSettings() {
@@ -503,10 +505,14 @@ async function savePinsFromForm() {
   if (panic && panic === real) return alert('Panic PIN must be different');
   if (real) accSet('realPin', await hashPin(real));
   if (panic) accSet('panicPin', await hashPin(panic));
+  const lock = document.getElementById('appLockCheck');
+  accSet('appLockOn', !!(lock && lock.checked && (real || accGet('realPin', ''))));
   if (!real && document.getElementById('clearPins') && document.getElementById('clearPins').checked) {
     accSet('realPin', '');
     accSet('panicPin', '');
+    accSet('appLockOn', false);
     window.__bookUnlocked = true;
+    showAppLockGate(false);
   }
   document.getElementById('setRealPin').value = '';
   document.getElementById('setPanicPin').value = '';
@@ -514,10 +520,72 @@ async function savePinsFromForm() {
   showSaveToast('PINs saved on this device');
 }
 
+function shouldAppLock() {
+  try {
+    return !!(accGet('appLockOn', false) && accGet('realPin', '') && window.sbAuth && window.sbAuth.isLoggedIn());
+  } catch (e) { return false; }
+}
+function showAppLockGate(on) {
+  const g = document.getElementById('appLockGate');
+  if (g) g.classList.toggle('hidden', !on);
+}
+let appLockBusy = false;
+async function runAppLock() {
+  if (!shouldAppLock()) {
+    showAppLockGate(false);
+    return;
+  }
+  showAppLockGate(true);
+  if (appLockBusy) return;
+  appLockBusy = true;
+  const ok = await requireUnlock('Unlock Anonomoose', true);
+  appLockBusy = false;
+  if (ok) showAppLockGate(false);
+}
+function isStandaloneApp() {
+  return !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+}
+function bindA2hsBar() {
+  const bar = document.getElementById('a2hsBar');
+  if (!bar || isStandaloneApp()) return;
+  try { if (localStorage.getItem('moose_hide_a2hs') === '1') return; } catch (e) {}
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent || '');
+  let deferred = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferred = e;
+    const txt = document.getElementById('a2hsText');
+    if (txt) txt.textContent = 'Add Anonomoose to your home screen.';
+    bar.classList.remove('hidden');
+  });
+  if (ios) {
+    const txt = document.getElementById('a2hsText');
+    if (txt) txt.textContent = 'iPhone: Share then Add to Home Screen. Calls and notes work better.';
+    bar.classList.remove('hidden');
+  }
+  const hide = document.getElementById('a2hsHide');
+  const go = document.getElementById('a2hsGo');
+  if (hide) hide.onclick = () => {
+    bar.classList.add('hidden');
+    try { localStorage.setItem('moose_hide_a2hs', '1'); } catch (e) {}
+  };
+  if (go) go.onclick = async () => {
+    if (deferred && deferred.prompt) {
+      deferred.prompt();
+      deferred = null;
+      bar.classList.add('hidden');
+      return;
+    }
+    alert('On iPhone tap the Share button (square with arrow) then Add to Home Screen.');
+  };
+}
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     window.__bookUnlocked = false;
     window.__notesUnlocked = false;
+    if (shouldAppLock()) showAppLockGate(true);
+  } else if (shouldAppLock()) {
+    runAppLock();
   }
   if (document.hidden && document.documentElement.classList.contains('shot-guard')) {
     const img = document.getElementById('sealedNoteImg');
@@ -848,6 +916,10 @@ window.loggedFeatures = {
 
 document.addEventListener('DOMContentLoaded', () => {
   bindModalBackdropClose();
+  const unlockBtn = document.getElementById('appLockUnlock');
+  if (unlockBtn) unlockBtn.onclick = () => runAppLock();
+  bindA2hsBar();
+  setTimeout(() => { try { runAppLock(); } catch (e) {} }, 600);
   const safetyBtn = document.getElementById('safetySettingsBtn');
   if (safetyBtn) safetyBtn.onclick = async () => {
     const ok = await requireUnlock('Unlock settings', true);

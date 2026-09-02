@@ -330,6 +330,7 @@ async function sendJoin(extra) {
   extra = extra || {};
   await initIdentityKeys();
   await ensureServerForCode(code);
+  const knockOn = !!(document.getElementById('knockCheckStart')?.checked || document.getElementById('knockCheck')?.checked);
   socket.send(JSON.stringify(Object.assign({
     type: 'join',
     code,
@@ -337,7 +338,8 @@ async function sendJoin(extra) {
     username,
     token,
     identityPublic: identityPubB64,
-    sbAccess: (window.__sbSession && window.__sbSession.access_token) || undefined
+    sbAccess: (window.__sbSession && window.__sbSession.access_token) || undefined,
+    knock: knockOn
   }, extra)));
 }
 function readP2pOnly() {
@@ -351,6 +353,14 @@ function syncLinkToggles(src) {
   if (!src) return;
   const p2pIds = ['p2pOnlyCheckStart', 'p2pOnlyCheck', 'p2pOnlyCheckConnect'];
   const lanIds = ['lanDropCheckStart', 'lanDropCheck', 'lanDropCheckConnect'];
+  const knockIds = ['knockCheckStart', 'knockCheck'];
+  if (knockIds.includes(src.id)) {
+    knockIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && el !== src) el.checked = src.checked;
+    });
+    return;
+  }
   const ids = p2pIds.includes(src.id) ? p2pIds : lanIds.includes(src.id) ? lanIds : null;
   if (!ids) return;
   ids.forEach((id) => {
@@ -805,6 +815,23 @@ async function handleSocketMessage(event) {
         pendingTotpSecret = null;
       }
       sendJoin();
+      return;
+    }
+    if (message.type === 'knock-wait') {
+      if (typeof showStatusMessage === 'function') showStatusMessage('Waiting for them to let you in…');
+      if (statusElement) statusElement.textContent = 'Waiting for them to let you in…';
+      return;
+    }
+    if (message.type === 'knock-go') {
+      sendJoin({ knockToken: true }).catch(() => {});
+      return;
+    }
+    if (message.type === 'knock' && message.code === code) {
+      const bar = document.getElementById('knockJoinBar');
+      const txt = document.getElementById('knockJoinText');
+      if (txt) txt.textContent = (message.username || 'Someone') + ' wants in';
+      if (bar) bar.classList.remove('hidden');
+      window.__knockTarget = message.clientId;
       return;
     }
     if (message.type === 'init') {
@@ -1857,7 +1884,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
   updateLogoutButtonVisibility();
-  ['p2pOnlyCheckStart', 'p2pOnlyCheck', 'p2pOnlyCheckConnect', 'lanDropCheckStart', 'lanDropCheck', 'lanDropCheckConnect'].forEach((id) => {
+  ['p2pOnlyCheckStart', 'p2pOnlyCheck', 'p2pOnlyCheckConnect', 'lanDropCheckStart', 'lanDropCheck', 'lanDropCheckConnect', 'knockCheckStart', 'knockCheck'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', (e) => syncLinkToggles(e.target));
   });
   document.getElementById('startChatToggleButton').onclick = () => {
@@ -2046,6 +2073,18 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('startChatToggleButton')?.focus();
     updateLogoutButtonVisibility();
   };
+  const knockAllow = document.getElementById('knockAllowBtn');
+  const knockDeny = document.getElementById('knockDenyBtn');
+  const sendKnock = (type) => {
+    const targetId = window.__knockTarget;
+    const bar = document.getElementById('knockJoinBar');
+    if (bar) bar.classList.add('hidden');
+    if (!targetId || !socket || socket.readyState !== 1) return;
+    socket.send(JSON.stringify({ type, code, clientId, targetId }));
+    window.__knockTarget = null;
+  };
+  if (knockAllow) knockAllow.onclick = () => sendKnock('knock-allow');
+  if (knockDeny) knockDeny.onclick = () => sendKnock('knock-deny');
   document.getElementById('backButtonConnect').onclick = () => {
     console.log('Back button clicked from connectContainer');
     connectContainer.classList.add('hidden');

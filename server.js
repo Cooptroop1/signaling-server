@@ -941,7 +941,7 @@ function pingCors(res) {
 }
 const PUBLIC_PATHS = new Set([
   '/', '/index.html', '/offline.html', '/cover.html', '/random.html', '/w.html',
-  '/robots.txt', '/sitemap.xml',
+  '/robots.txt', '/sitemap.xml', '/privacy.html', '/terms.html', '/refunds.html',
   '/manifest.json', '/sw.js', '/oldsw.js',
   '/crypto.js', '/ratchet.js', '/utils.js', '/main.js', '/init.js', '/events.js',
   '/supabase-auth.js', '/account-ui.js', '/logged-features.js',
@@ -2444,10 +2444,14 @@ wss.on('connection', (ws, req) => {
         const exists = await redisClient.exists(roomKey);
         let roomState;
         if (!exists) {
-          roomState = { initiator: clientId, maxClients: 2, forceRelay: false };
+          roomState = { initiator: clientId, maxClients: 2, forceRelay: false, knock: !!data.knock };
           await redisClient.set(roomKey, JSON.stringify(roomState), { EX: 86400 });
         } else {
           roomState = JSON.parse(await redisClient.get(roomKey));
+          if (clientId === roomState.initiator && data.knock) {
+            roomState.knock = true;
+            await redisClient.set(roomKey, JSON.stringify(roomState), { EX: 86400 });
+          }
         }
         const totpKey = `room:${code}:totp`;
         if (data.totpSecret && clientId === roomState.initiator) {
@@ -2490,8 +2494,28 @@ wss.on('connection', (ws, req) => {
             }
           }
         }
-        // Check if room full
         const clientsKey = `room:${code}:clients`;
+        if (roomState.knock && clientId !== roomState.initiator && !isReconnect && !data.knockToken) {
+          const allow = await redisClient.get(`room:${code}:allow:${clientId}`);
+          if (allow !== '1') {
+            await redisClient.set(`room:${code}:pending:${clientId}`, username, { EX: 180 });
+            if (!rooms.has(code)) {
+              rooms.set(code, { initiator: roomState.initiator, clients: new Map(), pending: new Map(), maxClients: roomState.maxClients, forceRelay: !!roomState.forceRelay, knock: true });
+            }
+            const roomP = rooms.get(code);
+            if (!roomP.pending) roomP.pending = new Map();
+            roomP.pending.set(clientId, ws);
+            ws.code = code;
+            ws.clientId = clientId;
+            ws.username = username;
+            ws.knockPending = true;
+            const knockMsg = { type: 'knock', clientId, username, code };
+            try { pubClient.publish(`room:${code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(knockMsg) })); } catch (e) {}
+            ws.send(JSON.stringify({ type: 'knock-wait', code, username }));
+            return;
+          }
+        }
+        // Check if room full
         const multi = redisClient.multi();
         multi.sAdd(clientsKey, clientId);
         multi.sCard(clientsKey);
@@ -2520,7 +2544,7 @@ wss.on('connection', (ws, req) => {
         }
         // Create or get local room
         if (!rooms.has(code)) {
-          rooms.set(code, { initiator: roomState.initiator, clients: new Map(), maxClients: roomState.maxClients, forceRelay: !!roomState.forceRelay });
+          rooms.set(code, { initiator: roomState.initiator, clients: new Map(), pending: new Map(), maxClients: roomState.maxClients, forceRelay: !!roomState.forceRelay, knock: !!roomState.knock });
         }
         const room = rooms.get(code);
         room.clients.set(clientId, { ws, username, claimed });
@@ -2604,7 +2628,7 @@ wss.on('connection', (ws, req) => {
           const room = rooms.get(data.code);
           room.maxClients = Math.min(data.maxClients, maxLimit);
           if (room.maxClients > 4) room.forceRelay = true;
-          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients, forceRelay: !!room.forceRelay }), { EX: 86400 });
+          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients, forceRelay: !!room.forceRelay, knock: !!room.knock }), { EX: 86400 });
           const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
           const msg = { type: 'max-clients', maxClients: room.maxClients, totalClients, forceRelay: !!room.forceRelay };
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(msg) }));
@@ -2625,6 +2649,33 @@ wss.on('connection', (ws, req) => {
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(msg) }));
         } else {
           ws.send(JSON.stringify({ type: 'error', message: 'Only initiator can set TOTP secret.', code: data.code }));
+        }
+        return;
+      }
+      if (data.type === 'knock-allow' || data.type === 'knock-deny') {
+        if (!rooms.has(data.code)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found', code: data.code }));
+          return;
+        }
+        const room = rooms.get(data.code);
+        if (data.clientId !== room.initiator) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Only the host can allow them in.', code: data.code }));
+          return;
+        }
+        const targetId = data.targetId;
+        const pendingWs = room.pending && room.pending.get(targetId);
+        if (data.type === 'knock-deny') {
+          try { await redisClient.del(`room:${data.code}:pending:${targetId}`); } catch (e) {}
+          if (pendingWs) {
+            try { pendingWs.send(JSON.stringify({ type: 'error', message: 'They did not let you in.', code: data.code })); } catch (e) {}
+            try { pendingWs.close(); } catch (e) {}
+            room.pending.delete(targetId);
+          }
+          return;
+        }
+        try { await redisClient.set(`room:${data.code}:allow:${targetId}`, '1', { EX: 120 }); } catch (e) {}
+        if (pendingWs) {
+          try { pendingWs.send(JSON.stringify({ type: 'knock-go', code: data.code })); } catch (e) {}
         }
         return;
       }
@@ -2654,7 +2705,7 @@ wss.on('connection', (ws, req) => {
         if (data.clientId === rooms.get(data.code).initiator) {
           const room = rooms.get(data.code);
           room.maxClients = Math.max(1, (room.maxClients || 2) - 1);
-          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients, forceRelay: !!room.forceRelay }), { EX: 86400 });
+          await redisClient.set(`room:${data.code}`, JSON.stringify({ initiator: room.initiator, maxClients: room.maxClients, forceRelay: !!room.forceRelay, knock: !!room.knock }), { EX: 86400 });
           const totalClients = await redisClient.sCard(`room:${data.code}:clients`);
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify({ type: 'max-clients', maxClients: room.maxClients, totalClients, forceRelay: !!room.forceRelay }) }));
           pubClient.publish(`room:${data.code}`, JSON.stringify({ type: data.type, targetId: data.targetId, senderId: data.clientId }));
@@ -3185,18 +3236,15 @@ wss.on('connection', (ws, req) => {
       };
       pubClient.publish(roomKey, JSON.stringify({ type: 'broadcast', clientMessage: JSON.stringify(disconnectedMsg) }));
       if (totalClients === 0) {
-        rooms.delete(code);
-        await redisClient.del(roomKey);
-        await redisClient.del(`${roomKey}:totp`);
-        await redisClient.del(`${roomKey}:nonces`);
-        await redisClient.sRem('randomCodes', code);
-        randomCodes.delete(code);
-        broadcastRandomCodes();
-        if (subscribed.has(code)) {
-          await subClient.unsubscribe(`room:${code}`);
-          subscribed.delete(code);
-          logger.info('room unsubscribed');
+        try { await destroyRoom(code); } catch (e) {
+          rooms.delete(code);
+          await redisClient.del(roomKey);
         }
+        if (subscribed.has(code)) {
+          try { await subClient.unsubscribe(`room:${code}`); } catch (e2) {}
+          subscribed.delete(code);
+        }
+        logger.info('last person out burned %s', code);
       } else if (isInitiator) {
         const newInitiator = await redisClient.sRandMember(clientsKey);
         if (newInitiator) {

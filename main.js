@@ -937,9 +937,16 @@ async function parkVideoSlots() {
     try { await Promise.all(jobs); } catch (e) {}
   }
 }
-function showVideoStage(on) {
+function showVideoStage(on, mode) {
   const stage = document.getElementById('videoCallStage');
-  if (stage) stage.classList.toggle('hidden', !on);
+  if (stage) {
+    stage.classList.toggle('hidden', !on);
+    stage.classList.toggle('video-note-preview', !!(on && mode === 'note'));
+  }
+  const you = document.getElementById('localVideo') && document.getElementById('localVideo').parentElement
+    ? document.getElementById('localVideo').parentElement.querySelector('em')
+    : null;
+  if (you) you.textContent = (on && mode === 'note') ? 'Recording' : 'You';
   if (!on) {
     const rem = document.getElementById('remoteVideo');
     if (rem && rem.parentElement) rem.parentElement.classList.remove('video-full');
@@ -1503,6 +1510,10 @@ function cleanupVoiceRecorder() {
   voiceStopping = false;
   voiceRecordStartedAt = 0;
   resetVoiceRecordingUi();
+  if (typeof recordingVideo !== 'undefined' && recordingVideo && !videoCallActive) {
+    setLocalPreview(null);
+    showVideoStage(false);
+  }
 }
 function startVoiceRecording() {
   if (!features.enableVoice) {
@@ -1793,6 +1804,8 @@ function startVideoRecording() {
       return;
     }
     voiceRecordStream = stream;
+    showVideoStage(true, 'note');
+    setLocalPreview(stream);
     const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
     const mimeTypes = isiOS ? [
       'video/mp4',
@@ -1809,6 +1822,9 @@ function startVideoRecording() {
     } catch (e) {
       stream.getTracks().forEach(tr => tr.stop());
       recordingVideo = false;
+      setLocalPreview(null);
+      showVideoStage(false);
+      if (typeof setComposerRecording === 'function') setComposerRecording(false);
       showStatusMessage('Could not start video recorder.');
       return;
     }
@@ -1859,9 +1875,9 @@ function startVideoRecording() {
     });
     try { mediaRecorder.start(250); } catch (e) {
       try { mediaRecorder.start(); } catch (e2) {
-        recordingVideo = false;
         showStatusMessage('Could not start video.');
         cleanupVoiceRecorder();
+        recordingVideo = false;
         return;
       }
     }

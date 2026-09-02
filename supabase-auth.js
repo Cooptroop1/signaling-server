@@ -58,6 +58,7 @@ function setAuthUi(session) {
     if (typeof updateLogoutButtonVisibility === 'function') updateLogoutButtonVisibility();
     markPasskeyButton();
     renderMyNames(window.__myNames || []);
+    loadMooseWallet();
   } else {
     if (nameEl) nameEl.textContent = '';
     const namesBox = document.getElementById('myNamesBox');
@@ -1234,23 +1235,26 @@ function mooseLabel(n) {
   const v = Math.max(0, Math.round(Number(n) || 0));
   return v.toLocaleString('en-GB') + ' moose';
 }
-async function loadMooseWallet() {
+function paintMooseCounts(coins, shopText) {
+  window.__mooseCoins = coins;
   const el = document.getElementById('mooseCoinHave');
+  if (el) el.textContent = shopText != null ? shopText : mooseLabel(coins);
+  const home = document.getElementById('homeMooseCount');
+  if (home) home.textContent = String(coins);
+}
+async function loadMooseWallet() {
   if (!isLoggedIn() || !sb) {
-    window.__mooseCoins = 0;
-    if (el) el.textContent = 'Log in for moose';
+    paintMooseCounts(0, 'Log in for moose');
     return 0;
   }
   try {
     const { data, error } = await sb.rpc('moose_my_wallet');
     const row = typeof data === 'string' ? JSON.parse(data) : data;
     const coins = (!error && row && row.ok) ? Number(row.coins) || 0 : 0;
-    window.__mooseCoins = coins;
-    if (el) el.textContent = mooseLabel(coins);
+    paintMooseCounts(coins);
     return coins;
   } catch (e) {
-    window.__mooseCoins = 0;
-    if (el) el.textContent = '0 moose';
+    paintMooseCounts(0);
     return 0;
   }
 }
@@ -1309,8 +1313,7 @@ async function spendClaimCoins(name) {
       return;
     }
     window.__mooseCoins = Number(row.coins) || 0;
-    const el = document.getElementById('mooseCoinHave');
-    if (el) el.textContent = mooseLabel(window.__mooseCoins);
+    paintMooseCounts(window.__mooseCoins);
     await applyBoughtName(row.name, true);
   } catch (e) {
     shopNote((e && e.message) || 'Could not buy that name.');
@@ -1705,6 +1708,8 @@ function bindVanityShop() {
   const out = document.getElementById('vanityShopResult');
   window.__vanityTab = 'number';
   if (openBtn) openBtn.onclick = openVanityShop;
+  const homeCoins = document.getElementById('homeMooseCoins');
+  if (homeCoins) homeCoins.onclick = () => { if (typeof openVanityShop === 'function') openVanityShop(); };
   document.querySelectorAll('#mooseCoinBar .coin-pack').forEach((btn) => {
     btn.onclick = () => buyMoosePack(Number(btn.getAttribute('data-coins') || 0));
   });

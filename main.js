@@ -363,6 +363,8 @@ async function startPeerConnection(targetId, isOfferer) {
   const iceServers = [];
   if (turnUsername && turnCredential) {
     iceServers.push(
+      { urls: 'turn:turn.anonomoose.com:3478?transport=udp', username: turnUsername, credential: turnCredential },
+      { urls: 'turn:turn.anonomoose.com:3478?transport=tcp', username: turnUsername, credential: turnCredential },
       { urls: 'turn:global.relay.metered.ca:80', username: turnUsername, credential: turnCredential },
       { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: turnUsername, credential: turnCredential },
       { urls: 'turn:global.relay.metered.ca:443', username: turnUsername, credential: turnCredential },

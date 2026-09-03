@@ -295,7 +295,8 @@ async function lookupVanityAmount(kind, name) {
     const rows = await vr.json();
     const row = Array.isArray(rows) ? rows[0] : null;
     if (row && (row.held_forever || row.status === 'sold')) return { error: 'That number is not for sale' };
-    const amount = Math.max(Number(row && row.buy_now_cents) || 0, Number(row && row.price_cents) || 0) || (n <= 9 ? 1000000 : n <= 99 ? 50000 : 1000);
+    if (n >= 1 && n <= 10) return { error: 'Numbers 1–10 are 100,000 moose' };
+    const amount = Math.max(Number(row && row.buy_now_cents) || 0, Number(row && row.price_cents) || 0) || (n <= 99 ? 50000 : 1000);
     return { amount: Math.max(100, amount), sold: !!(row && row.status === 'sold') };
   }
   const vr = await fetch(SUPABASE_URL + '/rest/v1/vanity_letters?name=eq.' + encodeURIComponent(name) + '&select=price_cents,status', { headers });

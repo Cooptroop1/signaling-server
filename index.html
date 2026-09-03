@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902p">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902p">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902p">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902p">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902p">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902p">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902q">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902q">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902q">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902q">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902q">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902q">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -73,6 +73,10 @@
     #messages.waiting {
       background-color: transparent;
       background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG?sanitize=true');
+    }
+    #pageShell {
+      position: relative;
+      width: 100%;
     }
     .corner-logo {
       position: absolute;
@@ -145,20 +149,25 @@
         margin-top: 50px;
       }
       .corner-logo {
-        position: absolute;
-        top: 0px;
-        right: 10px;
+        position: relative !important;
+        float: right;
+        top: 0 !important;
+        right: 0 !important;
+        left: auto !important;
+        bottom: auto !important;
         width: 128px;
         height: 128px;
-        z-index: 1000;
+        margin: 0 4px -72px 0;
+        z-index: 20;
       }
       #chatContainer:not(.hidden) #messages.waiting ~ .corner-logo {
-        position: absolute;
-        top: 0px;
-        right: 10px;
+        position: relative !important;
+        float: right;
+        top: 0 !important;
+        right: 0 !important;
         width: 128px;
         height: 128px;
-        z-index: 1000;
+        z-index: 20;
       }
       #maxClientsContainer {
         position: absolute;
@@ -1634,6 +1643,7 @@
     <span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span>
     <span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span><span class="burn-ash"></span>
   </div>
+  <div id="pageShell">
   <div id="cornerLogo" class="corner-logo" title="Tap to burn messages on this phone. Tap twice to wipe everyone in the room and leave." aria-label="Burn chat"></div>
   <audio id="callRingAudio" preload="auto" playsinline></audio>
   <div class="flex w-full max-w-xl mx-auto">
@@ -1826,7 +1836,7 @@
           <div id="userNameRow">
             <span id="userDisplayName" class="text-lg text-gray-700 font-medium"></span>
             <button type="button" id="homeMooseCoins" title="Your moose">
-              <img class="moose-badge" src="/192.png?v=260902p" alt="" width="14" height="14">
+              <img class="moose-badge" src="/192.png?v=260902q" alt="" width="14" height="14">
               <span id="homeMooseCount">0</span>
             </button>
           </div>
@@ -1847,12 +1857,13 @@
           <p class="legal-links"><a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a> · <a href="/refunds.html">Refunds</a></p>
         </div>
       </div>
-    </div> <!-- ← THIS CLOSES THE WHITE CARD (bg-white) -->
+    </div>
 
     <div id="maxClientsContainer" class="hidden flex flex-col justify-center bg-black p-4 rounded-lg shadow-lg">
       <span class="text-white mb-2 font-bold">Max Users</span>
       <div id="maxClientsRadios" class="grid grid-cols-5 gap-2" role="radiogroup" aria-label="Select maximum number of users"></div>
     </div>
+  </div>
   </div>
 
   <div id="privacyBlur" class="hidden" aria-hidden="true">
@@ -2256,15 +2267,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902p"></script>
-  <script src="ratchet.js?v=260902p"></script>
-  <script src="utils.js?v=260902p"></script>
-  <script src="main.js?v=260902p"></script>
-  <script src="init.js?v=260902p"></script>
-  <script src="events.js?v=260902p"></script>
+    <script src="crypto.js?v=260902q"></script>
+  <script src="ratchet.js?v=260902q"></script>
+  <script src="utils.js?v=260902q"></script>
+  <script src="main.js?v=260902q"></script>
+  <script src="init.js?v=260902q"></script>
+  <script src="events.js?v=260902q"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902p"></script>
-  <script src="account-ui.js?v=260902p"></script>
-  <script src="logged-features.js?v=260902p"></script>
+  <script src="supabase-auth.js?v=260902q"></script>
+  <script src="account-ui.js?v=260902q"></script>
+  <script src="logged-features.js?v=260902q"></script>
 </body>
 </html>

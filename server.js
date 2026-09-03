@@ -926,6 +926,16 @@ async function fulfillCoinPack(session, stored) {
 async function loadHouseCoins() {
   if (!SUPABASE_SERVICE_ROLE_KEY) return 0;
   try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_admin_coins', {
+      method: 'POST',
+      headers: svcHeaders(),
+      body: '{}'
+    });
+    const data = await r.json();
+    if (typeof data === 'number') return data;
+    if (data && typeof data === 'object' && data.coins != null) return Number(data.coins) || 0;
+  } catch (e) {}
+  try {
     const r = await fetch(SUPABASE_URL + '/rest/v1/moose_house?id=eq.1&select=coins', { headers: svcHeaders() });
     const rows = await r.json();
     return Number(Array.isArray(rows) && rows[0] && rows[0].coins) || 0;

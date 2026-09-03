@@ -181,12 +181,11 @@ try {
   if (stripeKey) stripe = require('stripe')(stripeKey);
 } catch (e) { logger.warn('stripe %s', e.message); }
 if (stripe) logger.info('Stripe mode %s', stripeKey.startsWith('sk_live_') ? 'LIVE' : (stripeKey.startsWith('sk_test_') ? 'TEST (swap to sk_live_ on Render)' : 'set'));
-const COIN_PACKS = [
-  { coins: 50, pence: 500 },
-  { coins: 100, pence: 1000 },
-  { coins: 200, pence: 2000 },
-  { coins: 500, pence: 5000 }
-];
+function coinPackFromAmount(coins) {
+  const n = Math.round(Number(coins) || 0);
+  if (!Number.isFinite(n) || n < 50 || n > 100000) return null;
+  return { coins: n, pence: n * 10 };
+}
 const SUPABASE_SERVICE_ROLE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim().replace(/^["']|["']$/g, '');
 logger.info('Vanity service role %s', SUPABASE_SERVICE_ROLE_KEY ? 'present' : 'MISSING');
 
@@ -890,8 +889,8 @@ async function fulfillCoinPack(session, stored) {
   const coins = parseInt((session.metadata && session.metadata.coins) || stored.coins, 10) || 0;
   const locked = parseInt((session.metadata && session.metadata.amount) || stored.amount, 10) || 0;
   const paidAmount = Number(session.amount_total) || 0;
-  const pack = COIN_PACKS.find((p) => p.coins === coins && p.pence === locked);
-  if (!userId || !pack) return { ok: false, error: 'Missing coin pack' };
+  const pack = coinPackFromAmount(coins);
+  if (!userId || !pack || pack.pence !== locked) return { ok: false, error: 'Missing coin pack' };
   if (paidAmount && paidAmount !== pack.pence) return { ok: false, error: 'Paid amount does not match the pack' };
   if (!SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Could not add moose' };
   const doneKey = 'coins:done:' + session.id;
@@ -1263,10 +1262,10 @@ server.on('request', (req, res) => {
           return;
         }
         if (body.kind === 'coins') {
-          const pack = COIN_PACKS.find((p) => p.coins === Number(body.coins));
+          const pack = coinPackFromAmount(body.coins);
           if (!pack) {
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: 'Pick a moose pack' }));
+            res.end(JSON.stringify({ ok: false, error: 'Buy 50 to 100,000 moose' }));
             return;
           }
           try {

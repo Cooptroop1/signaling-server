@@ -1294,27 +1294,48 @@ async function loadMooseWallet() {
     return 0;
   }
 }
+async function buyCustomMoose() {
+  const input = document.getElementById('mooseCustomAmt');
+  const n = Math.round(Number(input && input.value));
+  if (!n || n < 50) {
+    shopNote('Type at least 50 moose (£5).');
+    if (input) input.focus();
+    return;
+  }
+  if (n > 100000) {
+    shopNote('Max 100,000 moose (£10,000).');
+    return;
+  }
+  const cost = (n / 10).toFixed(n % 10 ? 2 : 0);
+  if (!window.confirm('Pay £' + cost + ' for ' + mooseLabel(n) + '?')) return;
+  await buyMoosePack(n);
+}
 async function buyMoosePack(coins) {
+  const n = Math.round(Number(coins) || 0);
+  if (n < 50 || n > 100000) {
+    shopNote('Buy 50 to 100,000 moose.');
+    return;
+  }
   if (!isLoggedIn()) {
     openLoginForShop();
     return;
   }
   if (window.__buyBusy) return;
   window.__buyBusy = true;
-  shopNote('Opening payment for ' + mooseLabel(coins) + '…');
+  shopNote('Opening payment for ' + mooseLabel(n) + '…');
   try {
     const r = await fetch('https://signal.anonomoose.com/vanity-checkout', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
         kind: 'coins',
-        coins: Number(coins),
+        coins: n,
         access: sbBearer()
       })
     });
     const data = await r.json();
     if (data && data.url) {
-      try { localStorage.setItem('vanityPendingName', 'coins:' + coins); } catch (e) {}
+      try { localStorage.setItem('vanityPendingName', 'coins:' + n); } catch (e) {}
       window.location.href = data.url;
       return;
     }
@@ -1808,6 +1829,17 @@ function bindVanityShop() {
   document.querySelectorAll('#mooseCoinBar .coin-pack').forEach((btn) => {
     btn.onclick = () => buyMoosePack(Number(btn.getAttribute('data-coins') || 0));
   });
+  const customBuy = document.getElementById('mooseCustomBuy');
+  const customAmt = document.getElementById('mooseCustomAmt');
+  if (customBuy) customBuy.onclick = buyCustomMoose;
+  if (customAmt) {
+    customAmt.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        buyCustomMoose();
+      }
+    };
+  }
   const tn = document.getElementById('vanityTabNum');
   const tl = document.getElementById('vanityTabLet');
   const tc = document.getElementById('vanityTabClaim');

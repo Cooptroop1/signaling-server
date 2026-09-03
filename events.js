@@ -1684,7 +1684,14 @@ function setupWaitingForJoin(codeParam) {
 }
 document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      regs.forEach((reg) => {
+        const url = ((reg.active && reg.active.scriptURL) || (reg.waiting && reg.waiting.scriptURL) || (reg.installing && reg.installing.scriptURL) || '');
+        if (url && url.indexOf('/sw.js') === -1) reg.unregister();
+      });
+    }).catch(() => {}).finally(() => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
   }
   ['pointerdown', 'touchstart', 'click'].forEach((ev) => {
     document.addEventListener(ev, unlockCallAudio, { passive: true });

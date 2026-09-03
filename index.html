@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902i">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902i">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902i">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902i">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902i">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902i">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902j">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902j">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902j">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902j">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902j">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902j">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1795,7 +1795,7 @@
           <div id="userNameRow">
             <span id="userDisplayName" class="text-lg text-gray-700 font-medium"></span>
             <button type="button" id="homeMooseCoins" title="Your moose">
-              <img class="moose-badge" src="/192.png?v=260902i" alt="" width="14" height="14">
+              <img class="moose-badge" src="/192.png?v=260902j" alt="" width="14" height="14">
               <span id="homeMooseCount">0</span>
             </button>
           </div>
@@ -1810,6 +1810,7 @@
           </div>
           <button type="button" id="howToUseBtn" class="how-to-link">How to use</button>
         </div>
+        <button type="button" id="androidInstallBtn" class="how-to-link hidden">Install app</button>
         <div id="donateBox" class="donate-box">
           <p>Donate for server upgrades and upkeep</p>
           <button type="button" id="copyEthDonate" title="Copy address">ETH 0x9D1AC5323583683666588B567C92FFCB1f41ba02</button>
@@ -1842,7 +1843,7 @@
     <div class="a2hs-card">
       <h3>Add to Home Screen</h3>
       <p id="a2hsLead">Works like an app. Calls and sealed notes can ping when you leave the browser.</p>
-      <ol id="a2hsSteps">
+      <ol id="a2hsSteps" class="hidden">
         <li>Tap <strong>Share</strong> <span class="a2hs-share">□↑</span> at the bottom of Safari</li>
         <li>Scroll and tap <strong>Add to Home Screen</strong></li>
         <li>Tap <strong>Add</strong>, then open the moose icon — not this Safari tab</li>
@@ -1879,7 +1880,8 @@
       <h3>Safety</h3>
       <p>Nobody sees that you are typing. After a burn there is nothing useful left on the phone.</p>
       <p><strong>Lock:</strong> Safety → set a 4+ digit PIN → tick <strong>Lock app when I leave</strong>. Optional Face ID / fingerprint on this phone. Leave the screen and the app is a black lock until the PIN. Three wrong PINs burns the book on this phone.</p>
-      <p><strong>Home Screen (iPhone):</strong> Safari → Share (square with arrow, bottom) → Add to Home Screen → Add. Then open the moose icon, not the Safari tab. Calls and sealed notes can ping. Android: tap Add when the prompt appears.</p>
+      <p><strong>Home screen (Android):</strong> Tap <strong>Install app</strong> on the start page. Chrome uses its own install, not the old iPhone sheet. Or ⋮ menu → Install app. Then open the moose icon.</p>
+      <p><strong>Home screen (iPhone):</strong> Safari → Share (square with arrow, bottom) → Add to Home Screen → Add. Then open the moose icon, not the Safari tab. Calls and sealed notes can ping.</p>
       <p>Paid name problems: Moose shop, message admin. Privacy / Terms / Refunds are on the start page.</p>
       <p>Tap anywhere here to close.</p>
     </div>
@@ -2213,15 +2215,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902i"></script>
-  <script src="ratchet.js?v=260902i"></script>
-  <script src="utils.js?v=260902i"></script>
-  <script src="main.js?v=260902i"></script>
-  <script src="init.js?v=260902i"></script>
-  <script src="events.js?v=260902i"></script>
+    <script src="crypto.js?v=260902j"></script>
+  <script src="ratchet.js?v=260902j"></script>
+  <script src="utils.js?v=260902j"></script>
+  <script src="main.js?v=260902j"></script>
+  <script src="init.js?v=260902j"></script>
+  <script src="events.js?v=260902j"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902i"></script>
-  <script src="account-ui.js?v=260902i"></script>
-  <script src="logged-features.js?v=260902i"></script>
+  <script src="supabase-auth.js?v=260902j"></script>
+  <script src="account-ui.js?v=260902j"></script>
+  <script src="logged-features.js?v=260902j"></script>
 </body>
 </html>

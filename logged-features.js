@@ -716,17 +716,22 @@ function a2hsOnStartPage() {
   const chat = document.getElementById('chatContainer');
   return !!(start && !start.classList.contains('hidden') && chat && chat.classList.contains('hidden'));
 }
+function isIosPhone() {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent || '') && !window.MSStream;
+}
 function bindA2hsBar() {
   const sheet = document.getElementById('a2hsSheet');
   if (!sheet) return;
-  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent || '');
+  const ios = isIosPhone();
   const steps = document.getElementById('a2hsSteps');
   const lead = document.getElementById('a2hsLead');
   const go = document.getElementById('a2hsGo');
+  const installBtn = document.getElementById('androidInstallBtn');
   let deferred = null;
   const hideForever = () => {
     try { localStorage.setItem('moose_hide_a2hs', '1'); } catch (e) {}
     sheet.classList.add('hidden');
+    if (installBtn) installBtn.classList.add('hidden');
   };
   const hideWeek = () => {
     try { localStorage.setItem('moose_a2hs_later', String(Date.now() + 7 * 86400000)); } catch (e) {}
@@ -740,35 +745,40 @@ function bindA2hsBar() {
     } catch (e) {}
     return false;
   };
+  const showInstallChip = () => {
+    if (isStandaloneApp() || blocked() || !installBtn) return;
+    installBtn.classList.remove('hidden');
+  };
   const openSheet = (force) => {
     if (isStandaloneApp()) return;
+    if (!ios) {
+      if (deferred) showInstallChip();
+      return;
+    }
     if (!force && blocked()) return;
     if (!force && !a2hsOnStartPage()) return;
     if (!force && document.getElementById('appLockGate') && !document.getElementById('appLockGate').classList.contains('hidden')) return;
-    if (ios) {
-      if (lead) lead.textContent = 'iPhone: add the moose icon. Calls and sealed notes can ping when you leave Safari.';
-      if (go) go.textContent = 'Got it';
-    } else if (deferred) {
-      if (lead) lead.textContent = 'Add Anonomoose to your home screen. Calls and notes work better.';
-      if (steps) steps.classList.add('hidden');
-      if (go) go.textContent = 'Add';
-    } else {
-      if (lead) lead.textContent = 'Browser menu → Add to Home Screen / Install app. Then open the moose icon.';
-      if (go) go.textContent = 'Got it';
-    }
+    if (lead) lead.textContent = 'iPhone: add the moose icon. Calls and sealed notes can ping when you leave Safari.';
+    if (steps) steps.classList.remove('hidden');
+    if (go) go.textContent = 'Got it';
     sheet.classList.remove('hidden');
   };
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferred = e;
-    if (!blocked() && a2hsOnStartPage()) openSheet(false);
+    if (!blocked() && !isStandaloneApp()) showInstallChip();
   });
   window.addEventListener('appinstalled', () => hideForever());
+  const runAndroidInstall = async () => {
+    if (!deferred || !deferred.prompt) return;
+    try { await deferred.prompt(); } catch (e) {}
+    deferred = null;
+    hideForever();
+  };
+  if (installBtn) installBtn.onclick = runAndroidInstall;
   if (go) go.onclick = async () => {
     if (deferred && deferred.prompt) {
-      try { await deferred.prompt(); } catch (e) {}
-      deferred = null;
-      hideForever();
+      await runAndroidInstall();
       return;
     }
     hideWeek();
@@ -778,9 +788,15 @@ function bindA2hsBar() {
   if (later) later.onclick = hideWeek;
   if (hide) hide.onclick = hideForever;
   const showBtn = document.getElementById('showA2hsBtn');
-  if (showBtn) showBtn.onclick = () => openSheet(true);
-  setTimeout(() => { try { openSheet(false); } catch (e) {} }, 7000);
-  window.__mooseShowA2hs = () => openSheet(true);
+  if (showBtn) showBtn.onclick = () => {
+    if (ios) openSheet(true);
+    else if (deferred) runAndroidInstall();
+    else if (typeof showStatusMessage === 'function') {
+      showStatusMessage('Browser menu (⋮) → Install app. Then open the moose icon.');
+    }
+  };
+  if (ios) setTimeout(() => { try { openSheet(false); } catch (e) {} }, 7000);
+  window.__mooseShowA2hs = () => (ios ? openSheet(true) : (deferred ? runAndroidInstall() : null));
 }
 function bindAppLockControls() {
   fillPinPad(document.getElementById('appLockPad'), document.getElementById('appLockPin'), () => submitAppLockPin());

@@ -2,41 +2,45 @@
   "background_color": "#000000",
   "dir": "ltr",
   "display": "standalone",
-  "display_override": ["standalone", "browser"],
-  "id": "/",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "id": "https://www.anonomoose.com/",
   "name": "Anonomoose",
-  "orientation": "portrait",
+  "orientation": "any",
   "scope": "/",
   "short_name": "Anonomoose",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "theme_color": "#111111",
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": ["focus-existing", "auto"]
+  },
   "icons": [
     {
-      "src": "/192.png?v=260902a",
+      "src": "/192.png?v=260902j",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "/192.png?v=260902a",
+      "src": "/192.png?v=260902j",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "maskable"
     },
     {
-      "src": "/256.png?v=260902a",
+      "src": "/256.png?v=260902j",
       "type": "image/png",
       "sizes": "256x256",
       "purpose": "any"
     },
     {
-      "src": "/512.png?v=260902a",
+      "src": "/512.png?v=260902j",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any"
     },
     {
-      "src": "/512.png?v=260902a",
+      "src": "/512.png?v=260902j",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "maskable"

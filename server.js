@@ -406,21 +406,28 @@ async function canMailToName(fromId, toName) {
 }
 async function loadUsedNameRows() {
   if (!SUPABASE_SERVICE_ROLE_KEY) return [];
-  const r = await fetch(
-    SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents&order=sale_price_cents.desc',
+  let r = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents,sale_price_coins&order=sale_price_cents.desc',
     { headers: svcHeaders() }
   );
-  const rows = await r.json();
+  let rows = await r.json();
+  if (!Array.isArray(rows)) {
+    r = await fetch(
+      SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents&order=sale_price_cents.desc',
+      { headers: svcHeaders() }
+    );
+    rows = await r.json();
+  }
   if (!Array.isArray(rows)) return [];
   return rows.filter((row) => {
-    const nm = String(row && row.name || '');
     const price = Number(row && row.sale_price_cents) || 0;
-    if (price < 200) return false;
-    return true;
+    const coins = Number(row && row.sale_price_coins) || 0;
+    return price >= 200 || coins >= 20;
   }).map((row) => ({
     name: row.name,
     kind: row.kind,
-    price_cents: Number(row.sale_price_cents) || 0
+    price_cents: Number(row.sale_price_cents) || 0,
+    price_coins: Number(row.sale_price_coins) || 0
   }));
 }
 
@@ -644,13 +651,22 @@ async function paySellerConnect(sellerId, netCents, sessionId, name, chargeId) {
   }
 }
 
-async function setNameListing(userId, name, priceCents) {
+async function setNameListing(userId, name, priceCents, priceCoins) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
   if (!userId || !nm) return { ok: false, error: 'Missing name' };
   if (!SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Listing is not available right now' };
   const listed = priceCents != null;
   const price = listed ? Math.round(Number(priceCents) || 0) : 0;
-  if (listed && (price < 200 || price > 100000000)) return { ok: false, error: 'Price must be £2 to £1,000,000' };
+  const coins = listed ? Math.round(Number(priceCoins) || 0) : 0;
+  const wantCard = listed && price >= 200;
+  const wantMoose = listed && coins >= 20;
+  if (listed && !wantCard && !wantMoose) {
+    return { ok: false, error: 'Set a card price (£2+) and/or a moose price (20+)' };
+  }
+  if (listed && price > 0 && !wantCard) return { ok: false, error: 'Card price must be £2 to £1,000,000' };
+  if (listed && coins > 0 && !wantMoose) return { ok: false, error: 'Moose price must be 20 to 10,000,000' };
+  if (wantCard && price > 100000000) return { ok: false, error: 'Card price must be £2 to £1,000,000' };
+  if (wantMoose && coins > 10000000) return { ok: false, error: 'Moose price must be 20 to 10,000,000' };
   const found = await fetch(
     SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&name=ilike.' + encodeURIComponent(nm) + '&select=name,kind',
     { headers: svcHeaders() }
@@ -684,15 +700,19 @@ async function setNameListing(userId, name, priceCents) {
       method: 'PATCH',
       headers: svcHeaders(),
       body: JSON.stringify(listed
-        ? { listed_for_sale: true, sale_price_cents: price }
-        : { listed_for_sale: false, sale_price_cents: null })
+        ? {
+          listed_for_sale: true,
+          sale_price_cents: wantCard ? price : null,
+          sale_price_coins: wantMoose ? coins : null
+        }
+        : { listed_for_sale: false, sale_price_cents: null, sale_price_coins: null })
     }
   );
   const text = await patch.text();
   if (!patch.ok) {
     return { ok: false, error: text && text.slice(0, 180) || 'Could not update listing' };
   }
-  return { ok: true, name: row.name, price_cents: listed ? price : 0 };
+  return { ok: true, name: row.name, price_cents: listed && wantCard ? price : 0, price_coins: listed && wantMoose ? coins : 0 };
 }
 
 async function chargeInfoFromSession(session) {
@@ -806,7 +826,7 @@ async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stri
     {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({ user_id: buyerId, listed_for_sale: false, sale_price_cents: null })
+      body: JSON.stringify({ user_id: buyerId, listed_for_sale: false, sale_price_cents: null, sale_price_coins: null })
     }
   );
   if (!moved.ok) {
@@ -1404,7 +1424,8 @@ server.on('request', (req, res) => {
         }
         const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
         const price = fullUrl.pathname === '/vanity-list' ? Math.round(Number(body.price_cents || body.price || 0)) : null;
-        const result = await setNameListing(shopUser.id, name, price);
+        const coins = fullUrl.pathname === '/vanity-list' ? Math.round(Number(body.price_coins || body.coins || 0)) : null;
+        const result = await setNameListing(shopUser.id, name, price, coins);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
         return;

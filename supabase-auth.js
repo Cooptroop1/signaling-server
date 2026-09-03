@@ -893,7 +893,8 @@ async function loadMyNames() {
   }
   let rows = [];
   try {
-    let got = await sb.from('owned_names').select('name, kind, listed_for_sale, sale_price_cents').eq('user_id', uid);
+    let got = await sb.from('owned_names').select('name, kind, listed_for_sale, sale_price_cents, sale_price_coins').eq('user_id', uid);
+    if (got.error) got = await sb.from('owned_names').select('name, kind, listed_for_sale, sale_price_cents').eq('user_id', uid);
     if (got.error) got = await sb.from('owned_names').select('name, kind, listed_for_sale').eq('user_id', uid);
     rows = got.data || [];
   } catch (e) {}
@@ -912,6 +913,7 @@ async function loadMyNames() {
       kind,
       listed: !!r.listed_for_sale,
       price: Number(r.sale_price_cents) || 0,
+      coins: Number(r.sale_price_coins) || 0,
       active: String(r.name).toLowerCase() === String(active || username || '').toLowerCase()
     };
   });
@@ -1024,7 +1026,7 @@ function renderMyNames(list) {
         acts += '<button type="button" class="sell-name-btn" disabled>Taking off…</button>';
       } else {
         acts += n.listed
-          ? '<button type="button" class="sell-name-btn" data-unlist="' + esc + '">Listed ' + pounds(n.price) + ' · Unlist</button>'
+          ? '<button type="button" class="sell-name-btn" data-unlist="' + esc + '">Listed ' + listPriceLabel(n) + ' · Unlist</button>'
           : '<button type="button" class="sell-name-btn" data-list="' + esc + '">Sell</button>';
       }
     }
@@ -1041,13 +1043,20 @@ function renderMyNames(list) {
     btn.onclick = () => unlistOwnedName(btn.getAttribute('data-unlist'));
   });
 }
-async function postVanityList(name, price) {
+function listPriceLabel(n) {
+  const bits = [];
+  if (Number(n && n.price) >= 200) bits.push(pounds(n.price));
+  if (Number(n && n.coins) >= 20) bits.push(mooseLabel(n.coins));
+  return bits.join(' or ') || 'on sale';
+}
+async function postVanityList(name, price, coins) {
   const r = await fetch('https://signal.anonomoose.com/vanity-list', {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({
       name: String(name),
       price_cents: parseInt(price, 10),
+      price_coins: parseInt(coins, 10),
       access: sbBearer()
     })
   });
@@ -1060,7 +1069,7 @@ function markNameBusy(name, busy, extra) {
   });
   renderMyNames(window.__myNames);
 }
-async function listOwnedName(name, presetPrice) {
+async function listOwnedName(name, presetPrice, presetCoins) {
   if (!isLoggedIn() || !name) return;
   const keepers = (window.__myNames || []).filter((x) => x && x.name && !x.listed).length;
   const already = (window.__myNames || []).some((x) => x && String(x.name) === String(name) && x.listed);
@@ -1069,42 +1078,69 @@ async function listOwnedName(name, presetPrice) {
     return;
   }
   if (window.__nameBusy && window.__nameBusy[name]) return;
-  let price = presetPrice;
-  if (!price) {
-    const raw = window.prompt('List ' + name + ' for how many £? Min 2, max 1,000,000. Buyer pays that. Stripe fee + 5% comes out. Stripe pays your bank after it sells.');
-    if (raw == null || String(raw).trim() === '') return;
-    const poundsIn = Number(raw);
-    price = Math.round(poundsIn * 100);
-    if (!poundsIn || price < 200) {
-      if (typeof showStatusMessage === 'function') showStatusMessage('Min £2.');
+  let price = Number(presetPrice) || 0;
+  let coins = Number(presetCoins) || 0;
+  if (!price && !coins) {
+    const howRaw = window.prompt('Sell ' + name + ' for moose, card, or both?\nType moose, card, or both');
+    if (howRaw == null) return;
+    const how = String(howRaw).trim().toLowerCase();
+    const wantMoose = how === 'moose' || how === 'both' || how === 'coins';
+    const wantCard = how === 'card' || how === 'both' || how === '£' || how === 'gbp';
+    if (!wantMoose && !wantCard) {
+      if (typeof showStatusMessage === 'function') showStatusMessage('Type moose, card, or both.');
       return;
     }
-    if (price > 100000000) {
-      if (typeof showStatusMessage === 'function') showStatusMessage('Max £1,000,000.');
-      return;
+    if (wantCard) {
+      const raw = window.prompt('Card price for ' + name + ' in £? Min 2, max 1,000,000.');
+      if (raw == null || String(raw).trim() === '') return;
+      const poundsIn = Number(raw);
+      price = Math.round(poundsIn * 100);
+      if (!poundsIn || price < 200) {
+        if (typeof showStatusMessage === 'function') showStatusMessage('Card min £2.');
+        return;
+      }
+      if (price > 100000000) {
+        if (typeof showStatusMessage === 'function') showStatusMessage('Max £1,000,000.');
+        return;
+      }
     }
-    const uk = pounds(sellerNetGuess(price, false));
-    const abroad = pounds(sellerNetGuess(price, true));
-    if (!window.confirm('UK card you get about ' + uk + '. Overseas card (up to 5.5% + 2% conversion) about ' + abroad + '. List ' + name + ' at ' + pounds(price) + '?')) return;
+    if (wantMoose) {
+      const suggest = price ? Math.max(20, Math.round(price / 10)) : 20;
+      const rawM = window.prompt('Moose price for ' + name + '? Min 20. Suggested ' + suggest + '.');
+      if (rawM == null || String(rawM).trim() === '') return;
+      coins = Math.round(Number(rawM));
+      if (!coins || coins < 20) {
+        if (typeof showStatusMessage === 'function') showStatusMessage('Moose min 20.');
+        return;
+      }
+      if (coins > 10000000) {
+        if (typeof showStatusMessage === 'function') showStatusMessage('Moose max 10,000,000.');
+        return;
+      }
+    }
+    const lines = [name + ' listed at ' + listPriceLabel({ price: price, coins: coins }) + '.'];
+    if (price >= 200) lines.push('Card: you get about ' + pounds(sellerNetGuess(price, false)) + ' after Stripe + 5%.');
+    if (coins >= 20) lines.push('Moose: you get ' + mooseLabel(Math.max(0, coins - Math.max(1, Math.floor(coins * 0.05)))) + ' after 5% to the shop pot.');
+    if (!window.confirm(lines.join('\n'))) return;
   }
   window.__nameBusy = window.__nameBusy || {};
   window.__nameBusy[name] = 'list';
-  markNameBusy(name, 'list', { listed: true, price: price });
+  markNameBusy(name, 'list', { listed: true, price: price, coins: coins });
   if (typeof showStatusMessage === 'function') showStatusMessage('Listing ' + name + '…');
   try {
-    const row = await postVanityList(name, price);
+    const row = await postVanityList(name, price, coins);
     if (row && row.onboard && row.url) {
-      try { localStorage.setItem('pendingList', JSON.stringify({ name: String(name), price_cents: parseInt(price, 10) })); } catch (e) {}
-      if (window.confirm('To get paid when it sells, add your bank with Stripe. About 2 minutes. Continue?')) {
+      try { localStorage.setItem('pendingList', JSON.stringify({ name: String(name), price_cents: parseInt(price, 10), price_coins: parseInt(coins, 10) })); } catch (e) {}
+      if (window.confirm('To get paid in pounds when someone pays by card, add your bank with Stripe. About 2 minutes. Continue?')) {
         window.location.href = row.url;
       }
       return;
     }
     if (!row || row.ok === false) throw new Error((row && row.error) || 'Could not list');
     try { localStorage.removeItem('pendingList'); } catch (e) {}
-    if (typeof showStatusMessage === 'function') showStatusMessage(name + ' listed in Used at ' + pounds(price) + '.');
+    if (typeof showStatusMessage === 'function') showStatusMessage(name + ' listed at ' + listPriceLabel({ price: price, coins: coins }) + '.');
   } catch (e) {
-    markNameBusy(name, '', { listed: false, price: 0 });
+    markNameBusy(name, '', { listed: false, price: 0, coins: 0 });
     if (typeof showStatusMessage === 'function') showStatusMessage(e.message || 'Could not list');
   } finally {
     if (window.__nameBusy) delete window.__nameBusy[name];
@@ -1135,7 +1171,7 @@ async function finishConnectReturn() {
       let pending = null;
       try { pending = JSON.parse(localStorage.getItem('pendingList') || 'null'); } catch (e) {}
       if (pending && pending.name && pending.price_cents) {
-        await listOwnedName(pending.name, pending.price_cents);
+        await listOwnedName(pending.name, pending.price_cents, pending.price_coins);
       }
       return;
     }
@@ -1326,6 +1362,42 @@ async function spendClaimCoins(name) {
     }
   }
 }
+async function spendResaleCoins(name) {
+  if (!isLoggedIn() || !sb) {
+    openLoginForShop();
+    return;
+  }
+  if (window.__buyBusy) return;
+  window.__buyBusy = true;
+  const buyBtn = document.getElementById('vanityBuyBtn');
+  if (buyBtn) {
+    buyBtn.disabled = true;
+    buyBtn.textContent = 'Spending moose…';
+  }
+  shopNote('Spending moose on ' + name + '…');
+  try {
+    const { data, error } = await sb.rpc('moose_spend_resale', { p_name: name });
+    const row = typeof data === 'string' ? JSON.parse(data) : data;
+    if (error) throw error;
+    if (!row || row.ok === false) {
+      shopNote((row && row.error) || 'Could not buy that name.');
+      await loadMooseWallet();
+      return;
+    }
+    paintMooseCounts(Number(row.coins) || 0);
+    await applyBoughtName(row.name, true);
+    loadUsedListings();
+  } catch (e) {
+    shopNote((e && e.message) || 'Could not buy that name.');
+  } finally {
+    window.__buyBusy = false;
+    const b = document.getElementById('vanityBuyBtn');
+    if (b) {
+      b.disabled = false;
+      b.textContent = 'Buy now';
+    }
+  }
+}
 
 function openLoginForShop() {
   shopNote('Log in with your email first. The name is saved on that account, same as your password login.');
@@ -1406,7 +1478,7 @@ async function checkMooseClaim(raw) {
   const listed = (window.__usedListings || []).find((x) => String(x.name || '').toLowerCase() === nm.toLowerCase());
   if (listed) {
     const mine = isMyUsedListing(listed.name);
-    return { ok: true, kind: 'resale', resale: true, name: listed.name, price_cents: listed.price_cents, available: !mine, mine: mine };
+    return { ok: true, kind: 'resale', resale: true, name: listed.name, price_cents: listed.price_cents, price_coins: listed.price_coins, available: !mine, mine: mine };
   }
   if (!sb) return { ok: false, error: 'Not ready' };
   let taken = false;
@@ -1488,11 +1560,16 @@ function paintUsedList(filter) {
     const mine = isMyUsedListing(nm);
     const bank = isBankTransferListing(r.price_cents);
     const tag = mine ? ' · your listing' : (bank ? ' · ask admin' : '');
-    return '<button type="button" class="used-name-btn' + (mine ? ' mine' : '') + (bank && !mine ? ' bank' : '') + '" data-used-name="' + nm + '" data-used-price="' + Number(r.price_cents || 0) + '" data-mine="' + (mine ? '1' : '0') + '">' +
-      nm + ' — ' + pounds(r.price_cents) + tag + '</button>';
+    return '<button type="button" class="used-name-btn' + (mine ? ' mine' : '') + (bank && !mine ? ' bank' : '') + '" data-used-name="' + nm + '" data-used-price="' + Number(r.price_cents || 0) + '" data-used-coins="' + Number(r.price_coins || 0) + '" data-mine="' + (mine ? '1' : '0') + '">' +
+      nm + ' — ' + listPriceLabel({ price: r.price_cents, coins: r.price_coins }) + tag + '</button>';
   }).join('');
   box.querySelectorAll('[data-used-name]').forEach((btn) => {
-    btn.onclick = () => pickUsedListing(btn.getAttribute('data-used-name'), Number(btn.getAttribute('data-used-price') || 0), btn.getAttribute('data-mine') === '1');
+    btn.onclick = () => pickUsedListing(
+      btn.getAttribute('data-used-name'),
+      Number(btn.getAttribute('data-used-price') || 0),
+      btn.getAttribute('data-mine') === '1',
+      Number(btn.getAttribute('data-used-coins') || 0)
+    );
   });
 }
 function isMyUsedListing(name) {
@@ -1500,17 +1577,19 @@ function isMyUsedListing(name) {
   const want = String(name || '').toLowerCase();
   return mine.some((n) => String(n.name || '').toLowerCase() === want);
 }
-function pickUsedListing(name, price, mine) {
+function pickUsedListing(name, price, mine, coins) {
   const own = mine || isMyUsedListing(name);
-  window.__vanityLast = { ok: true, kind: 'resale', resale: true, name, price_cents: price, available: !own, mine: own };
+  const moose = Number(coins) || 0;
+  window.__vanityLast = { ok: true, kind: 'resale', resale: true, name, price_cents: price, price_coins: moose, available: !own, mine: own };
   const buyBtn = document.getElementById('vanityBuyBtn');
   const bidBtn = document.getElementById('vanityBidBtn');
   const bidInput = document.getElementById('vanityBidInput');
   if (bidBtn) bidBtn.classList.add('hidden');
   if (bidInput) bidInput.classList.add('hidden');
+  const label = listPriceLabel({ price: price, coins: moose });
   if (own) {
     if (buyBtn) buyBtn.classList.add('hidden');
-    shopNote(name + ' is your listing — ' + pounds(price) + '. Other people can buy it. Unlist from My names to take it off.');
+    shopNote(name + ' is your listing — ' + label + '. Other people can buy it. Unlist from My names to take it off.');
     return;
   }
   const bank = isBankTransferListing(price);
@@ -1526,11 +1605,11 @@ function pickUsedListing(name, price, mine) {
   if (buyBtn) {
     buyBtn.disabled = false;
     buyBtn.classList.remove('hidden');
-    buyBtn.textContent = bank ? 'Message admin' : 'Buy now';
+    buyBtn.textContent = bank ? 'Message admin' : (moose >= 20 && !(Number(price) >= 200) ? 'Buy for ' + mooseLabel(moose) : 'Buy now');
   }
   shopNote(bank
     ? (name + ' is ' + pounds(price) + '. Card will not take this. Message admin to arrange payment.')
-    : (name + ' used — ' + pounds(price) + '. Buyer pays that. Seller gets the rest after Stripe + 5%.'));
+    : (name + ' used — ' + label + '.' + (moose >= 20 ? ' Moose: seller gets 95%, 5% to the shop pot.' : '') + (Number(price) >= 200 ? ' Card: seller gets the rest after Stripe + 5%.' : '')));
 }
 function setVanityTab(tab) {
   window.__vanityTab = tab;
@@ -1650,7 +1729,23 @@ async function startVanityCheckout(row) {
     await messageListingOwner(row);
     return;
   }
-  if ((row && (row.kind === 'claim' || row.coins)) || window.__vanityTab === 'claim') {
+  if (row && (row.kind === 'resale' || row.resale)) {
+    const card = Number(row.price_cents) >= 200;
+    const moose = Number(row.price_coins) >= 20;
+    if (moose && !card) {
+      await spendResaleCoins(row.name);
+      return;
+    }
+    if (moose && card) {
+      const pick = window.prompt('Pay with moose or card? Type moose or card');
+      if (pick == null) return;
+      const how = String(pick).trim().toLowerCase();
+      if (how === 'moose' || how === 'coins') {
+        await spendResaleCoins(row.name);
+        return;
+      }
+    }
+  } else if ((row && row.kind === 'claim') || window.__vanityTab === 'claim') {
     await spendClaimCoins((row && row.name) || '');
     return;
   }
@@ -1746,7 +1841,7 @@ function bindVanityShop() {
       return;
     }
     if (row.kind === 'resale' || row.resale) {
-      pickUsedListing(row.name, row.price_cents, row.mine);
+      pickUsedListing(row.name, row.price_cents, row.mine, row.price_coins);
       return;
     }
     if (row.kind === 'claim') {

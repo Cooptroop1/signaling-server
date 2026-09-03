@@ -16,6 +16,9 @@ const sb = (window.supabase && window.supabase.createClient)
 window.supabaseClient = sb;
 
 let inboxChannel = null;
+let walletChannel = null;
+let walletTimer = null;
+let walletReady = false;
 let heartbeatTimer = null;
 
 function isLoggedIn() {
@@ -357,6 +360,7 @@ function stopHeartbeat() {
 
 function stopInbox() {
   stopHeartbeat();
+  stopWalletWatch();
   if (inboxChannel && sb) {
     sb.removeChannel(inboxChannel);
     inboxChannel = null;
@@ -424,6 +428,51 @@ function subscribeInbox(uid) {
       }
     })
     .subscribe();
+  subscribeWallet(uid);
+}
+
+function applyLiveWallet(coins) {
+  const prev = Number(window.__mooseCoins);
+  const next = Math.max(0, Math.round(Number(coins) || 0));
+  const had = walletReady;
+  paintMooseCounts(next);
+  walletReady = true;
+  if (had && Number.isFinite(prev) && next > prev) {
+    if (typeof showStatusMessage === 'function') showStatusMessage('+' + mooseLabel(next - prev));
+    if (typeof loadMyNames === 'function') loadMyNames().catch(() => {});
+  }
+}
+function stopWalletWatch() {
+  walletReady = false;
+  if (walletTimer) {
+    clearInterval(walletTimer);
+    walletTimer = null;
+  }
+  if (walletChannel && sb) {
+    sb.removeChannel(walletChannel);
+    walletChannel = null;
+  }
+}
+function subscribeWallet(uid) {
+  if (!sb || !uid) return;
+  if (walletChannel) sb.removeChannel(walletChannel);
+  walletChannel = sb.channel('wallet-' + uid)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'moose_wallets',
+      filter: 'user_id=eq.' + uid
+    }, (payload) => {
+      const row = payload.new || {};
+      if (row.coins != null) applyLiveWallet(row.coins);
+    })
+    .subscribe();
+  if (walletTimer) clearInterval(walletTimer);
+  walletTimer = setInterval(() => {
+    if (document.hidden) return;
+    if (!isLoggedIn()) return;
+    loadMooseWallet({ live: true });
+  }, 8000);
 }
 
 function isAdminMailbox(name) {
@@ -1278,7 +1327,7 @@ function paintMooseCounts(coins, shopText) {
   const home = document.getElementById('homeMooseCount');
   if (home) home.textContent = String(coins);
 }
-async function loadMooseWallet() {
+async function loadMooseWallet(opts) {
   if (!isLoggedIn() || !sb) {
     paintMooseCounts(0, 'Log in for moose');
     return 0;
@@ -1287,10 +1336,14 @@ async function loadMooseWallet() {
     const { data, error } = await sb.rpc('moose_my_wallet');
     const row = typeof data === 'string' ? JSON.parse(data) : data;
     const coins = (!error && row && row.ok) ? Number(row.coins) || 0 : 0;
-    paintMooseCounts(coins);
+    if (opts && opts.live) applyLiveWallet(coins);
+    else {
+      paintMooseCounts(coins);
+      walletReady = true;
+    }
     return coins;
   } catch (e) {
-    paintMooseCounts(0);
+    if (!(opts && opts.live)) paintMooseCounts(0);
     return 0;
   }
 }

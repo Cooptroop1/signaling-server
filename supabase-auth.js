@@ -1546,8 +1546,9 @@ async function checkMooseNumber(raw) {
   const shopOn = !!(window.__mooseShop && window.__mooseShop.numbers_on);
   let data = null;
   try {
-    const { data: row } = await sb.from('vanity_numbers').select('n,status,price_cents,buy_now_cents,price_coins,gold,held_forever,current_bid_cents').eq('n', n).maybeSingle();
-    data = row;
+    let got = await sb.from('vanity_numbers').select('n,status,price_cents,buy_now_cents,price_coins,gold,held_forever,current_bid_cents').eq('n', n).maybeSingle();
+    if (got.error) got = await sb.from('vanity_numbers').select('n,status,price_cents,buy_now_cents,gold,held_forever,current_bid_cents').eq('n', n).maybeSingle();
+    data = got.data;
   } catch (e) {}
   if (!data) {
     try {
@@ -1558,14 +1559,18 @@ async function checkMooseNumber(raw) {
       return { ok: false, error: 'Could not check that number' };
     }
   }
-  const forever = data.held_forever === true && n > 10;
+  const topTen = n >= 1 && n <= 10;
+  const forever = !topTen && data.held_forever === true;
   const price = data.buy_now_cents || data.price_cents;
-  const coins = Number(data.price_coins) || (n >= 1 && n <= 10 ? 100000 : 0);
+  const coins = topTen ? 100000 : (Number(data.price_coins) || 0);
   return {
     ok: true, kind: 'number', n: data.n || n,
     status: forever ? 'held' : (data.status === 'sold' ? 'sold' : (shopOn ? 'listed' : data.status)),
-    price_cents: price, price_coins: coins, gold: data.gold || (n >= 1 && n <= 10),
-    held_forever: forever, current_bid_cents: data.current_bid_cents,
+    price_cents: topTen ? 0 : price,
+    price_coins: coins,
+    gold: data.gold || topTen,
+    held_forever: forever,
+    current_bid_cents: topTen ? 0 : data.current_bid_cents,
     shop_on: shopOn,
     available: !forever && data.status !== 'sold' && shopOn
   };
@@ -1982,7 +1987,27 @@ function bindVanityShop() {
       }
       return;
     }
-    const coins = Number(row.price_coins) || 0;
+    const n = Number(row.n);
+    const coins = Number(row.price_coins) || (row.kind === 'number' && n >= 1 && n <= 10 ? 100000 : 0);
+    if (row.kind === 'number' && n >= 1 && n <= 10) {
+      if (row.status === 'sold') {
+        out.textContent = '#' + n + ' is taken.';
+        return;
+      }
+      const label = '#' + n;
+      const have = await loadMooseWallet();
+      let msg = label + ' is 100,000 moose only. You have ' + mooseLabel(have) + '.';
+      if (have < 100000) msg += ' Buy a pack above first.';
+      out.textContent = msg;
+      if (buyBtn) {
+        buyBtn.disabled = false;
+        buyBtn.classList.remove('hidden');
+        buyBtn.textContent = have < 100000 ? 'Need 100,000 moose' : 'Buy for 100,000 moose';
+      }
+      if (bidBtn) bidBtn.classList.add('hidden');
+      if (bidInput) bidInput.classList.add('hidden');
+      return;
+    }
     if (row.kind === 'number' && coins >= 1) {
       const label = '#' + row.n;
       const have = await loadMooseWallet();
@@ -1997,7 +2022,6 @@ function bindVanityShop() {
       return;
     }
     const label = row.kind === 'letter' ? row.name : ('#' + row.n);
-    const n = Number(row.n);
     const forever = !!row.held_forever;
     const shop = window.__mooseShop || {};
     const saleOn = row.kind === 'letter'

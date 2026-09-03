@@ -944,6 +944,31 @@ async function loadHouseCoins() {
   }
 }
 
+async function loadMooseAudit() {
+  const empty = { stripe: 0, held: 0, diff: 0 };
+  if (!SUPABASE_SERVICE_ROLE_KEY) return empty;
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_coin_audit', {
+      method: 'POST',
+      headers: svcHeaders(),
+      body: '{}'
+    });
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return empty;
+    const num = (label) => {
+      const row = rows.find((x) => String(x.item || '').indexOf(label) !== -1);
+      return Number(row && row.moose) || 0;
+    };
+    return {
+      stripe: num('Bought'),
+      held: num('Everyone'),
+      diff: num('Difference')
+    };
+  } catch (e) {
+    return empty;
+  }
+}
+
 async function fulfillPaidSession(session, userAccess) {
   let paid = session && (session.payment_status === 'paid' || session.status === 'complete');
   if (!paid && session && session.id && stripe) {
@@ -3010,6 +3035,7 @@ wss.on('connection', (ws, req) => {
         let monthly = computeAggregate(30);
         let yearly = computeAggregate(365);
         const houseCoins = await loadHouseCoins();
+        const mooseAudit = await loadMooseAudit();
         ws.send(JSON.stringify({
           type: 'stats',
           dailyUsers: dailyUsers.get(day)?.size || 0,
@@ -3023,7 +3049,8 @@ wss.on('connection', (ws, req) => {
           allTimeUsers: allTimeUsers.size,
           activeRooms: rooms.size,
           totalClients: totalClients,
-          houseCoins: houseCoins
+          houseCoins: houseCoins,
+          mooseAudit: mooseAudit
         }));
         return;
       }

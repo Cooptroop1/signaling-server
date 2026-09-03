@@ -273,6 +273,27 @@
  p.textContent = stat;
  statsDisplay.appendChild(p);
  });
+ const audit = data.mooseAudit || {};
+ const tbl = document.createElement('table');
+ tbl.style.cssText = 'margin-top:12px;border-collapse:collapse;width:100%;max-width:420px';
+ const rows = [
+ ['Bought from Stripe', audit.stripe],
+ ['Everyone holding', audit.held],
+ ['Difference (should be 0)', audit.diff]
+ ];
+ rows.forEach((pair) => {
+ const tr = document.createElement('tr');
+ const a = document.createElement('td');
+ const b = document.createElement('td');
+ a.textContent = pair[0];
+ b.textContent = Number(pair[1] || 0).toLocaleString('en-GB');
+ a.style.cssText = 'padding:6px 8px;border-bottom:1px solid #ddd;text-align:left';
+ b.style.cssText = 'padding:6px 8px;border-bottom:1px solid #ddd;text-align:right;font-weight:700';
+ tr.appendChild(a);
+ tr.appendChild(b);
+ tbl.appendChild(tr);
+ });
+ statsDisplay.appendChild(tbl);
  } else if (data.type === 'features') {
  featuresContainer.classList.remove('hidden');
  exportContainer.classList.remove('hidden'); // Show export buttons

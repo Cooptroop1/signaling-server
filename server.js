@@ -948,6 +948,17 @@ async function loadMooseAudit() {
   const empty = { stripe: 0, held: 0, diff: 0 };
   if (!SUPABASE_SERVICE_ROLE_KEY) return empty;
   try {
+    const t = await fetch(SUPABASE_URL + '/rest/v1/moose_totals?id=eq.1&select=stripe_bought,everyone_holding,difference', { headers: svcHeaders() });
+    const rows = await t.json();
+    if (Array.isArray(rows) && rows[0]) {
+      return {
+        stripe: Number(rows[0].stripe_bought) || 0,
+        held: Number(rows[0].everyone_holding) || 0,
+        diff: Number(rows[0].difference) || 0
+      };
+    }
+  } catch (e) {}
+  try {
     const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/moose_coin_audit', {
       method: 'POST',
       headers: svcHeaders(),

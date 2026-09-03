@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902n">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902n">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902n">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902n">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902n">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902n">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902o">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902o">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902o">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902o">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902o">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902o">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1831,7 +1831,7 @@
           <div id="userNameRow">
             <span id="userDisplayName" class="text-lg text-gray-700 font-medium"></span>
             <button type="button" id="homeMooseCoins" title="Your moose">
-              <img class="moose-badge" src="/192.png?v=260902n" alt="" width="14" height="14">
+              <img class="moose-badge" src="/192.png?v=260902o" alt="" width="14" height="14">
               <span id="homeMooseCount">0</span>
             </button>
           </div>
@@ -1891,27 +1891,38 @@
   <div id="howToModal" class="help-modal" role="dialog" aria-label="How to use" tabindex="-1">
     <div class="help-modal-content how-to-body">
       <h2>How to use</h2>
+      <h3>Account</h3>
+      <p><strong>Sign Up</strong> with email. You pick a free name. That name is yours to chat with. <strong>Login</strong> next time. The moose next to your name is your coin count. Tap it to open the shop.</p>
       <h3>Rooms</h3>
       <p><strong>Start Chat</strong> gives you a code. Send that code. They tap <strong>Connect to Chat</strong> and type it.</p>
+      <p><strong>Start 2FA Room</strong> is the same, plus a second code so only people with both get in.</p>
       <p>Up to 4 people is phone-to-phone. More than 4 uses the encrypted backup.</p>
       <p>Close, refresh, leave for 20 seconds, or last person out: the room and the code burn. Nothing is saved.</p>
       <p>Tick <strong>Same Wi‑Fi</strong> when both phones are on the same network.</p>
+      <p><strong>Send Code</strong> (after you start) can put the room on the public board. Leave it off and the code stays private. <strong>Random Chat</strong> is that public board.</p>
       <h3>Ask before they join</h3>
       <p>Tick this <strong>before you start</strong> the room. Leave it off and anyone with the code walks straight in.</p>
       <p>Tick it on and they cannot walk in. They see “Waiting for them to let you in…”. You get a bar with their name, <strong>Allow</strong> or <strong>Ignore</strong>, and the phone buzzes. Allow lets them in. Ignore leaves them out. The code alone is not enough while this is on.</p>
       <p>The moose in the corner: tap once to burn this phone. Tap twice to burn everyone and kill the code.</p>
       <h3>Chat</h3>
       <p>Type and send. Next to send: Keep, Once (photo burns after they tap it), or 10s / 30s / 1 minute on both phones.</p>
-      <p>The camera button opens photos, a 10 second video note, voice note, voice call and video call.</p>
+      <p>The camera button opens photos, a 10 second video note, voice note, voice call and video call. Video notes are live in the room — they are not saved as a recording on the phone.</p>
       <p>Double-tap their picture to go full screen. Double-tap again to shrink it. Mute mic if you do not want to be heard.</p>
       <h3>Photo code</h3>
       <p>We shrink the photo first, then hide the room code. Send it as a <strong>file</strong> (Telegram: file, not photo). Sending it as a picture wipes the code.</p>
       <p>The photo only works while your room is still open. Leave or burn the room and the invite dies.</p>
       <h3>Names and friends</h3>
-      <p>Sign up for a name. Search someone. Tap <strong>Add friend</strong>. They confirm, or they burn (you wait 24 hours to ask again).</p>
+      <p>Sign up for a name. <strong>Search</strong> someone. Tap <strong>Add friend</strong>. They confirm, or they burn (you wait 24 hours to ask again).</p>
       <p>Once you are friends you can send a note, a read-once photo, a voice clip, or call them. Poke is just a nudge with no text.</p>
-      <p>Sealed notes sit until they open them, or until the timer you set.</p>
-      <p>Moose Book is names you chose to save. Moose shop: extra names cost 20 moose. Used names can be bought with moose or card. Search is for people.</p>
+      <p><strong>Sealed Notes</strong> sit until they open them, or until the timer you set. Missed calls land there too.</p>
+      <p><strong>Moose Book</strong> is names you chose to save. <strong>My names</strong> is names on your account. Search is for people, not for buying names.</p>
+      <h3>Moose shop</h3>
+      <p>Open <strong>Moose shop</strong>. <strong>Numbers</strong> 1–10 cost 100,000 moose. Numbers 11–999 are card. <strong>Short</strong> is 1–3 letter names (card). <strong>Names</strong> is extra 4–16 character names (20 moose). <strong>Used</strong> is names other people listed. Check first, then buy.</p>
+      <p><strong>My names → Sell:</strong> type moose, card, or both. You must keep one name. Free signup names cannot be sold.</p>
+      <h3>Moose coins</h3>
+      <p>Moose are only for this app. <strong>10 moose = £1</strong>. Buy a pack (50, 100, 200, 500) or type any amount from 50 up. You pay with card. Coins then sit on your account.</p>
+      <p>Spend moose on extra names (20), numbers 1–10 (100,000), or a used name if the seller listed a moose price. Shop cut on a used moose sale is 5%. The rest goes to the seller as moose.</p>
+      <p><strong>Moose cannot be cashed out.</strong> They are not money, not a gift card, and not an investment. You cannot redeem them for pounds, bank transfer, or crypto. Unused moose stay on the account. If you spend them on a name, that spend is done. Packs already on your account are not refunded because you changed your mind.</p>
       <h3>Safety</h3>
       <p>Nobody sees that you are typing. After a burn there is nothing useful left on the phone.</p>
       <p><strong>Lock:</strong> Safety → set a 4+ digit PIN → tick <strong>Lock app when I leave</strong>. Optional Face ID / fingerprint on this phone. Leave the screen and the app is a black lock until the PIN. Three wrong PINs burns the book on this phone.</p>
@@ -2250,15 +2261,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902n"></script>
-  <script src="ratchet.js?v=260902n"></script>
-  <script src="utils.js?v=260902n"></script>
-  <script src="main.js?v=260902n"></script>
-  <script src="init.js?v=260902n"></script>
-  <script src="events.js?v=260902n"></script>
+    <script src="crypto.js?v=260902o"></script>
+  <script src="ratchet.js?v=260902o"></script>
+  <script src="utils.js?v=260902o"></script>
+  <script src="main.js?v=260902o"></script>
+  <script src="init.js?v=260902o"></script>
+  <script src="events.js?v=260902o"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902n"></script>
-  <script src="account-ui.js?v=260902n"></script>
-  <script src="logged-features.js?v=260902n"></script>
+  <script src="supabase-auth.js?v=260902o"></script>
+  <script src="account-ui.js?v=260902o"></script>
+  <script src="logged-features.js?v=260902o"></script>
 </body>
 </html>

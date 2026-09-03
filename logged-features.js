@@ -726,12 +726,9 @@ function bindA2hsBar() {
   const steps = document.getElementById('a2hsSteps');
   const lead = document.getElementById('a2hsLead');
   const go = document.getElementById('a2hsGo');
-  const installBtn = document.getElementById('androidInstallBtn');
-  let deferred = null;
   const hideForever = () => {
     try { localStorage.setItem('moose_hide_a2hs', '1'); } catch (e) {}
     sheet.classList.add('hidden');
-    if (installBtn) installBtn.classList.add('hidden');
   };
   const hideWeek = () => {
     try { localStorage.setItem('moose_a2hs_later', String(Date.now() + 7 * 86400000)); } catch (e) {}
@@ -745,16 +742,8 @@ function bindA2hsBar() {
     } catch (e) {}
     return false;
   };
-  const showInstallChip = () => {
-    if (isStandaloneApp() || blocked() || !installBtn) return;
-    installBtn.classList.remove('hidden');
-  };
   const openSheet = (force) => {
-    if (isStandaloneApp()) return;
-    if (!ios) {
-      if (deferred) showInstallChip();
-      return;
-    }
+    if (!ios || isStandaloneApp()) return;
     if (!force && blocked()) return;
     if (!force && !a2hsOnStartPage()) return;
     if (!force && document.getElementById('appLockGate') && !document.getElementById('appLockGate').classList.contains('hidden')) return;
@@ -763,40 +752,15 @@ function bindA2hsBar() {
     if (go) go.textContent = 'Got it';
     sheet.classList.remove('hidden');
   };
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferred = e;
-    if (!blocked() && !isStandaloneApp()) showInstallChip();
-  });
-  window.addEventListener('appinstalled', () => hideForever());
-  const runAndroidInstall = async () => {
-    if (!deferred || !deferred.prompt) return;
-    try { await deferred.prompt(); } catch (e) {}
-    deferred = null;
-    hideForever();
-  };
-  if (installBtn) installBtn.onclick = runAndroidInstall;
-  if (go) go.onclick = async () => {
-    if (deferred && deferred.prompt) {
-      await runAndroidInstall();
-      return;
-    }
-    hideWeek();
-  };
+  if (go) go.onclick = hideWeek;
   const later = document.getElementById('a2hsLater');
   const hide = document.getElementById('a2hsHide');
   if (later) later.onclick = hideWeek;
   if (hide) hide.onclick = hideForever;
   const showBtn = document.getElementById('showA2hsBtn');
-  if (showBtn) showBtn.onclick = () => {
-    if (ios) openSheet(true);
-    else if (deferred) runAndroidInstall();
-    else if (typeof showStatusMessage === 'function') {
-      showStatusMessage('Browser menu (⋮) → Install app. Then open the moose icon.');
-    }
-  };
+  if (showBtn) showBtn.onclick = () => openSheet(true);
   if (ios) setTimeout(() => { try { openSheet(false); } catch (e) {} }, 7000);
-  window.__mooseShowA2hs = () => (ios ? openSheet(true) : (deferred ? runAndroidInstall() : null));
+  window.__mooseShowA2hs = () => openSheet(true);
 }
 function bindAppLockControls() {
   fillPinPad(document.getElementById('appLockPad'), document.getElementById('appLockPin'), () => submitAppLockPin());

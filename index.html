@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902u">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902u">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902u">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902u">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902u">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902u">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902v">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902v">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902v">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902v">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902v">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902v">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -47,12 +47,13 @@
     }
     body {
       min-height: 100vh;
-      padding-top: 32px;
-      padding-bottom: 140px;
+      padding: 48px 16px 80px;
       display: flex;
       flex-direction: column;
-      justify-content: flex-start;
       align-items: center;
+      justify-content: center;
+      justify-content: safe center;
+      box-sizing: border-box;
     }
     #messages {
       display: flex;
@@ -96,7 +97,7 @@
       max-width: 500px;
       width: 100%;
       margin: 0 auto;
-      margin-top: 24px;
+      margin-top: 0;
       position: relative;
     }
     @media (min-width: 641px) {
@@ -115,13 +116,15 @@
         height: 180px;
       }
       .bg-white {
-        margin-top: 16px;
+        margin-top: 0;
       }
     }
     @media (max-width: 640px) {
       body {
+        justify-content: flex-start;
+        justify-content: safe flex-start;
         align-items: stretch;
-        padding-top: 8px;
+        padding-top: 12px;
         padding-bottom: 80px;
       }
       .bg-white {
@@ -1828,7 +1831,7 @@
           <div id="userNameRow">
             <span id="userDisplayName" class="text-lg text-gray-700 font-medium"></span>
             <button type="button" id="homeMooseCoins" title="Your moose">
-              <img class="moose-badge" src="/192.png?v=260902u" alt="" width="14" height="14">
+              <img class="moose-badge" src="/192.png?v=260902v" alt="" width="14" height="14">
               <span id="homeMooseCount">0</span>
               <span class="home-moose-word">moose</span>
             </button>
@@ -2260,15 +2263,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902u"></script>
-  <script src="ratchet.js?v=260902u"></script>
-  <script src="utils.js?v=260902u"></script>
-  <script src="main.js?v=260902u"></script>
-  <script src="init.js?v=260902u"></script>
-  <script src="events.js?v=260902u"></script>
+    <script src="crypto.js?v=260902v"></script>
+  <script src="ratchet.js?v=260902v"></script>
+  <script src="utils.js?v=260902v"></script>
+  <script src="main.js?v=260902v"></script>
+  <script src="init.js?v=260902v"></script>
+  <script src="events.js?v=260902v"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902u"></script>
-  <script src="account-ui.js?v=260902u"></script>
-  <script src="logged-features.js?v=260902u"></script>
+  <script src="supabase-auth.js?v=260902v"></script>
+  <script src="account-ui.js?v=260902v"></script>
+  <script src="logged-features.js?v=260902v"></script>
 </body>
 </html>

@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902q">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902q">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902q">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902q">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902q">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902q">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902s">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902s">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902s">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902s">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902s">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902s">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -47,10 +47,11 @@
     }
     body {
       min-height: 100vh;
-      padding-top: 240px;
+      padding-top: 32px;
       padding-bottom: 140px;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      justify-content: flex-start;
       align-items: center;
     }
     #messages {
@@ -79,11 +80,6 @@
       width: 100%;
     }
     .corner-logo {
-      position: absolute;
-      top: -5px;
-      right: 10px;
-      width: 256px;
-      height: 256px;
       background-image: url('https://raw.githubusercontent.com/Cooptroop1/anonmess/main/corner%20logo.png');
       background-size: contain;
       background-repeat: no-repeat;
@@ -100,71 +96,57 @@
       max-width: 500px;
       width: 100%;
       margin: 0 auto;
-      margin-top: 100px;
+      margin-top: 24px;
       position: relative;
+    }
+    @media (min-width: 641px) {
+      .corner-logo {
+        position: fixed !important;
+        top: 8px;
+        right: 16px;
+        width: 256px;
+        height: 256px;
+        z-index: 100;
+      }
     }
     @media (min-width: 641px) and (max-width: 1099px) {
       .corner-logo {
-        position: absolute;
-        width: 112px;
-        height: 112px;
-        top: 8px;
-        right: 12px;
-        z-index: 40;
-      }
-      body {
-        padding-top: 140px;
+        width: 180px;
+        height: 180px;
       }
       .bg-white {
-        margin-top: 48px;
-      }
-    }
-    @media (display-mode: standalone) and (min-width: 641px) {
-      .corner-logo {
-        position: absolute;
-        top: 12px;
-        right: 16px;
-        width: 112px;
-        height: 112px;
-      }
-      body {
-        padding-top: 150px;
-      }
-    }
-    @media (display-mode: standalone) and (min-width: 1100px) {
-      .corner-logo {
-        width: 160px;
-        height: 160px;
+        margin-top: 16px;
       }
     }
     @media (max-width: 640px) {
       body {
-        padding-top: 80px;
+        align-items: stretch;
+        padding-top: 8px;
         padding-bottom: 80px;
       }
       .bg-white {
         padding: 1rem;
         max-width: none;
         width: 100%;
-        margin-top: 50px;
+        margin-top: 8px;
       }
       .corner-logo {
         position: relative !important;
         float: right;
-        top: 0 !important;
-        right: 0 !important;
+        top: auto !important;
+        right: auto !important;
         left: auto !important;
         bottom: auto !important;
         width: 128px;
         height: 128px;
-        margin: 0 4px -72px 0;
+        margin: 0 8px -56px 0;
         z-index: 20;
       }
       #chatContainer:not(.hidden) #messages.waiting ~ .corner-logo {
         position: relative !important;
         float: right;
-        top: 0 !important;
-        right: 0 !important;
+        top: auto !important;
+        right: auto !important;
         width: 128px;
         height: 128px;
         z-index: 20;
@@ -1635,7 +1617,7 @@
     .circle-select { font-size: 0.75rem; margin: 0.2rem 0.2rem 0 0; padding: 0.2rem; border-radius: 0.35rem; border: 1px solid #d1d5db; }
   </style>
 </head>
-<body class="bg-black min-h-screen flex items-center justify-center">
+<body class="bg-black min-h-screen">
   <div id="burnFlash" aria-hidden="true">
     <div class="burn-flash-white"></div>
     <div class="burn-flash-fire"></div>
@@ -1836,7 +1818,7 @@
           <div id="userNameRow">
             <span id="userDisplayName" class="text-lg text-gray-700 font-medium"></span>
             <button type="button" id="homeMooseCoins" title="Your moose">
-              <img class="moose-badge" src="/192.png?v=260902q" alt="" width="14" height="14">
+              <img class="moose-badge" src="/192.png?v=260902s" alt="" width="14" height="14">
               <span id="homeMooseCount">0</span>
             </button>
           </div>
@@ -2267,15 +2249,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902q"></script>
-  <script src="ratchet.js?v=260902q"></script>
-  <script src="utils.js?v=260902q"></script>
-  <script src="main.js?v=260902q"></script>
-  <script src="init.js?v=260902q"></script>
-  <script src="events.js?v=260902q"></script>
+    <script src="crypto.js?v=260902s"></script>
+  <script src="ratchet.js?v=260902s"></script>
+  <script src="utils.js?v=260902s"></script>
+  <script src="main.js?v=260902s"></script>
+  <script src="init.js?v=260902s"></script>
+  <script src="events.js?v=260902s"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902q"></script>
-  <script src="account-ui.js?v=260902q"></script>
-  <script src="logged-features.js?v=260902q"></script>
+  <script src="supabase-auth.js?v=260902s"></script>
+  <script src="account-ui.js?v=260902s"></script>
+  <script src="logged-features.js?v=260902s"></script>
 </body>
 </html>

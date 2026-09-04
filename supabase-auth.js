@@ -1317,17 +1317,21 @@ function shopNote(text) {
 }
 
 function mooseNum(n) {
-  return Math.max(0, Math.round(Number(n) || 0)).toLocaleString('en-GB');
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 function mooseLabel(n) {
   return mooseNum(n) + ' moose';
 }
 function paintMooseCounts(coins, shopText) {
   window.__mooseCoins = coins;
+  const formatted = mooseNum(coins);
   const el = document.getElementById('mooseCoinHave');
   if (el) el.textContent = shopText != null ? shopText : mooseLabel(coins);
   const home = document.getElementById('homeMooseCount');
-  if (home) home.textContent = mooseNum(coins);
+  if (home) home.textContent = formatted;
+  const homeBtn = document.getElementById('homeMooseCoins');
+  if (homeBtn) homeBtn.title = mooseLabel(coins);
 }
 async function loadMooseWallet(opts) {
   if (!isLoggedIn() || !sb) {

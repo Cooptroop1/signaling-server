@@ -1316,16 +1316,18 @@ function shopNote(text) {
   if (typeof showStatusMessage === 'function') showStatusMessage(text);
 }
 
+function mooseNum(n) {
+  return Math.max(0, Math.round(Number(n) || 0)).toLocaleString('en-GB');
+}
 function mooseLabel(n) {
-  const v = Math.max(0, Math.round(Number(n) || 0));
-  return v.toLocaleString('en-GB') + ' moose';
+  return mooseNum(n) + ' moose';
 }
 function paintMooseCounts(coins, shopText) {
   window.__mooseCoins = coins;
   const el = document.getElementById('mooseCoinHave');
   if (el) el.textContent = shopText != null ? shopText : mooseLabel(coins);
   const home = document.getElementById('homeMooseCount');
-  if (home) home.textContent = String(coins);
+  if (home) home.textContent = mooseNum(coins);
 }
 async function loadMooseWallet(opts) {
   if (!isLoggedIn() || !sb) {

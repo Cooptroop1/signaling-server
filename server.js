@@ -343,15 +343,22 @@ async function lookupResaleAmount(name) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
   if (!nm) return { error: 'Not for sale' };
   if (!SUPABASE_SERVICE_ROLE_KEY) return { error: 'Used names are not available right now' };
-  const r = await fetch(
-    SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&listed_for_sale=eq.true&select=name,kind,user_id,sale_price_cents',
+  let r = await fetch(
+    SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&listed_for_sale=eq.true&select=name,kind,user_id,sale_price_cents,sale_pin_hash',
     { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY } }
   );
-  const rows = await r.json();
+  let rows = await r.json();
+  if (!Array.isArray(rows)) {
+    r = await fetch(
+      SUPABASE_URL + '/rest/v1/owned_names?name=ilike.' + encodeURIComponent(nm) + '&listed_for_sale=eq.true&select=name,kind,user_id,sale_price_cents',
+      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY } }
+    );
+    rows = await r.json();
+  }
   const row = Array.isArray(rows) ? rows[0] : null;
   const amount = Number(row && row.sale_price_cents) || 0;
   if (!row || amount < 200) return { error: 'Not listed' };
-  return { amount, sellerId: row.user_id, name: row.name, kind: 'resale' };
+  return { amount, sellerId: row.user_id, name: row.name, kind: 'resale', pinHash: row.sale_pin_hash || '' };
 }
 
 function svcHeaders() {
@@ -407,10 +414,17 @@ async function canMailToName(fromId, toName) {
 async function loadUsedNameRows() {
   if (!SUPABASE_SERVICE_ROLE_KEY) return [];
   let r = await fetch(
-    SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents,sale_price_coins&order=sale_price_cents.desc',
+    SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents,sale_price_coins,sale_pin_hash&order=sale_price_cents.desc',
     { headers: svcHeaders() }
   );
   let rows = await r.json();
+  if (!Array.isArray(rows)) {
+    r = await fetch(
+      SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents,sale_price_coins&order=sale_price_cents.desc',
+      { headers: svcHeaders() }
+    );
+    rows = await r.json();
+  }
   if (!Array.isArray(rows)) {
     r = await fetch(
       SUPABASE_URL + '/rest/v1/owned_names?listed_for_sale=eq.true&select=name,kind,sale_price_cents&order=sale_price_cents.desc',
@@ -427,7 +441,8 @@ async function loadUsedNameRows() {
     name: row.name,
     kind: row.kind,
     price_cents: Number(row.sale_price_cents) || 0,
-    price_coins: Number(row.sale_price_coins) || 0
+    price_coins: Number(row.sale_price_coins) || 0,
+    pin: !!(row.sale_pin_hash)
   }));
 }
 
@@ -651,7 +666,13 @@ async function paySellerConnect(sellerId, netCents, sessionId, name, chargeId) {
   }
 }
 
-async function setNameListing(userId, name, priceCents, priceCoins) {
+function salePinHash(name, pin) {
+  const p = String(pin || '').replace(/\s/g, '');
+  if (!/^\d{4,12}$/.test(p)) return '';
+  return crypto.createHash('sha256').update('moose-sale|' + String(name || '').toLowerCase() + '|' + p).digest('hex');
+}
+
+async function setNameListing(userId, name, priceCents, priceCoins, salePin) {
   const nm = String(name || '').replace(/[^A-Za-z0-9]/g, '');
   if (!userId || !nm) return { ok: false, error: 'Missing name' };
   if (!SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: 'Listing is not available right now' };
@@ -667,6 +688,11 @@ async function setNameListing(userId, name, priceCents, priceCoins) {
   if (listed && coins > 0 && !wantMoose) return { ok: false, error: 'Moose price must be 20 to 10,000,000' };
   if (wantCard && price > 100000000) return { ok: false, error: 'Card price must be £2 to £1,000,000' };
   if (wantMoose && coins > 10000000) return { ok: false, error: 'Moose price must be 20 to 10,000,000' };
+  let pinHash = null;
+  if (listed && salePin != null && String(salePin).trim() !== '') {
+    pinHash = salePinHash(nm, salePin);
+    if (!pinHash) return { ok: false, error: 'PIN must be 4 to 12 digits' };
+  }
   const found = await fetch(
     SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&name=ilike.' + encodeURIComponent(nm) + '&select=name,kind',
     { headers: svcHeaders() }
@@ -703,16 +729,34 @@ async function setNameListing(userId, name, priceCents, priceCoins) {
         ? {
           listed_for_sale: true,
           sale_price_cents: wantCard ? price : null,
-          sale_price_coins: wantMoose ? coins : null
+          sale_price_coins: wantMoose ? coins : null,
+          sale_pin_hash: pinHash
         }
-        : { listed_for_sale: false, sale_price_cents: null, sale_price_coins: null })
+        : { listed_for_sale: false, sale_price_cents: null, sale_price_coins: null, sale_pin_hash: null })
     }
   );
   const text = await patch.text();
   if (!patch.ok) {
+    if (listed && /sale_pin_hash/i.test(text || '')) {
+      const retry = await fetch(
+        SUPABASE_URL + '/rest/v1/owned_names?user_id=eq.' + encodeURIComponent(userId) + '&name=ilike.' + encodeURIComponent(nm),
+        {
+          method: 'PATCH',
+          headers: svcHeaders(),
+          body: JSON.stringify({
+            listed_for_sale: true,
+            sale_price_cents: wantCard ? price : null,
+            sale_price_coins: wantMoose ? coins : null
+          })
+        }
+      );
+      if (retry.ok) {
+        return { ok: true, name: row.name, price_cents: listed && wantCard ? price : 0, price_coins: listed && wantMoose ? coins : 0, pin: false };
+      }
+    }
     return { ok: false, error: text && text.slice(0, 180) || 'Could not update listing' };
   }
-  return { ok: true, name: row.name, price_cents: listed && wantCard ? price : 0, price_coins: listed && wantMoose ? coins : 0 };
+  return { ok: true, name: row.name, price_cents: listed && wantCard ? price : 0, price_coins: listed && wantMoose ? coins : 0, pin: !!pinHash };
 }
 
 async function chargeInfoFromSession(session) {
@@ -826,7 +870,7 @@ async function attachResaleName(buyerId, sellerId, name, sessionId, amount, stri
     {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({ user_id: buyerId, listed_for_sale: false, sale_price_cents: null, sale_price_coins: null })
+      body: JSON.stringify({ user_id: buyerId, listed_for_sale: false, sale_price_cents: null, sale_price_coins: null, sale_pin_hash: null })
     }
   );
   if (!moved.ok) {
@@ -1369,6 +1413,14 @@ server.on('request', (req, res) => {
           res.end(JSON.stringify({ ok: false, error: 'That is your listing' }));
           return;
         }
+        if (isResale && priced.pinHash) {
+          const got = salePinHash(name, body.pin || body.sale_pin || '');
+          if (!got || got !== priced.pinHash) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'This sale needs the PIN from the seller' }));
+            return;
+          }
+        }
         const amount = priced.amount;
         const sellerId = priced.sellerId || '';
         if (amount >= 1000000) {
@@ -1471,7 +1523,7 @@ server.on('request', (req, res) => {
         const name = String(body.name || body.n || '').replace(/[^A-Za-z0-9]/g, '');
         const price = fullUrl.pathname === '/vanity-list' ? Math.round(Number(body.price_cents || body.price || 0)) : null;
         const coins = fullUrl.pathname === '/vanity-list' ? Math.round(Number(body.price_coins || body.coins || 0)) : null;
-        const result = await setNameListing(shopUser.id, name, price, coins);
+        const result = await setNameListing(shopUser.id, name, price, coins, body.pin || body.sale_pin || '');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
         return;

@@ -16,12 +16,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" integrity="sha512-wnea99uKIC3TJF7v4eKk4Y+lMz2Mklv18+r4na2Gn1abDRPPOeef95xTzdwGD9e6zXJBteMIhZ1+68QC5byJZw==" crossorigin="anonymous">
   <link rel="icon" type="image/jpeg" href="https://raw.githubusercontent.com/Cooptroop1/anonmess/main/logo.JPG"/>
   <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260902z">
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260902z">
-  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260902z">
-  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260902z">
-  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260902z">
-  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260902z">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=260903a">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=260903a">
+  <link rel="apple-touch-icon" sizes="192x192" href="/192.png?v=260903a">
+  <link rel="icon" type="image/png" sizes="192x192" href="/192.png?v=260903a">
+  <link rel="icon" type="image/png" sizes="256x256" href="/256.png?v=260903a">
+  <link rel="icon" type="image/png" sizes="512x512" href="/512.png?v=260903a">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg==" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/buffer.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@otplib/preset-browser@12.0.1/index.js"></script>
@@ -1474,7 +1474,24 @@
       font-size: 0.9rem;
       margin-right: 0.25rem;
     }
-    #myNamesBox.hidden { display: none !important; }
+    .sale-tick {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin: 0.45rem 0;
+      font-size: 0.95rem;
+      color: #111;
+    }
+    .sale-tick input { width: 1.05rem; height: 1.05rem; }
+    #salePickModal .totp-modal-content input[type="number"],
+    #salePickModal .totp-modal-content input[type="password"] {
+      display: block;
+      width: 100%;
+      margin: 0 0 0.55rem;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid #d1d5db;
+      border-radius: 0.4rem;
+    }
     #sealedNotesWrap.has-mail #sealedNotesBtn {
       color: #dc2626 !important;
     }
@@ -1520,6 +1537,7 @@
       margin-left: 0.35rem;
     }
     #vanityShopModal .totp-modal-content,
+    #salePickModal .totp-modal-content,
     #photoCodeModal .totp-modal-content,
     #sealedNotesModal .totp-modal-content,
     #mooseBookModal .totp-modal-content,
@@ -1810,7 +1828,7 @@
           <div id="userNameRow">
             <span id="userDisplayName" class="text-lg text-gray-700 font-medium"></span>
             <button type="button" id="homeMooseCoins" title="Your moose">
-              <img class="moose-badge" src="/192.png?v=260902z" alt="" width="14" height="14">
+              <img class="moose-badge" src="/192.png?v=260903a" alt="" width="14" height="14">
               <span id="homeMooseCount">0</span>
               <span class="home-moose-word">moose</span>
             </button>
@@ -1898,7 +1916,7 @@
       <p><strong>Moose Book</strong> is names you chose to save. <strong>My names</strong> is names on your account. Search is for people, not for buying names.</p>
       <h3>Moose shop</h3>
       <p>Open <strong>Moose shop</strong>. <strong>Numbers</strong> 1–10 cost 100,000 moose. Numbers 11–999 are card. <strong>Short</strong> is 1–3 letter names (card). <strong>Names</strong> is extra 4–16 character names (20 moose). <strong>Used</strong> is names other people listed. Check first, then buy.</p>
-      <p><strong>My names → Sell:</strong> type moose, card, or both. You must keep one name. Free signup names cannot be sold.</p>
+      <p><strong>My names → Sell:</strong> tick Moose and/or Card, type the amount. Tick <strong>PIN to buy</strong> if only someone with that PIN can buy (use this to move admin). You must keep one name. Free signup names cannot be sold.</p>
       <h3>Moose coins</h3>
       <p>Moose are only for this app. <strong>10 moose = £1</strong>. Buy a pack (50, 100, 200, 500) or type any amount from 50 up. You pay with card. Coins then sit on your account.</p>
       <p>Spend moose on extra names (20), numbers 1–10 (100,000), or a used name if the seller listed a moose price. Shop cut on a used moose sale is 5%. The rest goes to the seller as moose.</p>
@@ -1947,7 +1965,7 @@
   <div id="vanityShopModal" class="totp-modal" role="dialog" aria-label="Moose shop">
     <div class="totp-modal-content">
       <h2 class="text-xl font-bold mb-3">Moose shop</h2>
-      <p class="text-sm text-gray-600 mb-3">Buy moose (10 for £1). Type any amount from 50 up, or tap a pack. Extra names are 20 moose. Numbers 1–10 are 100,000 moose. 11–999 stay card. Used names: seller sets £ and moose, you pick.</p>
+      <p class="text-sm text-gray-600 mb-3">Buy moose (10 for £1). Type any amount from 50 up, or tap a pack. Extra names are 20 moose. Numbers 1–10 are 100,000 moose. 11–999 stay card. Used names: tick moose or card. PIN sales need the seller’s PIN.</p>
       <div id="mooseCoinBar">
         <span id="mooseCoinHave">0 moose</span>
         <button type="button" class="coin-pack" data-coins="50">50 · £5</button>
@@ -1972,6 +1990,21 @@
       <button id="vanityBuyBtn" type="button" class="bg-green-600 text-white px-4 py-2 rounded w-full mb-2 hidden">Buy now</button>
       <button id="vanityBuyMooseBtn" type="button" class="bg-gray-800 text-white px-4 py-2 rounded w-full mb-2 hidden">Buy with moose</button>
       <button id="closeVanityShop" type="button" class="bg-gray-500 text-white px-4 py-2 rounded w-full">Close</button>
+    </div>
+  </div>
+  <div id="salePickModal" class="totp-modal hidden" role="dialog" aria-label="Sell or buy">
+    <div class="totp-modal-content">
+      <h2 id="salePickTitle" class="text-xl font-bold mb-2">Sell</h2>
+      <p id="salePickLead" class="text-sm text-gray-600 mb-2"></p>
+      <label class="sale-tick" id="saleTickMooseWrap"><input type="checkbox" id="saleTickMoose"> Moose</label>
+      <input id="saleMooseAmt" type="number" min="20" step="1" inputmode="numeric" placeholder="Moose (20+)" class="hidden" autocomplete="off">
+      <label class="sale-tick" id="saleTickCardWrap"><input type="checkbox" id="saleTickCard"> Card (£)</label>
+      <input id="saleCardAmt" type="number" min="2" step="1" inputmode="decimal" placeholder="Pounds (2+)" class="hidden" autocomplete="off">
+      <label class="sale-tick" id="saleTickPinWrap"><input type="checkbox" id="saleTickPin"> PIN to buy (for moving admin or a private sale)</label>
+      <input id="salePinAmt" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="PIN (4+ digits)" class="hidden" autocomplete="off">
+      <p id="salePickErr" class="text-red-500 text-sm mb-2"></p>
+      <button type="button" id="salePickGo" class="bg-green-600 text-white px-4 py-2 rounded w-full">Continue</button>
+      <button type="button" id="salePickCancel" class="bg-gray-500 text-white px-4 py-2 rounded w-full mt-2">Cancel</button>
     </div>
   </div>
   <div id="photoCodeModal" class="totp-modal" role="dialog" aria-label="Photo Code">
@@ -2241,15 +2274,15 @@
       <button type="button" id="stegoShareClose" class="bg-gray-200 px-3 py-2 rounded text-sm w-full mt-2">Stay in room</button>
     </div>
   </div>
-    <script src="crypto.js?v=260902z"></script>
-  <script src="ratchet.js?v=260902z"></script>
-  <script src="utils.js?v=260902z"></script>
-  <script src="main.js?v=260902z"></script>
-  <script src="init.js?v=260902z"></script>
-  <script src="events.js?v=260902z"></script>
+    <script src="crypto.js?v=260903a"></script>
+  <script src="ratchet.js?v=260903a"></script>
+  <script src="utils.js?v=260903a"></script>
+  <script src="main.js?v=260903a"></script>
+  <script src="init.js?v=260903a"></script>
+  <script src="events.js?v=260903a"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-auth.js?v=260902z"></script>
-  <script src="account-ui.js?v=260902z"></script>
-  <script src="logged-features.js?v=260902z"></script>
+  <script src="supabase-auth.js?v=260903a"></script>
+  <script src="account-ui.js?v=260903a"></script>
+  <script src="logged-features.js?v=260903a"></script>
 </body>
 </html>
